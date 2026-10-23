@@ -1,0 +1,1474 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cross_border, author: claudeopus5.5
+metrics:
+- name: data_transfer_efficiency
+  description: 'Data Transfer Efficiency (DTE): how efficiently information is transferred, considering
+    success rate and error volume. DTE = success_pct / (error_count + 1). NULL when flow_overview is NULL
+    (36 flows).
+
+    '
+  sql_expression: CAST(json_extract_string(df.flow_overview, '$.performance.success_pct') AS DOUBLE) /
+    (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) + 1)
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: bandwidth_saturation_index
+  description: 'Bandwidth Saturation Index (BSI): how close a transfer is to using up all available network
+    resources. BSI = bandwidth_util_pct * (data_size_mb / duration_min) -- percentage of network used
+    times data sent (MB) per minute spent sending. NULL where data_size_mb is not measured.
+
+    '
+  sql_expression: "CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0))"
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: risk_exposure_score
+  description: 'Risk Exposure Score (RES): overall level of risk combining risk estimation and the strength
+    of controls. RES = risk_score * (1 / control_effectiveness_pct), both from risk_management_profile.assessment.
+    NULL when control effectiveness is not evaluated (NULL).
+
+    '
+  sql_expression: CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS DOUBLE)
+    * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.control_effectiveness_pct')
+    AS DOUBLE), 0))
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm
+  grain: one risk record (= one data flow)
+  domains:
+  - risk
+- name: compliance_cost_ratio
+  description: 'Compliance Cost Ratio (CCR): cost spent on following regulations compared to the potential
+    penalties. CCR = cost_usd / (penalties_usd + 1), from risk_management_profile.financial_impact.
+
+    '
+  sql_expression: CAST(json_extract_string(rm.risk_management_profile, '$.financial_impact.cost_usd')
+    AS DOUBLE) / (CAST(json_extract_string(rm.risk_management_profile, '$.financial_impact.penalties_usd')
+    AS DOUBLE) + 1)
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm
+  grain: one risk record
+  domains:
+  - risk
+- name: data_sensitivity_index
+  description: 'Data Sensitivity Index (DSI): how sensitive a batch of information is, based on volume
+    and sensitivity rating. DSI = vol_gb * (3 if dataSense is ''High'', 2 if ''Medium'', 1 if ''Low'').
+    The documentation gives no weight for ''Critical''; this expression gives it (and any other value)
+    weight 1.
+
+    '
+  sql_expression: dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp
+  grain: one data profile
+  domains:
+  - data_profile
+- name: security_robustness_score
+  description: 'Security Robustness Score (SRS): how strong the protections are. SRS = 3 if all data is
+    encrypted (enc_state = ''Full'') and only trusted users can access (acl_state = ''Strong''); 2 if
+    either full encryption or strong access control is present; 1 otherwise (including NULL enc_state).
+
+    '
+  sql_expression: "CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n     WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp
+  grain: one security profile
+  domains:
+  - security
+- name: vendor_security_rating_value
+  description: 'Vendor Security Rating as a number, higher = better protection: 4 for top tier, 3 for
+    good, 2 for average, 1 for weak. Stored as letters in vendSecRate: A = 4, B = 3, C = 2, D = 1.
+
+    '
+  sql_expression: CASE vm."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement vm
+  grain: one vendor record
+  domains:
+  - vendors
+- name: vendor_reliability_index
+  description: 'Vendor Reliability Index (VRI): how trustworthy a partner is, considering security and
+    contract status. VRI = vendor_security_rating_value * (1 if contrState = ''Active'', 0.5 otherwise
+    -- Expired, Under Review or NULL).
+
+    '
+  sql_expression: (CASE vm."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END) * CASE WHEN vm."contrState" = 'Active' THEN 1.0 ELSE 0.5 END
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement vm
+  grain: one vendor record
+  domains:
+  - vendors
+- name: vendor_risk_tier
+  description: 'Vendor Risk Tier: ''High'' if vendor_reliability_index < 2, ''Medium'' if >= 2 and < 3,
+    ''Low'' if >= 3.
+
+    '
+  sql_expression: "CASE WHEN (CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2\
+    \ WHEN 'D' THEN 1 END) * CASE WHEN vm.\"contrState\" = 'Active' THEN 1.0 ELSE 0.5 END < 2 THEN 'High'\n\
+    \     WHEN (CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN\
+    \ 1 END) * CASE WHEN vm.\"contrState\" = 'Active' THEN 1.0 ELSE 0.5 END < 3 THEN 'Medium'\n     WHEN\
+    \ (CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END) *\
+    \ CASE WHEN vm.\"contrState\" = 'Active' THEN 1.0 ELSE 0.5 END >= 3 THEN 'Low' END"
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement vm
+  grain: one vendor record
+  domains:
+  - vendors
+- name: non_compliant_vendor
+  description: 'Non-Compliant Vendor: a partner marked ''Non-compliant'' in policy compliance (pol_comp)
+    or process compliance (procComp).
+
+    '
+  sql_expression: COALESCE(vm.pol_comp = 'Non-compliant' OR vm."procComp" = 'Non-compliant', FALSE)
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement vm
+  grain: one vendor record
+  domains:
+  - vendors
+- name: audit_finding_severity
+  description: 'Audit Finding Severity (AFS): how serious audit findings are, especially critical issues.
+    AFS = critFindNum / (FINDTALLY + 1), computed in DOUBLE; critFindNum NULL (no critical findings recorded)
+    counts as 0.
+
+    '
+  sql_expression: CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1)
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: critical_audit_issue
+  description: 'Critical Audit Issue: an audit where audit_finding_severity > 0.5.'
+  sql_expression: CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1) > 0.5
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: data_subject_request_load
+  description: 'Data Subject Request Load (DSRL): how many requests people made about their own data.
+    DSRL = AccReqNum (access) + DEL_REQ_NUM (deletion) + rect_req_num (correction) + PORTREQNUM (data
+    transfer/portability).
+
+    '
+  sql_expression: ac."AccReqNum" + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: data_subject_request_pressure
+  description: 'Data Subject Request Pressure (DSRP): pressure from responding to data subject requests.
+    DSRP = data_subject_request_load * resp_time_day.
+
+    '
+  sql_expression: (ac."AccReqNum" + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM") * ac.resp_time_day
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: audit_remediation_load
+  description: 'Audit Remediation Load (ARL): work needed to fix audit issues. ARL = audit_finding_severity
+    * data_subject_request_load.
+
+    '
+  sql_expression: (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1)) * (ac."AccReqNum"
+    + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM")
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: audit_compliance_pressure
+  description: 'Audit Compliance Pressure (ACP): pressure audit findings and compliance put on operations.
+    ACP = audit_remediation_load * audit_finding_severity.
+
+    '
+  sql_expression: (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1)) * (ac."AccReqNum"
+    + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM") * (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE)
+    / (ac."FINDTALLY" + 1))
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: high_audit_compliance_pressure
+  description: 'High Audit Compliance Pressure: a transfer where audit_compliance_pressure > 5.'
+  sql_expression: (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1)) * (ac."AccReqNum"
+    + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM") * (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE)
+    / (ac."FINDTALLY" + 1)) > 5
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: cross_border_data_flow
+  description: 'Cross-Border Data Flow: a transfer where the sending and receiving countries differ (routing.origin_country
+    <> routing.destination_country). NULL when flow_overview is NULL.
+
+    '
+  sql_expression: json_extract_string(df.flow_overview, '$.routing.origin_country') <> json_extract_string(df.flow_overview,
+    '$.routing.destination_country')
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: transfer_path
+  description: 'Transfer Path: direction of the transfer, from source to target, as ''origin_country ->
+    destination_country''.
+
+    '
+  sql_expression: json_extract_string(df.flow_overview, '$.routing.origin_country') || ' -> ' || json_extract_string(df.flow_overview,
+    '$.routing.destination_country')
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: cross_border_risk_factor
+  description: 'Cross-Border Risk Factor (CBRF): extra risk when sending data between countries. CBRF
+    = risk_score * (2 if origin_country and destination_country differ, 1 if the same). NULL when the
+    countries are unknown (NULL flow_overview).
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country') IS NULL\n\
+    \         OR json_extract_string(df.flow_overview, '$.routing.destination_country') IS NULL THEN NULL\n\
+    \       WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n         <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country') THEN 2 ELSE 1 END"
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm JOIN main.DataFlow df ON df."RecordRegistry" = rm.flow_link
+  grain: one risk record (= one data flow)
+  domains:
+  - risk
+  - data_flows
+- name: high_risk_data_flow
+  description: 'High-Risk Data Flow: a transfer where risk_score is above 0.7 and data_sensitivity_index
+    is above 100. The 0.7 threshold is applied to the stored 0-100 risk_score as written.
+
+    '
+  sql_expression: CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS DOUBLE)
+    > 0.7 AND dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END > 100
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON rm."RISKTRACE" = dp."riskJoin" JOIN main.DataFlow
+    df ON df."RecordRegistry" = dp."Flow_Sign"
+  grain: one data profile (with its risk record and flow)
+  domains:
+  - risk
+  - data_profile
+- name: secure_data_flow
+  description: 'Secure Data Flow: a transfer where security_robustness_score equals 3.'
+  sql_expression: sp.enc_state = 'Full' AND sp.acl_state = 'Strong'
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp
+  grain: one security profile
+  domains:
+  - security
+- name: sensitive_data_exposure
+  description: 'Sensitive Data Exposure: data_sensitivity_index above 100 and security_robustness_score
+    less than 2.
+
+    '
+  sql_expression: "dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END\
+    \ > 100 AND (CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n          WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END) < 2"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = sp."RISKKEY" JOIN main.DataFlow df ON df."RecordRegistry"
+    = sp."flowKey"
+  grain: one security profile (with its data profile, risk record and flow)
+  domains:
+  - security
+  - data_profile
+- name: cross_border_compliance_gap
+  description: 'Cross-Border Compliance Gap: a compliance record where compliance with regulations is
+    missing in at least one country (any of gdprComp, CCPA_COMP, PIPLcomp, loc_law_comp = ''Non-compliant'')
+    and the transfer is international (origin_country <> destination_country).
+
+    '
+  sql_expression: "COALESCE(json_extract_string(df.flow_overview, '$.routing.origin_country')\n  <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country')\nAND (c.\"gdprComp\" = 'Non-compliant' OR c.\"CCPA_COMP\" = 'Non-compliant'\n\
+    \     OR c.\"PIPLcomp\" = 'Non-compliant' OR c.loc_law_comp = 'Non-compliant'), FALSE)"
+  source_model: main.Compliance
+  from_sql: main.Compliance c JOIN main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow
+    df ON df."RecordRegistry" = rm.flow_link
+  grain: one compliance record (with its risk record and flow)
+  domains:
+  - compliance_audit
+  - data_flows
+- name: regulatory_risk_exposure
+  description: 'Regulatory Risk Exposure: a transfer where cross_border_risk_factor > 1.5 and there is
+    a cross_border_compliance_gap.
+
+    '
+  sql_expression: "COALESCE(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score')\
+    \ AS DOUBLE)\n  * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n  \
+    \         <> json_extract_string(df.flow_overview, '$.routing.destination_country') THEN 2 ELSE 1\
+    \ END > 1.5\nAND json_extract_string(df.flow_overview, '$.routing.origin_country')\n  <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country')\nAND (c.\"gdprComp\" = 'Non-compliant' OR c.\"CCPA_COMP\" = 'Non-compliant'\n\
+    \     OR c.\"PIPLcomp\" = 'Non-compliant' OR c.loc_law_comp = 'Non-compliant'), FALSE)"
+  source_model: main.Compliance
+  from_sql: main.Compliance c JOIN main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow
+    df ON df."RecordRegistry" = rm.flow_link
+  grain: one compliance record (with its risk record and flow)
+  domains:
+  - compliance_audit
+  - risk
+- name: regulatory_overload_flow
+  description: 'Regulatory Overload Flow: a transfer with regulatory_risk_exposure and compliance marked
+    non-compliant (gdprComp = ''Non-compliant'').
+
+    '
+  sql_expression: "COALESCE(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score')\
+    \ AS DOUBLE)\n  * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n  \
+    \         <> json_extract_string(df.flow_overview, '$.routing.destination_country') THEN 2 ELSE 1\
+    \ END > 1.5\nAND json_extract_string(df.flow_overview, '$.routing.origin_country')\n  <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country')\nAND (c.\"gdprComp\" = 'Non-compliant' OR c.\"CCPA_COMP\" = 'Non-compliant'\n\
+    \     OR c.\"PIPLcomp\" = 'Non-compliant' OR c.loc_law_comp = 'Non-compliant'), FALSE)\nAND c.\"gdprComp\"\
+    \ = 'Non-compliant'"
+  source_model: main.Compliance
+  from_sql: main.Compliance c JOIN main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow
+    df ON df."RecordRegistry" = rm.flow_link
+  grain: one compliance record
+  domains:
+  - compliance_audit
+- name: data_integrity_failure
+  description: 'Data Integrity Failure: a data batch where the integrity check fails (Int_check = ''Failed'')
+    or checksum verification fails (CSUMVERIFY = ''Failed''). NULL Int_check (not performed) is not a
+    failure.
+
+    '
+  sql_expression: COALESCE(dp."Int_check" = 'Failed', FALSE) OR COALESCE(dp."CSUMVERIFY" = 'Failed', FALSE)
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp
+  grain: one data profile
+  domains:
+  - data_profile
+- name: integrity_failure_count
+  description: 'Integrity Failure Count (IFC): 1 if the integrity check fails, 0 otherwise, plus 1 if
+    verification (checksum) fails, 0 otherwise.
+
+    '
+  sql_expression: (CASE WHEN dp."Int_check" = 'Failed' THEN 1 ELSE 0 END) + (CASE WHEN dp."CSUMVERIFY"
+    = 'Failed' THEN 1 ELSE 0 END)
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp
+  grain: one data profile
+  domains:
+  - data_profile
+- name: failure_types_list
+  description: 'Failure Types List: comma-separated reasons a data batch failed checks: ''integrity check''
+    if Int_check = ''Failed'', ''verification'' if CSUMVERIFY = ''Failed''. NULL when neither failed.
+
+    '
+  sql_expression: "NULLIF(concat_ws(', ',\n  CASE WHEN dp.\"Int_check\" = 'Failed' THEN 'integrity check'\
+    \ END,\n  CASE WHEN dp.\"CSUMVERIFY\" = 'Failed' THEN 'verification' END), '')"
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp
+  grain: one data profile
+  domains:
+  - data_profile
+- name: overloaded_data_flow
+  description: 'Overloaded Data Flow: a transfer that uses too much bandwidth and is inefficient: bandwidth_saturation_index
+    > 50 and data_transfer_efficiency < 1.0.
+
+    '
+  sql_expression: "CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0)) > 50\nAND CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.success_pct') AS DOUBLE) / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count')\
+    \ AS DOUBLE) + 1) < 1.0"
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: data_flow_reliability_score
+  description: 'Data Flow Reliability Score (DFRS): reliability considering efficiency and retries. DFRS
+    = data_transfer_efficiency * (1 - retry_count / (error_count + 1)).
+
+    '
+  sql_expression: "(CAST(json_extract_string(df.flow_overview, '$.performance.success_pct') AS DOUBLE)\n\
+    \ / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) + 1))\n* (1\
+    \ - CAST(json_extract_string(df.flow_overview, '$.performance.retry_count') AS DOUBLE)\n   / (CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.error_count') AS DOUBLE) + 1))"
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: data_flow_stability_index
+  description: 'Data Flow Stability Index (DFSI): stability considering reliability and errors. DFSI =
+    data_flow_reliability_score * (success_pct / (error_count + 1)).
+
+    '
+  sql_expression: "(CAST(json_extract_string(df.flow_overview, '$.performance.success_pct') AS DOUBLE)\n\
+    \ / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) + 1))\n* (1\
+    \ - CAST(json_extract_string(df.flow_overview, '$.performance.retry_count') AS DOUBLE)\n   / (CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.error_count') AS DOUBLE) + 1))\n* (CAST(json_extract_string(df.flow_overview, '$.performance.success_pct')\
+    \ AS DOUBLE)\n   / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE)\
+    \ + 1))"
+  source_model: main.DataFlow
+  from_sql: main.DataFlow df
+  grain: one data flow
+  domains:
+  - data_flows
+- name: security_control_cost_ratio
+  description: 'Security Control Cost Ratio (SCCR): whether security protections are cost-effective. SCCR
+    = security_robustness_score / (compliance cost + 1), compliance cost = financial_impact.cost_usd (the
+    "total cost for compliance" of CCR).
+
+    '
+  sql_expression: "(CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n      WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n/ (CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.financial_impact.cost_usd') AS DOUBLE) + 1)"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = sp."RISKKEY" JOIN main.DataFlow df ON df."RecordRegistry"
+    = sp."flowKey"
+  grain: one security profile
+  domains:
+  - security
+  - risk
+- name: vendor_compliance_burden
+  description: 'Vendor Compliance Burden (VCB): burden a partner faces from compliance. VCB = audit_finding_severity
+    * (5 - vendor_security_rating_value).
+
+    '
+  sql_expression: (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1)) * (5 - CASE vm."vendSecRate"
+    WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record with its compliance, vendor, security, data profile, risk and flow records (240
+    rows)
+  domains:
+  - vendors
+  - compliance_audit
+- name: cross_border_data_volume_risk
+  description: 'Cross-Border Data Volume Risk (CDVR): risk from sending large amounts of data between
+    countries. CDVR = cross_border_risk_factor * vol_gb.
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country') IS NULL\n\
+    \         OR json_extract_string(df.flow_overview, '$.routing.destination_country') IS NULL THEN NULL\n\
+    \       WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n         <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country') THEN 2 ELSE 1 END\n* dp.vol_gb"
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON rm."RISKTRACE" = dp."riskJoin" JOIN main.DataFlow
+    df ON df."RecordRegistry" = dp."Flow_Sign"
+  grain: one data profile
+  domains:
+  - risk
+  - data_profile
+- name: encryption_coverage_ratio
+  description: 'Encryption Coverage Ratio (ECR): how much sensitive information is actually encrypted.
+    ECR = security_robustness_score * data_sensitivity_index.
+
+    '
+  sql_expression: "(CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n      WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN\
+    \ 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key
+  grain: one security profile
+  domains:
+  - security
+  - data_profile
+- name: unprotected_sensitive_data
+  description: 'Unprotected Sensitive Data: data_sensitivity_index above 100 and encryption_coverage_ratio
+    below 2.
+
+    '
+  sql_expression: "dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END\
+    \ > 100 AND (CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n          WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n    * dp.vol_gb * CASE dp.\"dataSense\"\
+    \ WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END < 2"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key
+  grain: one security profile
+  domains:
+  - security
+  - data_profile
+- name: security_posture_maturity
+  description: 'Security Posture Maturity (SPM): maturity combining encryption coverage and log retention.
+    SPM = encryption_coverage_ratio * (LogRetDays / 365).
+
+    '
+  sql_expression: "(CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n      WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN\
+    \ 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END * (sp.\"LogRetDays\" / 365.0)"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key
+  grain: one security profile
+  domains:
+  - security
+- name: insecure_high_volume_flow
+  description: 'Insecure High-Volume Flow: data volume (vol_gb) above 500 and security_robustness_score
+    below 2.
+
+    '
+  sql_expression: "dp.vol_gb > 500 AND (CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN\
+    \ 3\n          WHEN sp.enc_state = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END) < 2"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key
+  grain: one security profile
+  domains:
+  - security
+  - data_profile
+- name: bandwidth_risk_factor
+  description: 'Bandwidth Risk Factor (BRF): risk from overusing network resources with sensitive data.
+    BRF = bandwidth_saturation_index * data_sensitivity_index.
+
+    '
+  sql_expression: "CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0))\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN\
+    \ 3 WHEN 'Medium' THEN 2 ELSE 1 END"
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON rm."RISKTRACE" = dp."riskJoin" JOIN main.DataFlow
+    df ON df."RecordRegistry" = dp."Flow_Sign"
+  grain: one data profile
+  domains:
+  - data_flows
+  - data_profile
+- name: bandwidth_constrained_risk
+  description: 'Bandwidth-Constrained Risk: bandwidth_risk_factor above 100 and risk_exposure_score above
+    0.7.
+
+    '
+  sql_expression: "CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0))\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN\
+    \ 3 WHEN 'Medium' THEN 2 ELSE 1 END > 100 AND CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.risk_score') AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.control_effectiveness_pct') AS DOUBLE), 0)) > 0.7"
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON rm."RISKTRACE" = dp."riskJoin" JOIN main.DataFlow
+    df ON df."RecordRegistry" = dp."Flow_Sign"
+  grain: one data profile
+  domains:
+  - data_flows
+  - risk
+- name: vendor_risk_amplification
+  description: 'Vendor Risk Amplification (VRA): how much risk grows due to vendor issues. VRA = vendor_reliability_index
+    * risk_exposure_score (vendor''s risk record via riskassoc).
+
+    '
+  sql_expression: (CASE vm."vendSecRate" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN
+    1 END) * CASE WHEN vm."contrState" = 'Active' THEN 1.0 ELSE 0.5 END * CAST(json_extract_string(rm.risk_management_profile,
+    '$.assessment.risk_score') AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile,
+    '$.assessment.control_effectiveness_pct') AS DOUBLE), 0))
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement vm JOIN main.RiskManagement rm ON rm."RISKTRACE" = vm.riskassoc
+  grain: one vendor record
+  domains:
+  - vendors
+  - risk
+- name: vendor_risk_concentration
+  description: 'Vendor Risk Concentration (VRC): how much a single partner''s risk issues affect the whole
+    system. VRC = vendor_risk_amplification * (1 - vendor_reliability_index).
+
+    '
+  sql_expression: "(CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN\
+    \ 1 END) * CASE WHEN vm.\"contrState\" = 'Active' THEN 1.0 ELSE 0.5 END * CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.risk_score') AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.control_effectiveness_pct') AS DOUBLE), 0)) * (1 - (CASE vm.\"vendSecRate\" WHEN 'A'\
+    \ THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)\n       * CASE WHEN vm.\"contrState\"\
+    \ = 'Active' THEN 1.0 ELSE 0.5 END)"
+  source_model: main.VendorManagement
+  from_sql: main.VendorManagement vm JOIN main.RiskManagement rm ON rm."RISKTRACE" = vm.riskassoc
+  grain: one vendor record
+  domains:
+  - vendors
+  - risk
+- name: critical_data_flow_risk
+  description: 'Critical Data Flow Risk: risk_exposure_score above 0.7 and data_flow_reliability_score
+    below 0.5.
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.control_effectiveness_pct')\
+    \ AS DOUBLE), 0)) > 0.7 AND (CAST(json_extract_string(df.flow_overview, '$.performance.success_pct')\
+    \ AS DOUBLE)\n     / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE)\
+    \ + 1))\n  * (1 - CAST(json_extract_string(df.flow_overview, '$.performance.retry_count') AS DOUBLE)\n\
+    \         / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) +\
+    \ 1)) < 0.5"
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm JOIN main.DataFlow df ON df."RecordRegistry" = rm.flow_link
+  grain: one risk record (= one data flow)
+  domains:
+  - risk
+  - data_flows
+- name: unstable_high_risk_flow
+  description: 'Unstable High-Risk Flow: data_flow_stability_index below 0.5 and critical_data_flow_risk
+    exists.
+
+    '
+  sql_expression: "(CAST(json_extract_string(df.flow_overview, '$.performance.success_pct') AS DOUBLE)\n\
+    \ / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) + 1))\n* (1\
+    \ - CAST(json_extract_string(df.flow_overview, '$.performance.retry_count') AS DOUBLE)\n       / (CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.error_count') AS DOUBLE) + 1))\n* (CAST(json_extract_string(df.flow_overview, '$.performance.success_pct')\
+    \ AS DOUBLE)\n   / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE)\
+    \ + 1)) < 0.5\nAND CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score')\
+    \ AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.control_effectiveness_pct')\
+    \ AS DOUBLE), 0)) > 0.7 AND (CAST(json_extract_string(df.flow_overview, '$.performance.success_pct')\
+    \ AS DOUBLE)\n     / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE)\
+    \ + 1))\n  * (1 - CAST(json_extract_string(df.flow_overview, '$.performance.retry_count') AS DOUBLE)\n\
+    \         / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) +\
+    \ 1)) < 0.5"
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm JOIN main.DataFlow df ON df."RecordRegistry" = rm.flow_link
+  grain: one risk record (= one data flow)
+  domains:
+  - risk
+  - data_flows
+- name: incident_resolution_efficiency
+  description: 'Incident Resolution Efficiency (IRE): how quickly incidents get resolved compared to expectations.
+    IRE = sla_compliance_pct (percentage resolved on time) / (avg_resolution_hrs + 1), from incident_statistics.
+
+    '
+  sql_expression: CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.sla_compliance_pct')
+    AS DOUBLE) / (CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.avg_resolution_hrs')
+    AS DOUBLE) + 1)
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm
+  grain: one risk record
+  domains:
+  - risk
+- name: incident_impact_factor
+  description: 'Incident Impact Factor (IIF): potential impact of an incident. IIF = risk_exposure_score
+    * (1 - incident_resolution_efficiency).
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.control_effectiveness_pct')\
+    \ AS DOUBLE), 0)) * (1 - CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.sla_compliance_pct')\
+    \ AS DOUBLE)\n       / (CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.avg_resolution_hrs')\
+    \ AS DOUBLE) + 1))"
+  source_model: main.RiskManagement
+  from_sql: main.RiskManagement rm
+  grain: one risk record
+  domains:
+  - risk
+- name: incident_prone_data_flow
+  description: 'Incident-Prone Data Flow: incident_resolution_efficiency below 0.5 and high_risk_data_flow
+    is true.
+
+    '
+  sql_expression: CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.sla_compliance_pct')
+    AS DOUBLE) / (CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.avg_resolution_hrs')
+    AS DOUBLE) + 1) < 0.5 AND CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score')
+    AS DOUBLE) > 0.7 AND dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE
+    1 END > 100
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp JOIN main.RiskManagement rm ON rm."RISKTRACE" = dp."riskJoin" JOIN main.DataFlow
+    df ON df."RecordRegistry" = dp."Flow_Sign"
+  grain: one data profile
+  domains:
+  - risk
+- name: incident_prone_compliance_flow
+  description: 'Incident-Prone Compliance Flow: incident_impact_factor above 0.8 and compliance non-compliant
+    (gdprComp = ''Non-compliant'').
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.control_effectiveness_pct')\
+    \ AS DOUBLE), 0)) * (1 - CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.sla_compliance_pct')\
+    \ AS DOUBLE)\n       / (CAST(json_extract_string(rm.risk_management_profile, '$.incident_statistics.avg_resolution_hrs')\
+    \ AS DOUBLE) + 1)) > 0.8\nAND c.\"gdprComp\" = 'Non-compliant'"
+  source_model: main.Compliance
+  from_sql: main.Compliance c JOIN main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow
+    df ON df."RecordRegistry" = rm.flow_link
+  grain: one compliance record
+  domains:
+  - risk
+  - compliance_audit
+- name: overburdened_compliance_flow
+  description: 'Overburdened Compliance Flow: compliance_cost_ratio above 0.8 and audit_remediation_load
+    above 10.
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.financial_impact.cost_usd')\
+    \ AS DOUBLE) / (CAST(json_extract_string(rm.risk_management_profile, '$.financial_impact.penalties_usd')\
+    \ AS DOUBLE) + 1) > 0.8 AND (CAST(COALESCE(ac.\"critFindNum\", 0) AS DOUBLE) / (ac.\"FINDTALLY\" +\
+    \ 1))\n  * (ac.\"AccReqNum\" + ac.\"DEL_REQ_NUM\" + ac.rect_req_num + ac.\"PORTREQNUM\") > 10"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain, 240 rows)
+  domains:
+  - compliance_audit
+  - risk
+- name: high_pressure_data_flow
+  description: 'High-Pressure Data Flow: data_subject_request_pressure above 50 and bandwidth_saturation_index
+    above 50.
+
+    '
+  sql_expression: "(ac.\"AccReqNum\" + ac.\"DEL_REQ_NUM\" + ac.rect_req_num + ac.\"PORTREQNUM\") * ac.resp_time_day\
+    \ > 50 AND CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0)) > 50"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+  - data_flows
+- name: vendor_driven_risk_flow
+  description: 'Vendor-Driven Risk Flow: vendor_risk_amplification above 3 and vendor_compliance_burden
+    above 2.
+
+    '
+  sql_expression: "(CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN\
+    \ 1 END) * CASE WHEN vm.\"contrState\" = 'Active' THEN 1.0 ELSE 0.5 END * CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.risk_score') AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.control_effectiveness_pct') AS DOUBLE), 0)) > 3 AND (CAST(COALESCE(ac.\"critFindNum\"\
+    , 0) AS DOUBLE) / (ac.\"FINDTALLY\" + 1))\n  * (5 - CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B'\
+    \ THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END) > 2"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - vendors
+- name: cross_border_audit_risk
+  description: 'Cross-Border Audit Risk: cross_border_data_volume_risk above 1000 and audit_finding_severity
+    above 0.5.
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country') IS NULL\n\
+    \         OR json_extract_string(df.flow_overview, '$.routing.destination_country') IS NULL THEN NULL\n\
+    \       WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n         <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country') THEN 2 ELSE 1 END\n* dp.vol_gb > 1000 AND CAST(COALESCE(ac.\"critFindNum\"\
+    , 0) AS DOUBLE) / (ac.\"FINDTALLY\" + 1) > 0.5"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+  - risk
+- name: compliance_overhead_ratio
+  description: 'Compliance Overhead Ratio (COR): extra burden compliance puts on operations. COR = data_subject_request_pressure
+    / (compliance cost + 1), compliance cost = financial_impact.cost_usd.
+
+    '
+  sql_expression: (ac."AccReqNum" + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM") * ac.resp_time_day
+    / (CAST(json_extract_string(rm.risk_management_profile, '$.financial_impact.cost_usd') AS DOUBLE)
+    + 1)
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+- name: audit_stressed_data_flow
+  description: 'Audit-Stressed Data Flow: audit_compliance_pressure above 5 and compliance_overhead_ratio
+    above 0.5.
+
+    '
+  sql_expression: (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE) / (ac."FINDTALLY" + 1)) * (ac."AccReqNum"
+    + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM") * (CAST(COALESCE(ac."critFindNum", 0) AS DOUBLE)
+    / (ac."FINDTALLY" + 1)) > 5 AND (ac."AccReqNum" + ac."DEL_REQ_NUM" + ac.rect_req_num + ac."PORTREQNUM")
+    * ac.resp_time_day / (CAST(json_extract_string(rm.risk_management_profile, '$.financial_impact.cost_usd')
+    AS DOUBLE) + 1) > 0.5
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+- name: cross_border_compliance_exposure
+  description: 'Cross-Border Compliance Exposure (CBCE): CBCE = cross_border_data_volume_risk * (2 if
+    compliance is non-compliant -- gdprComp = ''Non-compliant'' -- 1 otherwise).
+
+    '
+  sql_expression: "CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score') AS\
+    \ DOUBLE) * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country') IS NULL\n\
+    \         OR json_extract_string(df.flow_overview, '$.routing.destination_country') IS NULL THEN NULL\n\
+    \       WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n         <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country') THEN 2 ELSE 1 END\n* dp.vol_gb * CASE WHEN c.\"gdprComp\" = 'Non-compliant'\
+    \ THEN 2 ELSE 1 END"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+  - risk
+- name: overloaded_security_flow
+  description: 'Overloaded Security Flow: security_posture_maturity below 1 and cross_border_compliance_exposure
+    above 100.
+
+    '
+  sql_expression: "(CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n      WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN\
+    \ 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END * (sp.\"LogRetDays\" / 365.0) < 1 AND CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.risk_score') AS DOUBLE) * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\
+    \ IS NULL\n         OR json_extract_string(df.flow_overview, '$.routing.destination_country') IS NULL\
+    \ THEN NULL\n       WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n     \
+    \    <> json_extract_string(df.flow_overview, '$.routing.destination_country') THEN 2 ELSE 1 END\n\
+    * dp.vol_gb * CASE WHEN c.\"gdprComp\" = 'Non-compliant' THEN 2 ELSE 1 END > 100"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - security
+  - compliance_audit
+- name: data_retention_risk_score
+  description: 'Data Retention Risk Score (DRRS): risk from keeping sensitive data too long. DRRS = data_sensitivity_index
+    * (ret_days / 365).
+
+    '
+  sql_expression: dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END *
+    (dp.ret_days / 365.0)
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp
+  grain: one data profile
+  domains:
+  - data_profile
+- name: excessive_retention_risk
+  description: 'Excessive Retention Risk: data_retention_risk_score above 50 and data_sensitivity_index
+    above 100.
+
+    '
+  sql_expression: dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END *
+    (dp.ret_days / 365.0) > 50 AND dp.vol_gb * CASE dp."dataSense" WHEN 'High' THEN 3 WHEN 'Medium' THEN
+    2 ELSE 1 END > 100
+  source_model: main.DataProfile
+  from_sql: main.DataProfile dp
+  grain: one data profile
+  domains:
+  - data_profile
+- name: bandwidth_compliance_risk
+  description: 'Bandwidth Compliance Risk (BCR): BCR = bandwidth_risk_factor * (1.5 if compliance is partial,
+    2 if non-compliant, 1 otherwise), using gdprComp.
+
+    '
+  sql_expression: "CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0))\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN\
+    \ 3 WHEN 'Medium' THEN 2 ELSE 1 END * CASE c.\"gdprComp\" WHEN 'Partial' THEN 1.5 WHEN 'Non-compliant'\
+    \ THEN 2 ELSE 1 END"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+  - data_flows
+- name: bandwidth_limited_compliance_risk
+  description: 'Bandwidth-Limited Compliance Risk: bandwidth_compliance_risk above 50 and a cross_border_compliance_gap
+    exists.
+
+    '
+  sql_expression: "CAST(json_extract_string(df.flow_overview, '$.performance.bandwidth_util_pct') AS DOUBLE)\
+    \ * (CAST(json_extract_string(df.flow_overview, '$.performance.data_size_mb') AS DOUBLE)\n   / NULLIF(CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.duration_min') AS DOUBLE), 0))\n* dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN\
+    \ 3 WHEN 'Medium' THEN 2 ELSE 1 END * CASE c.\"gdprComp\" WHEN 'Partial' THEN 1.5 WHEN 'Non-compliant'\
+    \ THEN 2 ELSE 1 END > 50 AND json_extract_string(df.flow_overview, '$.routing.origin_country')\n \
+    \ <> json_extract_string(df.flow_overview, '$.routing.destination_country')\nAND (c.\"gdprComp\" =\
+    \ 'Non-compliant' OR c.\"CCPA_COMP\" = 'Non-compliant'\n     OR c.\"PIPLcomp\" = 'Non-compliant' OR\
+    \ c.loc_law_comp = 'Non-compliant')"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+- name: vendor_security_cost_index
+  description: 'Vendor Security Cost Index (VSCI): compliance burden from a partner vs the cost of protections.
+    VSCI = vendor_compliance_burden / (security_control_cost_ratio + 1).
+
+    '
+  sql_expression: "((CAST(COALESCE(ac.\"critFindNum\", 0) AS DOUBLE) / (ac.\"FINDTALLY\" + 1))\n * (5\
+    \ - CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END))\n\
+    / ((CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n         WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n   / (CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.financial_impact.cost_usd') AS DOUBLE) + 1) + 1)"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - vendors
+  - security
+- name: costly_vendor_risk_flow
+  description: 'Costly Vendor Risk Flow: vendor_security_cost_index above 1 and vendor_risk_amplification
+    above 3.
+
+    '
+  sql_expression: "((CAST(COALESCE(ac.\"critFindNum\", 0) AS DOUBLE) / (ac.\"FINDTALLY\" + 1))\n * (5\
+    \ - CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END))\n\
+    / ((CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n         WHEN sp.enc_state\
+    \ = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END)\n   / (CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.financial_impact.cost_usd') AS DOUBLE) + 1) + 1) > 1\nAND (CASE vm.\"vendSecRate\" WHEN 'A' THEN\
+    \ 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END) * CASE WHEN vm.\"contrState\" = 'Active'\
+    \ THEN 1.0 ELSE 0.5 END * CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score')\
+    \ AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.control_effectiveness_pct')\
+    \ AS DOUBLE), 0)) > 3"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - vendors
+- name: vendor_compliance_risk_cluster
+  description: 'Vendor Compliance Risk Cluster: a partner where vendor_risk_concentration is above 2 and
+    vendor_compliance_burden is above 2.
+
+    '
+  sql_expression: "(CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN\
+    \ 1 END) * CASE WHEN vm.\"contrState\" = 'Active' THEN 1.0 ELSE 0.5 END * CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.risk_score') AS DOUBLE) * (1.0 / NULLIF(CAST(json_extract_string(rm.risk_management_profile,\
+    \ '$.assessment.control_effectiveness_pct') AS DOUBLE), 0)) * (1 - (CASE vm.\"vendSecRate\" WHEN 'A'\
+    \ THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN 2 WHEN 'D' THEN 1 END)\n       * CASE WHEN vm.\"contrState\"\
+    \ = 'Active' THEN 1.0 ELSE 0.5 END) > 2\nAND (CAST(COALESCE(ac.\"critFindNum\", 0) AS DOUBLE) / (ac.\"\
+    FINDTALLY\" + 1))\n  * (5 - CASE vm.\"vendSecRate\" WHEN 'A' THEN 4 WHEN 'B' THEN 3 WHEN 'C' THEN\
+    \ 2 WHEN 'D' THEN 1 END) > 2"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain; one per vendor)
+  domains:
+  - vendors
+- name: sensitive_unstable_flow
+  description: 'Sensitive Unstable Flow: data_flow_stability_index below 0.5 and sensitive_data_exposure
+    exists (DSI > 100 and SRS < 2).
+
+    '
+  sql_expression: "(CAST(json_extract_string(df.flow_overview, '$.performance.success_pct') AS DOUBLE)\n\
+    \ / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE) + 1))\n* (1\
+    \ - CAST(json_extract_string(df.flow_overview, '$.performance.retry_count') AS DOUBLE)\n       / (CAST(json_extract_string(df.flow_overview,\
+    \ '$.performance.error_count') AS DOUBLE) + 1))\n* (CAST(json_extract_string(df.flow_overview, '$.performance.success_pct')\
+    \ AS DOUBLE)\n   / (CAST(json_extract_string(df.flow_overview, '$.performance.error_count') AS DOUBLE)\
+    \ + 1)) < 0.5\nAND dp.vol_gb * CASE dp.\"dataSense\" WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE\
+    \ 1 END > 100 AND (CASE WHEN sp.enc_state = 'Full' AND sp.acl_state = 'Strong' THEN 3\n          WHEN\
+    \ sp.enc_state = 'Full' OR sp.acl_state = 'Strong' THEN 2 ELSE 1 END) < 2"
+  source_model: main.SecurityProfile
+  from_sql: main.SecurityProfile sp JOIN main.DataProfile dp ON dp."profileTrace" = sp.profile_key JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = sp."RISKKEY" JOIN main.DataFlow df ON df."RecordRegistry"
+    = sp."flowKey"
+  grain: one security profile
+  domains:
+  - data_flows
+  - security
+- name: high_impact_audit_risk_flow
+  description: 'High-Impact Audit Risk Flow: regulatory_risk_exposure exists and audit_compliance_pressure
+    is above 5.
+
+    '
+  sql_expression: "COALESCE(CAST(json_extract_string(rm.risk_management_profile, '$.assessment.risk_score')\
+    \ AS DOUBLE)\n  * CASE WHEN json_extract_string(df.flow_overview, '$.routing.origin_country')\n  \
+    \         <> json_extract_string(df.flow_overview, '$.routing.destination_country') THEN 2 ELSE 1\
+    \ END > 1.5\nAND json_extract_string(df.flow_overview, '$.routing.origin_country')\n  <> json_extract_string(df.flow_overview,\
+    \ '$.routing.destination_country')\nAND (c.\"gdprComp\" = 'Non-compliant' OR c.\"CCPA_COMP\" = 'Non-compliant'\n\
+    \     OR c.\"PIPLcomp\" = 'Non-compliant' OR c.loc_law_comp = 'Non-compliant'), FALSE)\nAND (CAST(COALESCE(ac.\"\
+    critFindNum\", 0) AS DOUBLE) / (ac.\"FINDTALLY\" + 1))\n  * (ac.\"AccReqNum\" + ac.\"DEL_REQ_NUM\"\
+    \ + ac.rect_req_num + ac.\"PORTREQNUM\")\n  * (CAST(COALESCE(ac.\"critFindNum\", 0) AS DOUBLE) / (ac.\"\
+    FINDTALLY\" + 1)) > 5"
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac JOIN main.Compliance c ON c."complianceTrace" = ac."COMP_JOIN"
+    JOIN main.VendorManagement vm ON vm."Vendor_Trace" = ac."VendJoin" JOIN main.SecurityProfile sp ON
+    sp."SECURITY_TRACE" = vm."SEC_JOIN" JOIN main.DataProfile dp ON dp."profileTrace" = ac.profjoin JOIN
+    main.RiskManagement rm ON rm."RISKTRACE" = c.risk_tie JOIN main.DataFlow df ON df."RecordRegistry"
+    = dp."Flow_Sign"
+  grain: one audit record (full chain)
+  domains:
+  - compliance_audit
+- name: request_breakdown
+  description: 'Request Breakdown: the types and numbers of requests individuals made about their data
+    -- access, deletion, correction and transfer requests with their counts, as one string.
+
+    '
+  sql_expression: '''access requests: '' || ac."AccReqNum" || '', deletion requests: '' || ac."DEL_REQ_NUM"
+    || '', correction requests: '' || ac.rect_req_num || '', transfer requests: '' || ac."PORTREQNUM"'
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: slow_remediation_timeline
+  description: 'Slow Remediation Timeline: the deadline to fix an issue has already passed: CURRENT_DATE
+    - REMED_DUE > 0 (days). Note: all REMED_DUE values are 2025-02-20..2025-05-20, so relative to today
+    they are all past.
+
+    '
+  sql_expression: CURRENT_DATE - ac."REMED_DUE" > 0
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: nearing_remediation_deadline
+  description: 'Nearing Remediation Deadline: the time until the fix deadline (REMED_DUE - CURRENT_DATE,
+    in days) is between -5 and 0 inclusive.
+
+    '
+  sql_expression: ac."REMED_DUE" - CURRENT_DATE BETWEEN -5 AND 0
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record
+  domains:
+  - compliance_audit
+- name: high_vendor_risk_concentration
+  description: 'High Vendor Risk Concentration: flags partners with many risk issues over time. The documentation
+    defines it with the same condition as Slow Remediation Timeline -- the current date minus the fix
+    deadline is greater than zero (CURRENT_DATE - REMED_DUE > 0) -- and that stated definition is kept.
+    Not to be confused with the numeric vendor_risk_concentration (VRC).
+
+    '
+  sql_expression: CURRENT_DATE - ac."REMED_DUE" > 0
+  source_model: main.AuditAndCompliance
+  from_sql: main.AuditAndCompliance ac
+  grain: one audit record (one per vendor)
+  domains:
+  - vendors
+  - compliance_audit
+tables:
+- schema: main
+  table: DataFlow
+  columns:
+  - name: RecordRegistry
+    type: VARCHAR
+    description: Unique data-flow record identifier (PK), e.g. CB932064.
+  - name: FLOWSTAMP
+    type: VARCHAR
+    description: Text timestamp when the flow was logged, ISO format 2024-03-11T11:43:31; CAST to TIMESTAMP
+      for date logic.
+  - name: flow_overview
+    type: JSON
+    description: 'JSON: routing{origin_country, destination_country, origin_actor, destination_actor (NULL
+      = not recorded), protocol (Blockchain, HTTPS, Private Network, SFTP), transfer_frequency (Daily,
+      Hourly, Real-time, Weekly)}, classification{flow_tag, data_category, sensitivity_level (Critical,
+      High, Low, Medium), encryption_status (Full, Partial; NULL = not specified)}, performance{data_size_mb
+      (MB; NULL = not measured), duration_min (minutes), bandwidth_util_pct, success_pct (0-100, higher
+      = more reliable transfers), error_count (higher = more problems), retry_count}. Entire column NULL
+      for 36 of 999 flows. Read with json_extract_string(df.flow_overview, ''$.performance.success_pct'')
+      and CAST.
+
+      '
+- schema: main
+  table: RiskManagement
+  columns:
+  - name: RISKTRACE
+    type: BIGINT
+    description: Unique risk-management record identifier (PK).
+  - name: flow_link
+    type: VARCHAR
+    description: FK to DataFlow.RecordRegistry; one risk record per flow.
+  - name: recordRegistry
+    type: VARCHAR
+    description: Redundant record registry reference (equals flow_link).
+  - name: risk_management_profile
+    type: JSON
+    description: 'JSON: assessment{risk_score (0-100, higher = greater risk), residual_risk_level (High,
+      Low, Medium), control_effectiveness_pct (higher = stronger controls; NULL = not evaluated), compliance_score,
+      maturity_level (Initial, Managed, Optimized)}, mitigation{mitigation_state, secure_action, breach_notification,
+      incident_plan_status, plan_state (NULL = not set), next_review_date}, incident_statistics{incident_count,
+      breach_count (NULL = no breaches recorded), near_miss_count (NULL = unavailable), avg_resolution_hrs,
+      sla_compliance_pct}, financial_impact{cost_usd (compliance cost, USD), penalties_usd (potential
+      penalty, USD), insurance_coverage_state (Adequate, Limited; NULL = not set)}.
+
+      '
+- schema: main
+  table: DataProfile
+  columns:
+  - name: profileTrace
+    type: BIGINT
+    description: Unique data-profile identifier (PK).
+  - name: Flow_Sign
+    type: VARCHAR
+    description: FK to DataFlow.RecordRegistry.
+  - name: riskJoin
+    type: BIGINT
+    description: FK to RiskManagement.RISKTRACE.
+  - name: Record_Registry
+    type: VARCHAR
+    description: Record registry reference string.
+  - name: DATATYPE
+    type: VARCHAR
+    description: 'Primary data type: Commercial, Financial, Industrial, Medical, Personal.'
+  - name: dataSense
+    type: VARCHAR
+    description: 'Data sensitivity: Critical, High, Low, Medium. DSI weights High 3, Medium 2, Low 1 (Critical
+      gets 1; undefined by the documentation).'
+  - name: vol_gb
+    type: FLOAT
+    description: Data volume of the batch in gigabytes (small like 0.1 to large like 1000).
+  - name: REC_TALLY
+    type: BIGINT
+    description: Total number of data records.
+  - name: subjectTally
+    type: BIGINT
+    description: Count of data subjects represented.
+  - name: ret_days
+    type: BIGINT
+    description: Data-retention period in days (used by data_retention_risk_score).
+  - name: FormatType
+    type: VARCHAR
+    description: 'Data format: Mixed, Structured, Unstructured.'
+  - name: qlty_score
+    type: FLOAT
+    description: Data quality score.
+  - name: Int_check
+    type: VARCHAR
+    description: 'Integrity check result: Failed, Partial, Passed. NULL = integrity check not performed.'
+  - name: CSUMVERIFY
+    type: VARCHAR
+    description: 'Checksum verification status: Failed, Pending, Success. ''Failed'' = verification failure.'
+  - name: srcValState
+    type: VARCHAR
+    description: 'Source validation: Failed, Pending, Verified. NULL = not performed.'
+  - name: DEST_VAL_state
+    type: VARCHAR
+    description: 'Destination validation: Failed, Pending, Verified.'
+- schema: main
+  table: SecurityProfile
+  columns:
+  - name: SECURITY_TRACE
+    type: BIGINT
+    description: Unique security-profile identifier (PK).
+  - name: flowKey
+    type: VARCHAR
+    description: FK to DataFlow.RecordRegistry.
+  - name: RISKKEY
+    type: BIGINT
+    description: FK to RiskManagement.RISKTRACE.
+  - name: profile_key
+    type: BIGINT
+    description: FK to DataProfile.profileTrace.
+  - name: RecordRegistry
+    type: VARCHAR
+    description: Record registry reference string.
+  - name: enc_state
+    type: VARCHAR
+    description: 'Encryption status: ''Full'' (all data fully encrypted) or ''Partial''; NULL in 125 rows.
+      Used by security_robustness_score.'
+  - name: ENCMETH
+    type: VARCHAR
+    description: 'Encryption method: AES-256, Custom, RSA-2048, SM4. NULL = not specified.'
+  - name: keyManState
+    type: VARCHAR
+    description: 'Key management: Centralized, Distributed, Hybrid. NULL = not recorded.'
+  - name: MASK_LEVEL
+    type: VARCHAR
+    description: 'Masking level: Full, Partial. NULL = not specified.'
+  - name: anonMeth
+    type: VARCHAR
+    description: 'Anonymisation method: K-Anonymity, L-Diversity, T-Closeness.'
+  - name: PSYMSTATE
+    type: VARCHAR
+    description: 'Pseudonymisation: Applied, Partial. NULL = not applied.'
+  - name: authMeth
+    type: VARCHAR
+    description: 'Authentication method: Basic, MFA, SSO.'
+  - name: AUTHZ_FRAME
+    type: VARCHAR
+    description: 'Authorisation framework: ABAC, Custom, RBAC.'
+  - name: acl_state
+    type: VARCHAR
+    description: 'Access-control-list state: Adequate, Strong, Weak. ''Strong'' = only trusted users can
+      access (SRS).'
+  - name: APISECSTATE
+    type: VARCHAR
+    description: 'API security: Review Required, Secure, Vulnerable. NULL = not assessed.'
+  - name: logIntCheck
+    type: VARCHAR
+    description: 'Logging integrity check: Failed, Passed, Pending.'
+  - name: LogRetDays
+    type: BIGINT
+    description: Audit log retention in days; higher = longer history available. Used by security_posture_maturity.
+  - name: bkp_state
+    type: VARCHAR
+    description: 'Backup state: Current, Failed, Outdated. NULL = not documented.'
+  - name: DRECSTATE
+    type: VARCHAR
+    description: 'Data recovery: Missing, Tested, Untested.'
+  - name: bc_state
+    type: VARCHAR
+    description: 'Business-continuity state: Active, Outdated, Review Required.'
+- schema: main
+  table: VendorManagement
+  columns:
+  - name: Vendor_Trace
+    type: BIGINT
+    description: Unique vendor-management record identifier (PK).
+  - name: SEC_JOIN
+    type: BIGINT
+    description: FK to SecurityProfile.SECURITY_TRACE.
+  - name: riskassoc
+    type: BIGINT
+    description: FK to RiskManagement.RISKTRACE.
+  - name: recordregistry
+    type: VARCHAR
+    description: Record registry reference string.
+  - name: VENDASSESS
+    type: VARCHAR
+    description: 'Vendor assessment: Completed, Due, In Progress. NULL = not completed.'
+  - name: vendSecRate
+    type: VARCHAR
+    description: 'Vendor security rating letter: A = 4 (top tier), B = 3 (good), C = 2 (average), D =
+      1 (weak); higher = better protection.'
+  - name: VEND_AUD_DATE
+    type: DATE
+    description: Date of most recent vendor audit.
+  - name: contrState
+    type: VARCHAR
+    description: 'Contract state: Active, Expired, Under Review. NULL = unknown. Only ''Active'' counts
+      as active in VRI.'
+  - name: CONTR_EXPIRE
+    type: DATE
+    description: Contract expiration date.
+  - name: dpa_state
+    type: VARCHAR
+    description: 'Data processing agreement: Pending, Required, Signed.'
+  - name: SCCSTATE
+    type: VARCHAR
+    description: 'Standard Contractual Clauses: Implemented, Not Required, Partial.'
+  - name: bcr_state
+    type: VARCHAR
+    description: 'Binding Corporate Rules: Approved, Not Applicable, Pending.'
+  - name: docuState
+    type: VARCHAR
+    description: 'Documentation: Complete, Incomplete, Partial.'
+  - name: pol_comp
+    type: VARCHAR
+    description: 'Policy compliance: Full, Non-compliant, Partial. ''Non-compliant'' -> non_compliant_vendor.'
+  - name: procComp
+    type: VARCHAR
+    description: 'Process compliance: Full, Non-compliant, Partial. NULL = not assessed. ''Non-compliant''
+      -> non_compliant_vendor.'
+  - name: train_state
+    type: VARCHAR
+    description: 'Training: Current, Due, Overdue.'
+  - name: certState
+    type: VARCHAR
+    description: 'Certification: Expired, Pending, Valid. NULL = not recorded.'
+  - name: MONSTATE
+    type: VARCHAR
+    description: 'Monitoring: Active, Inactive, Partial.'
+  - name: rep_state
+    type: VARCHAR
+    description: 'Reporting: Current, Delayed, Overdue.'
+  - name: stakeComm
+    type: VARCHAR
+    description: 'Stakeholder communication: Limited, Poor, Regular.'
+- schema: main
+  table: Compliance
+  columns:
+  - name: complianceTrace
+    type: BIGINT
+    description: Unique compliance record identifier (PK).
+  - name: risk_tie
+    type: BIGINT
+    description: FK to RiskManagement.RISKTRACE.
+  - name: vendorTie
+    type: BIGINT
+    description: FK to VendorManagement.Vendor_Trace.
+  - name: recordRegistry
+    type: VARCHAR
+    description: Record registry reference string.
+  - name: LEGALBASE
+    type: VARCHAR
+    description: 'Legal basis: Consent, Contract, Legal Obligation, Legitimate Interest. NULL = not determined.'
+  - name: consent_state
+    type: VARCHAR
+    description: 'Consent: Expired, Not Required, Pending, Valid.'
+  - name: ConsentColl
+    type: DATE
+    description: Date consent was collected.
+  - name: consent_exp
+    type: DATE
+    description: Consent expiration date.
+  - name: purp_limit
+    type: VARCHAR
+    description: 'Purpose limitation: General, Multiple, Specific.'
+  - name: PURP_DESC
+    type: VARCHAR
+    description: 'Processing purpose: Business Operations, Compliance, Marketing, Research.'
+  - name: gdprComp
+    type: VARCHAR
+    description: 'GDPR compliance status: Compliant, Non-compliant, Partial. The ''compliance'' status
+      used by CBCE, BCR, regulatory overload and incident-prone compliance flows.'
+  - name: CCPA_COMP
+    type: VARCHAR
+    description: 'CCPA compliance: Compliant, Non-compliant, Partial.'
+  - name: PIPLcomp
+    type: VARCHAR
+    description: 'PIPL compliance: Compliant, Non-compliant, Partial.'
+  - name: loc_law_comp
+    type: VARCHAR
+    description: 'Local-law compliance: Compliant, Non-compliant, Partial.'
+  - name: RegApprovals
+    type: VARCHAR
+    description: 'Regulatory approvals: Not Required, Obtained, Pending.'
+  - name: priv_imp_assess
+    type: VARCHAR
+    description: 'Privacy impact assessment: Completed, In Progress, Required.'
+  - name: Datasubjright
+    type: VARCHAR
+    description: 'Data subject rights: Fully Supported, Limited, Partial.'
+- schema: main
+  table: AuditAndCompliance
+  columns:
+  - name: AUDIT_TRACE
+    type: BIGINT
+    description: Unique audit record identifier (PK).
+  - name: profjoin
+    type: BIGINT
+    description: FK to DataProfile.profileTrace.
+  - name: COMP_JOIN
+    type: BIGINT
+    description: FK to Compliance.complianceTrace.
+  - name: VendJoin
+    type: BIGINT
+    description: FK to VendorManagement.Vendor_Trace.
+  - name: record_registry
+    type: VARCHAR
+    description: Record registry reference string.
+  - name: AudtrailState
+    type: VARCHAR
+    description: 'Audit trail: Complete, Missing, Partial.'
+  - name: FINDTALLY
+    type: BIGINT
+    description: Total findings tally.
+  - name: critFindNum
+    type: BIGINT
+    description: Critical findings. NULL = no critical findings recorded (treated as 0).
+  - name: remed_state
+    type: VARCHAR
+    description: 'Remediation: Completed, In Progress, Not Started.'
+  - name: REMED_DUE
+    type: DATE
+    description: Remediation due date (fix deadline).
+  - name: authNotify
+    type: VARCHAR
+    description: 'Authority notification: Not Required, Required, Submitted. NULL = authority not notified.'
+  - name: border_mech
+    type: VARCHAR
+    description: 'Cross-border mechanism: Adequacy Decision, BCRs, Derogations, SCCs.'
+  - name: TRANSIMPASSESS
+    type: VARCHAR
+    description: 'Transfer impact assessment: Completed, In Progress, Required. NULL = not performed.'
+  - name: localReqs
+    type: VARCHAR
+    description: 'Local requirements: Met, Not Met, Partial.'
+  - name: data_map_state
+    type: VARCHAR
+    description: 'Data mapping: Complete, Outdated, Partial.'
+  - name: SYSINTSTATE
+    type: VARCHAR
+    description: 'System integration: Fully Integrated, Manual, Partial.'
+  - name: AccReqNum
+    type: BIGINT
+    description: Data access request count.
+  - name: DEL_REQ_NUM
+    type: BIGINT
+    description: Deletion request count.
+  - name: rect_req_num
+    type: BIGINT
+    description: Rectification (correction) request count.
+  - name: PORTREQNUM
+    type: BIGINT
+    description: Portability (data transfer) request count.
+  - name: resp_time_day
+    type: FLOAT
+    description: Average response time in days; lower = faster, higher = delays.
+relationships:
+- from: main.RiskManagement.flow_link
+  to: main.DataFlow.RecordRegistry
+  type: one_to_one
+- from: main.DataProfile.riskJoin
+  to: main.RiskManagement.RISKTRACE
+  type: one_to_one
+- from: main.DataProfile.Flow_Sign
+  to: main.DataFlow.RecordRegistry
+  type: many_to_one
+- from: main.SecurityProfile.profile_key
+  to: main.DataProfile.profileTrace
+  type: many_to_one
+- from: main.SecurityProfile.RISKKEY
+  to: main.RiskManagement.RISKTRACE
+  type: many_to_one
+- from: main.SecurityProfile.flowKey
+  to: main.DataFlow.RecordRegistry
+  type: many_to_one
+- from: main.VendorManagement.SEC_JOIN
+  to: main.SecurityProfile.SECURITY_TRACE
+  type: many_to_one
+- from: main.VendorManagement.riskassoc
+  to: main.RiskManagement.RISKTRACE
+  type: many_to_one
+- from: main.Compliance.vendorTie
+  to: main.VendorManagement.Vendor_Trace
+  type: many_to_one
+- from: main.Compliance.risk_tie
+  to: main.RiskManagement.RISKTRACE
+  type: many_to_one
+- from: main.AuditAndCompliance.COMP_JOIN
+  to: main.Compliance.complianceTrace
+  type: many_to_one
+- from: main.AuditAndCompliance.VendJoin
+  to: main.VendorManagement.Vendor_Trace
+  type: many_to_one
+- from: main.AuditAndCompliance.profjoin
+  to: main.DataProfile.profileTrace
+  type: many_to_one

@@ -1,0 +1,962 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: crypto_exchange, author: claudeopus5.5
+metrics:
+- name: spread_percentage
+  description: 'Spread as a percentage of the midpoint price: (best ask - best bid) / midpoint price *
+    100, from marketdata.orderbook_metrics (best_ask, best_bid, mid_price). Computed, not the stored text
+    field spread_pct.
+
+    '
+  sql_expression: '(CAST(md.orderbook_metrics->>''best_ask'' AS DOUBLE) - CAST(md.orderbook_metrics->>''best_bid''
+    AS DOUBLE)) / NULLIF(CAST(md.orderbook_metrics->>''mid_price'' AS DOUBLE), 0) * 100
+
+    '
+  source_model: main.marketdata
+  from_sql: main.marketdata md
+  grain: one row per market
+  domains:
+  - market_microstructure
+- name: slippage_impact
+  description: 'Expected price slippage impact for an order''s size: order quantity / quantity available
+    at best bid or ask * raw spread. Order quantity = order_attributes.quantity; raw spread = orderbook_metrics.spread_abs.
+    INTERPRETATION: the available quantity is the side the order consumes - ask_size for ''Buy'' orders,
+    bid_size for ''Sell'' orders. One row per order.
+
+    '
+  sql_expression: "CAST(o.order_attributes->>'quantity' AS DOUBLE) / NULLIF(CASE WHEN (o.order_attributes->>'side')\
+    \ = 'Buy'\n              THEN CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE)\n              ELSE\
+    \ CAST(md.orderbook_metrics->>'bid_size' AS DOUBLE) END, 0)\n* CAST(md.orderbook_metrics->>'spread_abs'\
+    \ AS DOUBLE)\n"
+  source_model: main.orders
+  from_sql: main.orders o JOIN main.marketdata md ON md."EXCH_SPOT" = o."exchSpot"
+  grain: one row per order (joined to its market's order-book snapshot)
+  domains:
+  - market_microstructure
+  - execution_and_fees
+- name: position_value_at_risk
+  description: 'PVaR = notional value of position * volatility rating * 0.01. Notional = margin_risk_profile.position_notional;
+    volatility rating = marketstats.vol_meter (text, TRY_CAST; NULL in 100 rows) of the position''s market
+    (riskandmargin -> orders.exchSpot -> marketstats.md_link). A market can have several marketstats rows,
+    so there is one value per position and market-stats snapshot.
+
+    '
+  sql_expression: 'CAST(rm.margin_risk_profile->>''position_notional'' AS DOUBLE) * TRY_CAST(ms.vol_meter
+    AS DOUBLE) * 0.01
+
+    '
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketstats
+    ms ON ms.md_link = o."exchSpot"
+
+    '
+  grain: one row per (position, marketstats snapshot of its market)
+  domains:
+  - position_risk
+- name: arbitrage_potential_score
+  description: 'APS = arbitrage potential + cross-exchange spread + (funding-rate gap * 2) + basis gap,
+    from indicator_bundle.cross_venue (arbitrage_pct, cross_exchange_spread_pct (NULL in 3 rows), funding_gap_pct,
+    basis_gap_pct). Max in data is 0.0471.
+
+    '
+  sql_expression: 'CAST(ai.indicator_bundle->>''$.cross_venue.arbitrage_pct'' AS DOUBLE) + CAST(ai.indicator_bundle->>''$.cross_venue.cross_exchange_spread_pct''
+    AS DOUBLE) + CAST(ai.indicator_bundle->>''$.cross_venue.funding_gap_pct'' AS DOUBLE) * 2 + CAST(ai.indicator_bundle->>''$.cross_venue.basis_gap_pct''
+    AS DOUBLE)
+
+    '
+  source_model: main.analyticsindicators
+  from_sql: main.analyticsindicators ai
+  grain: one row per analytics snapshot
+  domains:
+  - arbitrage
+- name: arbitrage_window
+  description: 'Arbitrage Window: a market condition where the Arbitrage Potential Score exceeds 0.05
+    (substantial exploitable price discrepancies). No row currently qualifies.'
+  sql_expression: '(CAST(ai.indicator_bundle->>''$.cross_venue.arbitrage_pct'' AS DOUBLE) + CAST(ai.indicator_bundle->>''$.cross_venue.cross_exchange_spread_pct''
+    AS DOUBLE) + CAST(ai.indicator_bundle->>''$.cross_venue.funding_gap_pct'' AS DOUBLE) * 2 + CAST(ai.indicator_bundle->>''$.cross_venue.basis_gap_pct''
+    AS DOUBLE)) > 0.05
+
+    '
+  source_model: main.analyticsindicators
+  from_sql: main.analyticsindicators ai
+  grain: one row per analytics snapshot
+  domains:
+  - arbitrage
+- name: market_impact_cost
+  description: 'MIC = order quantity * limit price * large order ratio * 0.01; quantity and limit_price
+    from order_attributes, large_order_ratio from indicator_bundle.order_flow of the order''s market (one
+    row per order and analytics snapshot).
+
+    '
+  sql_expression: 'CAST(o.order_attributes->>''quantity'' AS DOUBLE) * CAST(o.order_attributes->>''limit_price''
+    AS DOUBLE) * CAST(ai.indicator_bundle->>''$.order_flow.large_order_ratio'' AS DOUBLE) * 0.01
+
+    '
+  source_model: main.orders
+  from_sql: main.orders o JOIN main.analyticsindicators ai ON ai.md_ref = o."exchSpot"
+  grain: one row per (order, analytics snapshot of its market)
+  domains:
+  - execution_and_fees
+- name: liquidity_ratio
+  description: '(quantity at best bid + quantity at best ask) * midpoint price / 24h volume: (bid_size
+    + ask_size) * mid_price / marketstats.VOLday.
+
+    '
+  sql_expression: '(CAST(md.orderbook_metrics->>''bid_size'' AS DOUBLE) + CAST(md.orderbook_metrics->>''ask_size''
+    AS DOUBLE)) * CAST(md.orderbook_metrics->>''mid_price'' AS DOUBLE) / NULLIF(ms."VOLday", 0)
+
+    '
+  source_model: main.marketdata
+  from_sql: main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT"
+  grain: one row per (market, marketstats snapshot)
+  domains:
+  - market_microstructure
+- name: liquidity_crisis
+  description: 'Liquidity Crisis: Liquidity Ratio falls below 0.01 (insufficient depth relative to volume).'
+  sql_expression: '(CAST(md.orderbook_metrics->>''bid_size'' AS DOUBLE) + CAST(md.orderbook_metrics->>''ask_size''
+    AS DOUBLE)) * CAST(md.orderbook_metrics->>''mid_price'' AS DOUBLE) / NULLIF(ms."VOLday", 0) < 0.01
+
+    '
+  source_model: main.marketdata
+  from_sql: main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT"
+  grain: one row per (market, marketstats snapshot)
+  domains:
+  - market_microstructure
+- name: realized_risk_ratio
+  description: 'RRR = realized PnL / Position Value at Risk. Realized PnL = accountbalances.REAL_LINE
+    of the position''s user (orders.UserRef); a user has several balance records, so one value per balance
+    record.
+
+    '
+  sql_expression: 'ab."REAL_LINE" / NULLIF(CAST(rm.margin_risk_profile->>''position_notional'' AS DOUBLE)
+    * TRY_CAST(ms.vol_meter AS DOUBLE) * 0.01, 0)
+
+    '
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketstats
+    ms ON ms.md_link = o."exchSpot" JOIN main.accountbalances ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, marketstats snapshot, balance record of the user)
+  domains:
+  - position_risk
+- name: margin_utilization
+  description: 'Percentage of margin utilised: initial margin required (margin_risk_profile.initial_margin_pct,
+    an amount despite its name) / margin account balance (accountbalances.marg_sum) * 100.
+
+    '
+  sql_expression: 'CAST(rm.margin_risk_profile->>''initial_margin_pct'' AS DOUBLE) / NULLIF(ab.marg_sum,
+    0) * 100
+
+    '
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.accountbalances
+    ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, balance record of its user)
+  domains:
+  - position_risk
+- name: margin_call_risk
+  description: 'Margin Call Risk: accounts whose Margin Utilization exceeds 80%.'
+  sql_expression: 'CAST(rm.margin_risk_profile->>''initial_margin_pct'' AS DOUBLE) / NULLIF(ab.marg_sum,
+    0) * 100 > 80
+
+    '
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.accountbalances
+    ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, balance record of its user)
+  domains:
+  - position_risk
+- name: order_fill_rate
+  description: 'Percentage of an order filled: (order quantity - unfilled units) / order quantity * 100,
+    with order_attributes.quantity and orderExecutions.remain_amt (NULL = remaining not recorded -> NULL).
+
+    '
+  sql_expression: '(CAST(o.order_attributes->>''quantity'' AS DOUBLE) - oe.remain_amt) / NULLIF(CAST(o.order_attributes->>''quantity''
+    AS DOUBLE), 0) * 100
+
+    '
+  source_model: main.orderExecutions
+  from_sql: main."orderExecutions" oe JOIN main.orders o ON o."ORD_STAMP" = oe."Ord_Link"
+  grain: one row per execution record
+  domains:
+  - execution_and_fees
+- name: market_efficiency_ratio
+  description: 'MER = Slippage Impact / average slippage measure. INTERPRETATION: the average slippage
+    measure is AVG(systemmonitoring.SLIP_ratio) over all monitoring rows (about 0.000178; the table has
+    no key to orders).
+
+    '
+  sql_expression: "(CAST(o.order_attributes->>'quantity' AS DOUBLE)\n / NULLIF(CASE WHEN (o.order_attributes->>'side')\
+    \ = 'Buy'\n               THEN CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE)\n               ELSE\
+    \ CAST(md.orderbook_metrics->>'bid_size' AS DOUBLE) END, 0)\n * CAST(md.orderbook_metrics->>'spread_abs'\
+    \ AS DOUBLE))\n/ NULLIF((SELECT AVG(\"SLIP_ratio\") FROM main.systemmonitoring), 0)\n"
+  source_model: main.orders
+  from_sql: main.orders o JOIN main.marketdata md ON md."EXCH_SPOT" = o."exchSpot"
+  grain: one row per order
+  domains:
+  - execution_and_fees
+- name: whale_order
+  description: 'Whale Order: order quantity exceeds 10% of the available liquidity at the current best
+    bid or ask. INTERPRETATION: available liquidity is the side the order hits - ask_size for ''Buy'',
+    bid_size for ''Sell''.
+
+    '
+  sql_expression: "CAST(o.order_attributes->>'quantity' AS DOUBLE) > 0.1 * CASE WHEN (o.order_attributes->>'side')\
+    \ = 'Buy'\n  THEN CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE)\n  ELSE CAST(md.orderbook_metrics->>'bid_size'\
+    \ AS DOUBLE) END\n"
+  source_model: main.orders
+  from_sql: main.orders o JOIN main.marketdata md ON md."EXCH_SPOT" = o."exchSpot"
+  grain: one row per order
+  domains:
+  - market_microstructure
+- name: liquidation_risk_level
+  description: '''High Risk'' when liquidation price >= market price * 0.95, else ''Safe''. Liquidation
+    price = margin_risk_profile.liquidation_price (money string, parsed). INTERPRETATION: current market
+    price = orderbook_metrics.mark_price of the position''s market. NULL liquidation price -> NULL.
+
+    '
+  sql_expression: "CASE WHEN (rm.margin_risk_profile->>'liquidation_price') IS NULL THEN NULL\n     WHEN\
+    \ CAST(regexp_replace((rm.margin_risk_profile->>'liquidation_price'), '[$, ]', '', 'g') AS DOUBLE)\n\
+    \          >= CAST(md.orderbook_metrics->>'mark_price' AS DOUBLE) * 0.95 THEN 'High Risk'\n     ELSE\
+    \ 'Safe' END\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketdata
+    md ON md."EXCH_SPOT" = o."exchSpot"
+
+    '
+  grain: one row per position
+  domains:
+  - position_risk
+- name: over_leveraged_position
+  description: 'Over-Leveraged Position: leverage * volatility measure exceeds 500. leverage = margin_risk_profile.leverage
+    (string, cast); volatility = marketstats.vol_meter.
+
+    '
+  sql_expression: 'CAST(rm.margin_risk_profile->>''leverage'' AS DOUBLE) * TRY_CAST(ms.vol_meter AS DOUBLE)
+    > 500
+
+    '
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketstats
+    ms ON ms.md_link = o."exchSpot"
+
+    '
+  grain: one row per (position, marketstats snapshot)
+  domains:
+  - position_risk
+- name: market_maker_activity
+  description: 'Market Maker Activity: execution tuning parameter predominantly ''Maker'' and maker-order
+    flow (participant_flow.market_maker_note) ''High''. INTERPRETATION: predominantly = more Maker than
+    Taker executions (NULL EXECtune ignored) among executions of orders on the market. Aggregate: evaluate
+    with GROUP BY ai."ANALYTICS_NODE" (or ai.md_ref).
+
+    '
+  sql_expression: 'COUNT(*) FILTER (WHERE oe."EXECtune" = ''Maker'') > COUNT(*) FILTER (WHERE oe."EXECtune"
+    = ''Taker'') AND MAX((ai.indicator_bundle->>''$.participant_flow.market_maker_note'')) = ''High''
+
+    '
+  source_model: main.analyticsindicators
+  from_sql: 'main.analyticsindicators ai JOIN main.orders o ON o."exchSpot" = ai.md_ref JOIN main."orderExecutions"
+    oe ON oe."Ord_Link" = o."ORD_STAMP"
+
+    '
+  grain: one row per (analytics snapshot, execution on that market); group by ai."ANALYTICS_NODE"
+  domains:
+  - market_microstructure
+  - execution_and_fees
+- name: smart_money_flow
+  description: 'Smart Money Flow: smart-money force exceeds both retail-flow share and institutional-flow
+    share by at least 20% (>= 1.2 times each). retail_flow is NULL in 286 rows -> NULL. INTERPRETATION
+    for direction: positive smart_money = ''Buy'' direction, negative = ''Sell''.
+
+    '
+  sql_expression: 'CAST(ai.indicator_bundle->>''$.participant_flow.smart_money'' AS DOUBLE) >= 1.2 * CAST(ai.indicator_bundle->>''$.participant_flow.retail_flow''
+    AS DOUBLE) AND CAST(ai.indicator_bundle->>''$.participant_flow.smart_money'' AS DOUBLE) >= 1.2 * CAST(ai.indicator_bundle->>''$.participant_flow.institutional_flow''
+    AS DOUBLE)
+
+    '
+  source_model: main.analyticsindicators
+  from_sql: main.analyticsindicators ai
+  grain: one row per analytics snapshot
+  domains:
+  - technical_and_flow
+- name: momentum_divergence
+  description: 'Price makes new highs/lows while momentum (buy_pressure, sell_pressure) moves opposite.
+    INTERPRETATION: new high = mid_price above marketstats.HIGH_SPOT_DAY with sell_pressure > buy_pressure;
+    new low = mid_price below low_spot_day with buy_pressure > sell_pressure.
+
+    '
+  sql_expression: "(CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) > ms.\"HIGH_SPOT_DAY\"\n AND CAST(ai.indicator_bundle->>'$.order_flow.buy_pressure'\
+    \ AS DOUBLE) < CAST(ai.indicator_bundle->>'$.order_flow.sell_pressure' AS DOUBLE))\nOR (CAST(md.orderbook_metrics->>'mid_price'\
+    \ AS DOUBLE) < ms.low_spot_day\n AND CAST(ai.indicator_bundle->>'$.order_flow.buy_pressure' AS DOUBLE)\
+    \ > CAST(ai.indicator_bundle->>'$.order_flow.sell_pressure' AS DOUBLE))\n"
+  source_model: main.marketdata
+  from_sql: 'main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT" JOIN main.analyticsindicators
+    ai ON ai.md_ref = md."EXCH_SPOT"
+
+    '
+  grain: one row per (market, marketstats snapshot, analytics snapshot)
+  domains:
+  - technical_and_flow
+- name: technical_breakout
+  description: 'Price exceeds the day''s high or falls below the day''s low with day volume (VOLday) at
+    least 50% above the 30-day average. INTERPRETATION: price = mid_price; no 30-day history exists (all
+    stats are from 2025-02-19), so the average is AVG(VOLday) over all marketstats rows.
+
+    '
+  sql_expression: "(CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) > ms.\"HIGH_SPOT_DAY\"\n OR CAST(md.orderbook_metrics->>'mid_price'\
+    \ AS DOUBLE) < ms.low_spot_day)\nAND ms.\"VOLday\" >= 1.5 * (SELECT AVG(\"VOLday\") FROM main.marketstats)\n"
+  source_model: main.marketdata
+  from_sql: main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT"
+  grain: one row per (market, marketstats snapshot)
+  domains:
+  - technical_and_flow
+- name: risk_adjusted_return
+  description: 'Realized PnL / (Position Value at Risk * position risk ratio); position risk ratio = margin_risk_profile.position_risk_pct.
+
+    '
+  sql_expression: "ab.\"REAL_LINE\" / NULLIF(CAST(rm.margin_risk_profile->>'position_notional' AS DOUBLE)\
+    \ * TRY_CAST(ms.vol_meter AS DOUBLE) * 0.01\n  * CAST(rm.margin_risk_profile->>'position_risk_pct'\
+    \ AS DOUBLE), 0)\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketstats
+    ms ON ms.md_link = o."exchSpot" JOIN main.accountbalances ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, marketstats snapshot, balance record)
+  domains:
+  - position_risk
+- name: total_fee_charged
+  description: 'Total fee charged: fees.FEE_TOTAL parsed from its money string (''$26.60 '').'
+  sql_expression: CAST(regexp_replace(f."FEE_TOTAL", '[$, ]', '', 'g') AS DOUBLE)
+  source_model: main.fees
+  from_sql: main.fees f
+  grain: one row per fee record
+  domains:
+  - execution_and_fees
+- name: true_cost_of_execution
+  description: 'Total fee charged + (order quantity * limit or stop price * Slippage Impact * 0.01). Price
+    = order_attributes.limit_price. One row per fee record (orders can have more than one).
+
+    '
+  sql_expression: "CAST(regexp_replace(f.\"FEE_TOTAL\", '[$, ]', '', 'g') AS DOUBLE) + CAST(o.order_attributes->>'quantity'\
+    \ AS DOUBLE) * CAST(o.order_attributes->>'limit_price' AS DOUBLE)\n  * (CAST(o.order_attributes->>'quantity'\
+    \ AS DOUBLE)\n     / NULLIF(CASE WHEN (o.order_attributes->>'side') = 'Buy'\n                   THEN\
+    \ CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE)\n                   ELSE CAST(md.orderbook_metrics->>'bid_size'\
+    \ AS DOUBLE) END, 0)\n     * CAST(md.orderbook_metrics->>'spread_abs' AS DOUBLE)) * 0.01\n"
+  source_model: main.orders
+  from_sql: 'main.orders o JOIN main.marketdata md ON md."EXCH_SPOT" = o."exchSpot" JOIN main.fees f ON
+    f."Order_Link" = o."ORD_STAMP"
+
+    '
+  grain: one row per (order, fee record)
+  domains:
+  - execution_and_fees
+- name: order_book_imbalance_ratio
+  description: '(deeper bid liquidity - deeper ask liquidity) / (deeper bid + deeper ask) using orderbook_metrics.bid_depth
+    and ask_depth. Positive = stronger buying pressure, negative = stronger selling pressure.
+
+    '
+  sql_expression: '(CAST(md.orderbook_metrics->>''bid_depth'' AS DOUBLE) - CAST(md.orderbook_metrics->>''ask_depth''
+    AS DOUBLE)) / NULLIF(CAST(md.orderbook_metrics->>''bid_depth'' AS DOUBLE) + CAST(md.orderbook_metrics->>''ask_depth''
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.marketdata
+  from_sql: main.marketdata md
+  grain: one row per market
+  domains:
+  - market_microstructure
+- name: effective_leverage
+  description: 'Position leverage * notional value of position / total wallet balance; leverage = margin_risk_profile.leverage,
+    notional = position_notional, wallet = accountbalances.walletSum (money string, parsed).
+
+    '
+  sql_expression: 'CAST(rm.margin_risk_profile->>''leverage'' AS DOUBLE) * CAST(rm.margin_risk_profile->>''position_notional''
+    AS DOUBLE) / NULLIF(CAST(regexp_replace(ab."walletSum", ''[$, ]'', '''', ''g'') AS DOUBLE), 0)
+
+    '
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.accountbalances
+    ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, balance record of its user)
+  domains:
+  - position_risk
+- name: effective_leverage_risk_classification
+  description: '''High Risk'' if Effective Leverage exceeds 20, otherwise ''Normal''.'
+  sql_expression: "CASE WHEN CAST(rm.margin_risk_profile->>'leverage' AS DOUBLE) * CAST(rm.margin_risk_profile->>'position_notional'\
+    \ AS DOUBLE)\n  / NULLIF(CAST(regexp_replace(ab.\"walletSum\", '[$, ]', '', 'g') AS DOUBLE), 0) >\
+    \ 20 THEN 'High Risk' ELSE 'Normal' END\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.accountbalances
+    ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, balance record of its user)
+  domains:
+  - position_risk
+- name: profit_factor
+  description: 'Sum of positive realized PnL / |sum of negative realized PnL| over accountbalances.REAL_LINE
+    (aggregate over the chosen rows).
+
+    '
+  sql_expression: 'SUM(CASE WHEN ab."REAL_LINE" > 0 THEN ab."REAL_LINE" END) / NULLIF(ABS(SUM(CASE WHEN
+    ab."REAL_LINE" < 0 THEN ab."REAL_LINE" END)), 0)
+
+    '
+  source_model: main.accountbalances
+  from_sql: main.accountbalances ab
+  grain: one row per balance record (aggregate)
+  domains:
+  - position_risk
+- name: arbitrage_roi
+  description: 'Arbitrage ROI = Arbitrage Potential Score * limit or stop price / (total fee charged *
+    2), fees counted on both legs. Fee 0 -> NULL.
+
+    '
+  sql_expression: "(CAST(ai.indicator_bundle->>'$.cross_venue.arbitrage_pct' AS DOUBLE)\n + CAST(ai.indicator_bundle->>'$.cross_venue.cross_exchange_spread_pct'\
+    \ AS DOUBLE)\n + CAST(ai.indicator_bundle->>'$.cross_venue.funding_gap_pct' AS DOUBLE) * 2\n + CAST(ai.indicator_bundle->>'$.cross_venue.basis_gap_pct'\
+    \ AS DOUBLE))\n* CAST(o.order_attributes->>'limit_price' AS DOUBLE) / NULLIF(CAST(regexp_replace(f.\"\
+    FEE_TOTAL\", '[$, ]', '', 'g') AS DOUBLE) * 2, 0)\n"
+  source_model: main.orders
+  from_sql: 'main.orders o JOIN main.analyticsindicators ai ON ai.md_ref = o."exchSpot" JOIN main.fees
+    f ON f."Order_Link" = o."ORD_STAMP"
+
+    '
+  grain: one row per (order, analytics snapshot, fee record)
+  domains:
+  - arbitrage
+- name: market_depth_ratio
+  description: 'Deeper bid or ask liquidity / order quantity * Liquidity Ratio. Depth by position side:
+    ''Long'' uses bid_depth (exit by selling), ''Short'' uses ask_depth; NULL side -> NULL. Order quantity
+    from the position''s order.
+
+    '
+  sql_expression: "CASE (rm.margin_risk_profile->>'position_side')\n  WHEN 'Long' THEN CAST(md.orderbook_metrics->>'bid_depth'\
+    \ AS DOUBLE)\n  WHEN 'Short' THEN CAST(md.orderbook_metrics->>'ask_depth' AS DOUBLE) END\n/ NULLIF(CAST(o.order_attributes->>'quantity'\
+    \ AS DOUBLE), 0) * ((CAST(md.orderbook_metrics->>'bid_size' AS DOUBLE) + CAST(md.orderbook_metrics->>'ask_size'\
+    \ AS DOUBLE))\n   * CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) / NULLIF(ms.\"VOLday\", 0))\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketdata
+    md ON md."EXCH_SPOT" = o."exchSpot" JOIN main.marketstats ms ON ms.md_link = o."exchSpot"
+
+    '
+  grain: one row per (position, marketstats snapshot)
+  domains:
+  - market_microstructure
+  - position_risk
+- name: liquidity_constrained_position
+  description: Position whose Market Depth Ratio is less than 2.0 (hard to exit without significant slippage).
+  sql_expression: "CASE (rm.margin_risk_profile->>'position_side')\n  WHEN 'Long' THEN CAST(md.orderbook_metrics->>'bid_depth'\
+    \ AS DOUBLE)\n  WHEN 'Short' THEN CAST(md.orderbook_metrics->>'ask_depth' AS DOUBLE) END\n/ NULLIF(CAST(o.order_attributes->>'quantity'\
+    \ AS DOUBLE), 0) * ((CAST(md.orderbook_metrics->>'bid_size' AS DOUBLE) + CAST(md.orderbook_metrics->>'ask_size'\
+    \ AS DOUBLE))\n   * CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) / NULLIF(ms.\"VOLday\", 0))\
+    \ < 2.0\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketdata
+    md ON md."EXCH_SPOT" = o."exchSpot" JOIN main.marketstats ms ON ms.md_link = o."exchSpot"
+
+    '
+  grain: one row per (position, marketstats snapshot)
+  domains:
+  - position_risk
+- name: volatility_adjusted_spread
+  description: Spread Percentage / (volatility rating * 0.1); volatility rating = marketstats.vol_meter.
+  sql_expression: "((CAST(md.orderbook_metrics->>'best_ask' AS DOUBLE) - CAST(md.orderbook_metrics->>'best_bid'\
+    \ AS DOUBLE))\n / NULLIF(CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE), 0) * 100)\n/ NULLIF(TRY_CAST(ms.vol_meter\
+    \ AS DOUBLE) * 0.1, 0)\n"
+  source_model: main.marketdata
+  from_sql: main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT"
+  grain: one row per (market, marketstats snapshot)
+  domains:
+  - market_microstructure
+- name: risk_to_reward_ratio
+  description: '|entry - (Long ? stop price : advanced trigger price)| / |entry - (Long ? advanced trigger
+    price : stop price)|. Entry price = order_attributes.limit_price; stop price = margin_risk_profile.stop_loss_price;
+    advanced trigger price = stop_trigger_price. NULL position_side -> NULL.
+
+    '
+  sql_expression: "ABS(CAST(o.order_attributes->>'limit_price' AS DOUBLE) - CASE (rm.margin_risk_profile->>'position_side')\n\
+    \      WHEN 'Long' THEN CAST(rm.margin_risk_profile->>'stop_loss_price' AS DOUBLE)\n      WHEN 'Short'\
+    \ THEN CAST(rm.margin_risk_profile->>'stop_trigger_price' AS DOUBLE) END)\n/ NULLIF(ABS(CAST(o.order_attributes->>'limit_price'\
+    \ AS DOUBLE) - CASE (rm.margin_risk_profile->>'position_side')\n      WHEN 'Long' THEN CAST(rm.margin_risk_profile->>'stop_trigger_price'\
+    \ AS DOUBLE)\n      WHEN 'Short' THEN CAST(rm.margin_risk_profile->>'stop_loss_price' AS DOUBLE) END),\
+    \ 0)\n"
+  source_model: main.riskandmargin
+  from_sql: main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp"
+  grain: one row per position
+  domains:
+  - position_risk
+- name: technical_signal_strength
+  description: '(|rsi_14 - 50| + |macd_hist| + bollinger_width_pct * 0.01) / 3 * (signal ''Buy'' -> 1,
+    ''Sell'' -> -1, ''Hold'' -> 0).
+
+    '
+  sql_expression: "(ABS(CAST(ai.indicator_bundle->>'$.technical.rsi_14' AS DOUBLE) - 50)\n + ABS(CAST(ai.indicator_bundle->>'$.technical.macd_hist'\
+    \ AS DOUBLE))\n + CAST(ai.indicator_bundle->>'$.technical.bollinger_width_pct' AS DOUBLE) * 0.01)\
+    \ / 3\n* CASE (ai.indicator_bundle->>'$.sentiment.signal') WHEN 'Buy' THEN 1 WHEN 'Sell' THEN -1 ELSE\
+    \ 0 END\n"
+  source_model: main.analyticsindicators
+  from_sql: main.analyticsindicators ai
+  grain: one row per analytics snapshot
+  domains:
+  - technical_and_flow
+- name: critically_over_leveraged_position
+  description: 'Over-Leveraged Position (leverage * volatility > 500) where additionally Effective Leverage
+    exceeds 20 and Margin Utilization exceeds 90%.
+
+    '
+  sql_expression: "CAST(rm.margin_risk_profile->>'leverage' AS DOUBLE) * TRY_CAST(ms.vol_meter AS DOUBLE)\
+    \ > 500 AND CAST(rm.margin_risk_profile->>'leverage' AS DOUBLE) * CAST(rm.margin_risk_profile->>'position_notional'\
+    \ AS DOUBLE)\n    / NULLIF(CAST(regexp_replace(ab.\"walletSum\", '[$, ]', '', 'g') AS DOUBLE), 0)\
+    \ > 20\nAND CAST(rm.margin_risk_profile->>'initial_margin_pct' AS DOUBLE) / NULLIF(ab.marg_sum, 0)\
+    \ * 100 > 90\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketstats
+    ms ON ms.md_link = o."exchSpot" JOIN main.accountbalances ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, marketstats snapshot, balance record)
+  domains:
+  - position_risk
+- name: high_quality_arbitrage_opportunity
+  description: 'An Arbitrage Window (APS > 0.05) where Arbitrage ROI exceeds 0.5% (0.005) and Market Efficiency
+    Ratio is below 1.2.
+
+    '
+  sql_expression: "(CAST(ai.indicator_bundle->>'$.cross_venue.arbitrage_pct' AS DOUBLE)\n + CAST(ai.indicator_bundle->>'$.cross_venue.cross_exchange_spread_pct'\
+    \ AS DOUBLE)\n + CAST(ai.indicator_bundle->>'$.cross_venue.funding_gap_pct' AS DOUBLE) * 2\n + CAST(ai.indicator_bundle->>'$.cross_venue.basis_gap_pct'\
+    \ AS DOUBLE)) > 0.05\nAND (CAST(ai.indicator_bundle->>'$.cross_venue.arbitrage_pct' AS DOUBLE)\n +\
+    \ CAST(ai.indicator_bundle->>'$.cross_venue.cross_exchange_spread_pct' AS DOUBLE)\n + CAST(ai.indicator_bundle->>'$.cross_venue.funding_gap_pct'\
+    \ AS DOUBLE) * 2\n + CAST(ai.indicator_bundle->>'$.cross_venue.basis_gap_pct' AS DOUBLE))\n * CAST(o.order_attributes->>'limit_price'\
+    \ AS DOUBLE)\n / NULLIF(CAST(regexp_replace(f.\"FEE_TOTAL\", '[$, ]', '', 'g') AS DOUBLE) * 2, 0)\
+    \ > 0.005\nAND (CAST(o.order_attributes->>'quantity' AS DOUBLE)\n / NULLIF(CASE WHEN (o.order_attributes->>'side')\
+    \ = 'Buy'\n               THEN CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE)\n               ELSE\
+    \ CAST(md.orderbook_metrics->>'bid_size' AS DOUBLE) END, 0)\n * CAST(md.orderbook_metrics->>'spread_abs'\
+    \ AS DOUBLE))\n / NULLIF((SELECT AVG(\"SLIP_ratio\") FROM main.systemmonitoring), 0) < 1.2\n"
+  source_model: main.orders
+  from_sql: 'main.orders o JOIN main.marketdata md ON md."EXCH_SPOT" = o."exchSpot" JOIN main.analyticsindicators
+    ai ON ai.md_ref = o."exchSpot" JOIN main.fees f ON f."Order_Link" = o."ORD_STAMP"
+
+    '
+  grain: one row per (order, analytics snapshot, fee record)
+  domains:
+  - arbitrage
+- name: technical_reversal_signal
+  description: Technical Signal Strength exceeds 8 in absolute value while Momentum Divergence is present.
+  sql_expression: "ABS((ABS(CAST(ai.indicator_bundle->>'$.technical.rsi_14' AS DOUBLE) - 50)\n + ABS(CAST(ai.indicator_bundle->>'$.technical.macd_hist'\
+    \ AS DOUBLE))\n + CAST(ai.indicator_bundle->>'$.technical.bollinger_width_pct' AS DOUBLE) * 0.01)\
+    \ / 3\n* CASE (ai.indicator_bundle->>'$.sentiment.signal') WHEN 'Buy' THEN 1 WHEN 'Sell' THEN -1 ELSE\
+    \ 0 END) > 8 AND ((CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) > ms.\"HIGH_SPOT_DAY\"\n   \
+    \   AND CAST(ai.indicator_bundle->>'$.order_flow.buy_pressure' AS DOUBLE) < CAST(ai.indicator_bundle->>'$.order_flow.sell_pressure'\
+    \ AS DOUBLE))\n  OR (CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) < ms.low_spot_day\n      AND\
+    \ CAST(ai.indicator_bundle->>'$.order_flow.buy_pressure' AS DOUBLE) > CAST(ai.indicator_bundle->>'$.order_flow.sell_pressure'\
+    \ AS DOUBLE)))\n"
+  source_model: main.marketdata
+  from_sql: 'main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT" JOIN main.analyticsindicators
+    ai ON ai.md_ref = md."EXCH_SPOT"
+
+    '
+  grain: one row per (market, marketstats snapshot, analytics snapshot)
+  domains:
+  - technical_and_flow
+- name: optimal_trading_window
+  description: 'Volatility-Adjusted Spread below 1.0 and Market Maker Activity ''High'' (predominantly
+    Maker executions and market_maker_note ''High''). Aggregate: evaluate with GROUP BY ms."MKT_STATS_MARK",
+    ai."ANALYTICS_NODE".
+
+    '
+  sql_expression: "MAX(((CAST(md.orderbook_metrics->>'best_ask' AS DOUBLE) - CAST(md.orderbook_metrics->>'best_bid'\
+    \ AS DOUBLE))\n     / NULLIF(CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE), 0) * 100)\n    /\
+    \ NULLIF(TRY_CAST(ms.vol_meter AS DOUBLE) * 0.1, 0)) < 1.0\nAND COUNT(*) FILTER (WHERE oe.\"EXECtune\"\
+    \ = 'Maker') > COUNT(*) FILTER (WHERE oe.\"EXECtune\" = 'Taker') AND MAX((ai.indicator_bundle->>'$.participant_flow.market_maker_note'))\
+    \ = 'High'\n"
+  source_model: main.marketdata
+  from_sql: 'main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT" JOIN main.analyticsindicators
+    ai ON ai.md_ref = md."EXCH_SPOT" JOIN main.orders o ON o."exchSpot" = md."EXCH_SPOT" JOIN main."orderExecutions"
+    oe ON oe."Ord_Link" = o."ORD_STAMP"
+
+    '
+  grain: one row per (stats snapshot, analytics snapshot, execution); group by ms."MKT_STATS_MARK", ai."ANALYTICS_NODE"
+  domains:
+  - market_microstructure
+- name: risk_efficient_position
+  description: Risk-Adjusted Return exceeds 1.5 and Risk-to-Reward Ratio is less than 0.5.
+  sql_expression: "ab.\"REAL_LINE\" / NULLIF(CAST(rm.margin_risk_profile->>'position_notional' AS DOUBLE)\
+    \ * TRY_CAST(ms.vol_meter AS DOUBLE) * 0.01\n  * CAST(rm.margin_risk_profile->>'position_risk_pct'\
+    \ AS DOUBLE), 0) > 1.5\nAND ABS(CAST(o.order_attributes->>'limit_price' AS DOUBLE) - CASE (rm.margin_risk_profile->>'position_side')\n\
+    \      WHEN 'Long' THEN CAST(rm.margin_risk_profile->>'stop_loss_price' AS DOUBLE)\n      WHEN 'Short'\
+    \ THEN CAST(rm.margin_risk_profile->>'stop_trigger_price' AS DOUBLE) END)\n/ NULLIF(ABS(CAST(o.order_attributes->>'limit_price'\
+    \ AS DOUBLE) - CASE (rm.margin_risk_profile->>'position_side')\n      WHEN 'Long' THEN CAST(rm.margin_risk_profile->>'stop_trigger_price'\
+    \ AS DOUBLE)\n      WHEN 'Short' THEN CAST(rm.margin_risk_profile->>'stop_loss_price' AS DOUBLE) END),\
+    \ 0) < 0.5\n"
+  source_model: main.riskandmargin
+  from_sql: 'main.riskandmargin rm JOIN main.orders o ON o."ORD_STAMP" = rm."ordStamp" JOIN main.marketstats
+    ms ON ms.md_link = o."exchSpot" JOIN main.accountbalances ab ON ab."userTAG" = o."UserRef"
+
+    '
+  grain: one row per (position, marketstats snapshot, balance record)
+  domains:
+  - position_risk
+- name: whale_driven_market
+  description: 'whale_activity ''High'' and at least one Whale Order in the same direction as the Smart
+    Money Flow (Smart Money Flow must hold; direction ''Buy'' if smart_money > 0, ''Sell'' if < 0). Aggregate:
+    GROUP BY ai."ANALYTICS_NODE". 34 analytics snapshots qualify.
+
+    '
+  sql_expression: "MAX((ai.indicator_bundle->>'$.participant_flow.whale_activity')) = 'High' AND bool_or(CAST(ai.indicator_bundle->>'$.participant_flow.smart_money'\
+    \ AS DOUBLE) >= 1.2 * CAST(ai.indicator_bundle->>'$.participant_flow.retail_flow' AS DOUBLE)\n   \
+    \         AND CAST(ai.indicator_bundle->>'$.participant_flow.smart_money' AS DOUBLE) >= 1.2 * CAST(ai.indicator_bundle->>'$.participant_flow.institutional_flow'\
+    \ AS DOUBLE))\nAND bool_or(CAST(o.order_attributes->>'quantity' AS DOUBLE) > 0.1 * CASE WHEN (o.order_attributes->>'side')\
+    \ = 'Buy'\n              THEN CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE) ELSE CAST(md.orderbook_metrics->>'bid_size'\
+    \ AS DOUBLE) END\n            AND (o.order_attributes->>'side') = CASE WHEN CAST(ai.indicator_bundle->>'$.participant_flow.smart_money'\
+    \ AS DOUBLE) > 0 THEN 'Buy'\n              WHEN CAST(ai.indicator_bundle->>'$.participant_flow.smart_money'\
+    \ AS DOUBLE) < 0 THEN 'Sell' END)\n"
+  source_model: main.analyticsindicators
+  from_sql: 'main.analyticsindicators ai JOIN main.orders o ON o."exchSpot" = ai.md_ref JOIN main.marketdata
+    md ON md."EXCH_SPOT" = ai.md_ref
+
+    '
+  grain: one row per (analytics snapshot, order on that market); group by ai."ANALYTICS_NODE"
+  domains:
+  - technical_and_flow
+  - market_microstructure
+- name: liquidation_cascade_risk
+  description: 'More than 15% of open positions on the market are Liquidation Risk Level ''High Risk''
+    and |Order Book Imbalance Ratio| exceeds 0.3. Open positions = riskandmargin rows whose order is on
+    the market. Aggregate: GROUP BY md."EXCH_SPOT".
+
+    '
+  sql_expression: "1.0 * COUNT(*) FILTER (WHERE CAST(regexp_replace((rm.margin_risk_profile->>'liquidation_price'),\
+    \ '[$, ]', '', 'g') AS DOUBLE)\n                          >= CAST(md.orderbook_metrics->>'mark_price'\
+    \ AS DOUBLE) * 0.95) / NULLIF(COUNT(*), 0) > 0.15\nAND ABS(MAX((CAST(md.orderbook_metrics->>'bid_depth'\
+    \ AS DOUBLE) - CAST(md.orderbook_metrics->>'ask_depth' AS DOUBLE))\n        / NULLIF(CAST(md.orderbook_metrics->>'bid_depth'\
+    \ AS DOUBLE) + CAST(md.orderbook_metrics->>'ask_depth' AS DOUBLE), 0))) > 0.3\n"
+  source_model: main.marketdata
+  from_sql: 'main.marketdata md JOIN main.orders o ON o."exchSpot" = md."EXCH_SPOT" JOIN main.riskandmargin
+    rm ON rm."ordStamp" = o."ORD_STAMP"
+
+    '
+  grain: one row per (market, position); group by md."EXCH_SPOT"
+  domains:
+  - position_risk
+- name: perfect_technical_setup
+  description: 'Technical Signal Strength exceeds 7, the technical meter direction matches market sentiment
+    (Buy-Bullish, Sell-Bearish, Hold-Neutral), and no Momentum Divergence is present.
+
+    '
+  sql_expression: "(ABS(CAST(ai.indicator_bundle->>'$.technical.rsi_14' AS DOUBLE) - 50)\n + ABS(CAST(ai.indicator_bundle->>'$.technical.macd_hist'\
+    \ AS DOUBLE))\n + CAST(ai.indicator_bundle->>'$.technical.bollinger_width_pct' AS DOUBLE) * 0.01)\
+    \ / 3\n* CASE (ai.indicator_bundle->>'$.sentiment.signal') WHEN 'Buy' THEN 1 WHEN 'Sell' THEN -1 ELSE\
+    \ 0 END > 7 AND (((ai.indicator_bundle->>'$.sentiment.signal') = 'Buy' AND (ai.indicator_bundle->>'$.sentiment.market_sentiment')\
+    \ = 'Bullish')\n  OR ((ai.indicator_bundle->>'$.sentiment.signal') = 'Sell' AND (ai.indicator_bundle->>'$.sentiment.market_sentiment')\
+    \ = 'Bearish')\n  OR ((ai.indicator_bundle->>'$.sentiment.signal') = 'Hold' AND (ai.indicator_bundle->>'$.sentiment.market_sentiment')\
+    \ = 'Neutral'))\nAND NOT COALESCE((CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) > ms.\"HIGH_SPOT_DAY\"\
+    \n      AND CAST(ai.indicator_bundle->>'$.order_flow.buy_pressure' AS DOUBLE) < CAST(ai.indicator_bundle->>'$.order_flow.sell_pressure'\
+    \ AS DOUBLE))\n  OR (CAST(md.orderbook_metrics->>'mid_price' AS DOUBLE) < ms.low_spot_day\n      AND\
+    \ CAST(ai.indicator_bundle->>'$.order_flow.buy_pressure' AS DOUBLE) > CAST(ai.indicator_bundle->>'$.order_flow.sell_pressure'\
+    \ AS DOUBLE)), FALSE)\n"
+  source_model: main.marketdata
+  from_sql: 'main.marketdata md JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT" JOIN main.analyticsindicators
+    ai ON ai.md_ref = md."EXCH_SPOT"
+
+    '
+  grain: one row per (market, marketstats snapshot, analytics snapshot)
+  domains:
+  - technical_and_flow
+- name: flash_crash_vulnerability
+  description: 'Liquidation Cascade Risk present, more than 30% of positions are Over-Leveraged Positions,
+    and a Liquidity Crisis (Liquidity Ratio < 0.01). Aggregate: GROUP BY md."EXCH_SPOT", ms."MKT_STATS_MARK".
+
+    '
+  sql_expression: "1.0 * COUNT(*) FILTER (WHERE CAST(regexp_replace((rm.margin_risk_profile->>'liquidation_price'),\
+    \ '[$, ]', '', 'g') AS DOUBLE)\n                          >= CAST(md.orderbook_metrics->>'mark_price'\
+    \ AS DOUBLE) * 0.95) / NULLIF(COUNT(*), 0) > 0.15\nAND ABS(MAX((CAST(md.orderbook_metrics->>'bid_depth'\
+    \ AS DOUBLE) - CAST(md.orderbook_metrics->>'ask_depth' AS DOUBLE))\n        / NULLIF(CAST(md.orderbook_metrics->>'bid_depth'\
+    \ AS DOUBLE) + CAST(md.orderbook_metrics->>'ask_depth' AS DOUBLE), 0))) > 0.3\nAND 1.0 * COUNT(*)\
+    \ FILTER (WHERE CAST(rm.margin_risk_profile->>'leverage' AS DOUBLE) * TRY_CAST(ms.vol_meter AS DOUBLE)\
+    \ > 500) / NULLIF(COUNT(*), 0) > 0.3 AND MAX((CAST(md.orderbook_metrics->>'bid_size' AS DOUBLE) +\
+    \ CAST(md.orderbook_metrics->>'ask_size' AS DOUBLE))\n        * CAST(md.orderbook_metrics->>'mid_price'\
+    \ AS DOUBLE) / NULLIF(ms.\"VOLday\", 0)) < 0.01\n"
+  source_model: main.marketdata
+  from_sql: 'main.marketdata md JOIN main.orders o ON o."exchSpot" = md."EXCH_SPOT" JOIN main.riskandmargin
+    rm ON rm."ordStamp" = o."ORD_STAMP" JOIN main.marketstats ms ON ms.md_link = md."EXCH_SPOT"
+
+    '
+  grain: one row per (market, position, marketstats snapshot); group by md."EXCH_SPOT", ms."MKT_STATS_MARK"
+  domains:
+  - position_risk
+  - market_microstructure
+- name: flow_dominance
+  description: '''Smart Money Dominant'' when smart_money > retail_flow * 1.2 and > institutional_flow
+    * 1.2; ''Retail Dominant'' when retail_flow > smart_money * 1.2 and > institutional_flow * 1.2; ''Institutional
+    Dominant'' when institutional_flow > smart_money * 1.2 and > retail_flow * 1.2; otherwise ''Mixed''
+    (including NULL retail_flow).
+
+    '
+  sql_expression: "CASE\n  WHEN CAST(ai.indicator_bundle->>'$.participant_flow.smart_money' AS DOUBLE)\
+    \ > CAST(ai.indicator_bundle->>'$.participant_flow.retail_flow' AS DOUBLE) * 1.2\n   AND CAST(ai.indicator_bundle->>'$.participant_flow.smart_money'\
+    \ AS DOUBLE) > CAST(ai.indicator_bundle->>'$.participant_flow.institutional_flow' AS DOUBLE) * 1.2\
+    \ THEN 'Smart Money Dominant'\n  WHEN CAST(ai.indicator_bundle->>'$.participant_flow.retail_flow'\
+    \ AS DOUBLE) > CAST(ai.indicator_bundle->>'$.participant_flow.smart_money' AS DOUBLE) * 1.2\n   AND\
+    \ CAST(ai.indicator_bundle->>'$.participant_flow.retail_flow' AS DOUBLE) > CAST(ai.indicator_bundle->>'$.participant_flow.institutional_flow'\
+    \ AS DOUBLE) * 1.2 THEN 'Retail Dominant'\n  WHEN CAST(ai.indicator_bundle->>'$.participant_flow.institutional_flow'\
+    \ AS DOUBLE) > CAST(ai.indicator_bundle->>'$.participant_flow.smart_money' AS DOUBLE) * 1.2\n   AND\
+    \ CAST(ai.indicator_bundle->>'$.participant_flow.institutional_flow' AS DOUBLE) > CAST(ai.indicator_bundle->>'$.participant_flow.retail_flow'\
+    \ AS DOUBLE) * 1.2 THEN 'Institutional Dominant'\n  ELSE 'Mixed' END\n"
+  source_model: main.analyticsindicators
+  from_sql: main.analyticsindicators ai
+  grain: one row per analytics snapshot
+  domains:
+  - technical_and_flow
+tables:
+- schema: main
+  table: orders
+  columns:
+  - name: ORD_STAMP
+    description: Unique order identifier (PK), e.g. OR6015391.
+  - name: TimeCode
+    description: Order submission timestamp (all 2025-02-19).
+  - name: exchSpot
+    description: Market key, e.g. EX203; joins marketdata.EXCH_SPOT, marketstats.md_link, analyticsindicators.md_ref.
+  - name: market_note
+    description: Trading pair, e.g. ETH-USDT.
+  - name: UserRef
+    description: User who placed the order; FK to users.USERSTAMP and joins accountbalances.userTAG.
+  - name: created_at
+    description: Record-creation timestamp.
+  - name: UPDATED_AT
+    description: Last update timestamp.
+  - name: order_attributes
+    description: 'JSON: type (Limit, Market, Stop, StopLimit); side (dealedge: ''Buy'' = purchase base
+      asset with quote asset, e.g. buying BTC with USDT; ''Sell'' = sell base asset for quote asset);
+      limit_price (DOUBLE, the order''s limit/stop price, used as entry price); quantity (DOUBLE, order
+      quantity); notional_value (money string ''$81,019.90 '', NULL = not recorded); status (orderflow:
+      ''New'' newly placed not matched, ''PartiallyFilled'' some but not all executed, ''Cancelled'' cancelled
+      before full execution, ''Filled'' completely executed); time_in_force (timespan: IOC execute available
+      portion immediately or cancel; GTC active until explicitly cancelled; GTD active until a specified
+      date; FOK execute completely immediately or cancel entirely; NULL = not specified); source (API,
+      Bot, Mobile, Web); client_order_id. Extract with (o.order_attributes->>''side''), CAST(o.order_attributes->>''quantity''
+      AS DOUBLE).
+
+      '
+- schema: main
+  table: marketdata
+  columns:
+  - name: EXCH_SPOT
+    description: Market key (PK), one row per market (605).
+  - name: TimeTrack
+    description: Snapshot timestamp (all 2025-02-19 00:00).
+  - name: exchNote
+    description: Exchange commentary (equals the market key in the data).
+  - name: mktCombo
+    description: Instrument pair, e.g. ETH-USDT.
+  - name: orderbook_metrics
+    description: 'JSON order-book snapshot: best_bid, best_ask, bid_size (quantity at best bid), ask_size
+      (quantity at best ask), bid_depth / ask_depth (deeper aggregate liquidity), spread_abs (raw spread
+      = best_ask - best_bid), spread_pct (text ''11.99%'', NULL in 65 rows; not the documented Spread
+      Percentage - use metric spread_percentage), mid_price (midpoint), mark_price (market price), index_price
+      (money string). Numbers are cast with CAST(md.orderbook_metrics->>''k'' AS DOUBLE).
+
+      '
+- schema: main
+  table: users
+  columns:
+  - name: USERSTAMP
+    description: Unique user identifier (PK).
+  - name: acctScope
+    description: 'Account scope: Futures, Margin, Options, Spot; NULL = not specified.'
+- schema: main
+  table: orderExecutions
+  columns:
+  - name: RecordVault
+    description: Execution record identifier (PK).
+  - name: ExecMARK
+    description: Auto-increment execution index.
+  - name: FillAmt
+    description: Executed fill amount.
+  - name: remain_amt
+    description: Remaining (unfilled) amount; NULL = not recorded. Used by order_fill_rate.
+  - name: fillQuote
+    description: Execution price quote.
+  - name: FILL_SUM
+    description: Cumulative fill value.
+  - name: expireSpot
+    description: Expiration timestamp of the execution record.
+  - name: CancelNote
+    description: 'Cancellation reason: Expired, InsufficientFunds, UserRequested; NULL = no cancellation
+      note.'
+  - name: EXECtune
+    description: 'exectune: ''Maker'' = added liquidity to the book by not matching immediately; ''Taker''
+      = removed liquidity by matching existing orders immediately on placement. NULL = not specified.'
+  - name: Ord_Link
+    description: Parent order; FK to orders.ORD_STAMP.
+- schema: main
+  table: fees
+  columns:
+  - name: fee_range
+    description: 'Fee tier: Tier1-Tier4; NULL = not provided.'
+  - name: FeeRate
+    description: Applied fee rate as a fraction (0.001 = 0.1 %).
+  - name: FEE_TOTAL
+    description: Total fee charged as a money string ('$26.60 '); parse with CAST(regexp_replace("FEE_TOTAL",
+      '[$, ]', '', 'g') AS DOUBLE) - see metric total_fee_charged.
+  - name: FeeCoin
+    description: 'Fee currency: USD, USDC, USDT; NULL = not specified.'
+  - name: rebRate
+    description: Rebate rate as percent text ('0.09%').
+  - name: REB_TOTAL
+    description: Total rebate amount as numeric text.
+  - name: Order_Link
+    description: Order; FK to orders.ORD_STAMP (1000 fee rows for 970 orders).
+- schema: main
+  table: marketstats
+  columns:
+  - name: MKT_STATS_MARK
+    description: Market-statistics identifier (PK).
+  - name: fundRate
+    description: Funding rate for perpetual swaps.
+  - name: FundSpot
+    description: Funding-rate timestamp.
+  - name: openStake
+    description: Open interest.
+  - name: VOLday
+    description: Trading volume of the day (the 24h volume in Liquidity Ratio).
+  - name: TRADE_DAY
+    description: Trading-day counter; NULL = not recorded.
+  - name: turnoverDay
+    description: Turnover for the day.
+  - name: priceShiftDay
+    description: Price shift over the day as percent text ('7.96%'); NULL = not recorded.
+  - name: HIGH_SPOT_DAY
+    description: Day's high price.
+  - name: low_spot_day
+    description: Day's low price.
+  - name: VwapDay
+    description: Volume-weighted average price of the day.
+  - name: mktSIZE
+    description: Market capitalisation.
+  - name: Circ_Total
+    description: Circulating supply.
+  - name: TOTAL_SUPPLY
+    description: Total supply; NULL = not available.
+  - name: MAXsupPLY
+    description: Maximum supply as text ('188,391,541 tokens').
+  - name: MktHold
+    description: Market value held by top addresses.
+  - name: tradeRank
+    description: Trading-volume rank across markets.
+  - name: LIQUIDscore
+    description: Liquidity score indicator.
+  - name: vol_meter
+    description: Volatility rating / volatility measure used by PVaR, Over-Leveraged and Volatility-Adjusted
+      Spread. Text holding a number (0.24-99.98); NULL in 100 rows = not set. Use TRY_CAST(vol_meter AS
+      DOUBLE).
+  - name: md_link
+    description: Market key; FK to marketdata.EXCH_SPOT (several stats rows per market).
+- schema: main
+  table: analyticsindicators
+  columns:
+  - name: ANALYTICS_NODE
+    description: Analytics indicator identifier (PK).
+  - name: md_ref
+    description: Market key; FK to marketdata.EXCH_SPOT (several rows per market).
+  - name: indicator_bundle
+    description: 'JSON. order_flow: buy_wall_pct, sell_wall_pct, buy_pressure (aggregate buy-side force),
+      sell_pressure, order_flow_imbalance, trade_flow_imbalance (NULL = not computed), large_order_ratio.
+      technical: rsi_14, macd_hist (MACD line), bollinger_width_pct. sentiment: market_sentiment (mktfeel:
+      ''Bearish'' negative, expecting price decreases; ''Bullish'' positive, expecting increases; ''Neutral''
+      balanced, no strong bias); signal (techmeter / technical meter: ''Buy'' indicators suggest buying;
+      ''Sell'' suggest selling; ''Hold'' maintain positions without new trades). participant_flow: smart_money,
+      retail_flow (NULL in 286 rows = not measured), institutional_flow, whale_activity (whalemotion:
+      ''Low'' minimal, ''Medium'' moderate, ''High'' significant large-trader activity potentially signalling
+      important moves; NULL = not assessed), market_maker_note (makermotion: ''Low'' minimal market-maker
+      activity with potentially wider spreads, ''Medium'' normal, ''High'' substantial, typically tighter
+      spreads and higher liquidity). cross_venue: arbitrage_pct, cross_exchange_spread_pct (NULL = not
+      computed), funding_gap_pct, basis_gap_pct. Paths: ai.indicator_bundle->>''$.participant_flow.smart_money''.
+
+      '
+- schema: main
+  table: riskandmargin
+  columns:
+  - name: MARG_FORM
+    description: 'Margin form (PK): Cross or Isolated. Only 2 rows (positions).'
+  - name: ordStamp
+    description: Order of the position; FK to orders.ORD_STAMP.
+  - name: margin_risk_profile
+    description: 'JSON. leverage (string number, the position leverage); leverage_multiplier (posmagn:
+      ''1'',''2'',''3'',''5'',''10'',''20'',''50'',''100'' leverage multipliers; ''10'' = 10x, amplifying
+      profits and losses tenfold); initial_margin_pct (initial margin required, an amount); maintenance_margin_pct;
+      liquidation_price (money string, NULL = not set); stop_loss_price (stop price); stop_trigger_price
+      (advanced trigger price); trailing_delta; iceberg_qty; visible_qty; liquidation_risk, counterparty_risk,
+      settlement_risk, custody_risk, network_risk, regulatory_risk (string numbers); position_size; position_notional
+      (notional value of position); position_side (posedge: ''Long'' profits from price increases, ''Short''
+      profits from decreases; NULL = not defined); position_risk_pct (position risk ratio); margin_ratio_pct
+      (percent text); margin_call_price; bankruptcy_price; collateral_ratio_pct (percent text); collateral_amount
+      (''750,485.81 USDT'' text); collateral_currency (BTC, ETH, USDC, USDT); insurance_fund_share (money
+      string).
+
+      '
+- schema: main
+  table: accountbalances
+  columns:
+  - name: ACCTBAL_NODE
+    description: Balance record identifier (PK).
+  - name: walletSum
+    description: Total wallet balance as a money string ('$316,482.99 '); parse with regexp_replace(walletSum,
+      '[$, ]', '', 'g').
+  - name: AVAIL_SUM
+    description: Available balance.
+  - name: frozenSum
+    description: Frozen balance.
+  - name: marg_sum
+    description: Margin account balance (margin allocated).
+  - name: unrealLINE
+    description: Unrealised P/L.
+  - name: REAL_LINE
+    description: Realised P/L (realized PnL).
+  - name: userTAG
+    description: User; FK to users.USERSTAMP (about 5 balance records per user).
+- schema: main
+  table: systemmonitoring
+  columns:
+  - name: SYS_MON_PIVOT
+    description: Monitoring record identifier (PK).
+  - name: APIRQTotal
+    description: Total API requests; NULL = not recorded.
+  - name: apiErrTOTAL
+    description: Total API errors.
+  - name: ApiLatMark
+    description: API latency in ms; NULL = not measured.
+  - name: WS_STATE
+    description: 'WebSocket state: Connected, Disconnected.'
+  - name: RateRemain
+    description: Remaining rate-limit quota.
+  - name: lastUpdNote
+    description: Last system update note.
+  - name: SeqCode
+    description: Deployment sequence code; NULL = not set.
+  - name: SLIP_ratio
+    description: Slippage ratio; AVG over the table is the average slippage measure in Market Efficiency
+      Ratio.
+  - name: ExecTimeSpan
+    description: Execution time span; NULL = not captured.
+  - name: queue_LINE
+    description: Queue length.
+  - name: mktEffect
+    description: Market-impact metric.
+  - name: Price_Effect
+    description: Price-impact metric.
+- schema: main
+  table: Exchange_OrderType_Map
+  columns:
+  - name: exchSpot
+    description: Market key (PK part).
+  - name: ORDERtune
+    description: Order type supported on the market (PK part).

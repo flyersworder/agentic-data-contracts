@@ -1,0 +1,133 @@
+[
+  {
+    "id": 50,
+    "knowledge": "Settlement Capacity Band",
+    "description": "Groups a plant by its installed capacity for module warranty settlement.",
+    "definition": "Taken from the installed capacity plants.cap_mw (in MW) of the plant a snapshot belongs to (plant_record.sitetie = plants.sitekey): 'Small' if cap_mw < 100; 'Mid' if 100 <= cap_mw < 300; 'Large' if cap_mw >= 300. Lower bounds are inclusive and upper bounds exclusive, so exactly 100 MW is 'Mid' and exactly 300 MW is 'Large'.",
+    "type": "domain_knowledge",
+    "children_knowledge": -1,
+    "piece": "R"
+  },
+  {
+    "id": 51,
+    "knowledge": "Manufacturer Monthly Claim Volume",
+    "description": "Counts the performance snapshots of one panel manufacturer in one calendar month, the manufacturer's warranty claim volume for that month.",
+    "definition": "A snapshot's manufacturer group is panel_models.makertag of the panel model recorded on its plant (plant_record.sitetie = plants.sitekey, plants.modhook = panel_models.modkey; the plant_panel_model table is not used); a snapshot whose model has a NULL makertag is in the group 'Unlisted'. Its calendar month is the year and month of plant_record.snapts. For a snapshot s: $V_{s} = $ the number of rows of plant_record with the same calendar month and the same manufacturer group as s, s itself included, so $V_{s} \\geq 1$.",
+    "type": "calculation_knowledge",
+    "children_knowledge": -1,
+    "piece": "R"
+  },
+  {
+    "id": 52,
+    "knowledge": "Claim Volume Tier",
+    "description": "Classifies a snapshot by its panel manufacturer's claim volume in that calendar month.",
+    "definition": "From the Manufacturer Monthly Claim Volume $V_{s}$: 'Single' if $V_{s} = 1$; 'Moderate' if $V_{s}$ is 2 or 3; 'Bulk' if $V_{s} \\geq 4$. All snapshots of one manufacturer group in one calendar month share a tier.",
+    "type": "domain_knowledge",
+    "children_knowledge": [
+      51
+    ],
+    "piece": "R"
+  },
+  {
+    "id": 53,
+    "knowledge": "Warranty Settlement Rule Match",
+    "description": "Determines which rule of the module warranty settlement schedule governs a performance snapshot.",
+    "definition": "Each row of warranty_settle_rules is a rule with six criteria. A snapshot satisfies a criterion when the criterion is NULL (it matches any value, including a missing one) or equals the snapshot's value exactly: maker_tag against panel_models.makertag and pnl_kind against panel_models.pnlkind (both through plants.modhook); alrt_state against alert.alrtstate (alert.snapalrt = plant_record.snapkey); warr_state against plants.warrstate; cap_band against the Settlement Capacity Band; vol_tier against the Claim Volume Tier. A non-NULL criterion is never satisfied by a NULL snapshot value, so an 'Unlisted' snapshot, or one with no alert or warranty state, satisfies only a NULL criterion there. A rule matches when all six criteria are satisfied. A rule's specificity is its number of non-NULL criteria (0 to 6). Of the matching rules, the one with the highest specificity governs; a tie goes to the lowest rule_id. A snapshot matching no rule has no governing rule and is settled on the Standard Settlement Terms.",
+    "type": "domain_knowledge",
+    "children_knowledge": [
+      50,
+      52
+    ],
+    "piece": "R"
+  },
+  {
+    "id": 54,
+    "knowledge": "Standard Settlement Terms",
+    "description": "Illustrates the fallback terms for a snapshot that matches no warranty settlement rule.",
+    "definition": "A fixed handling fee of 300.00 USD and a coverage percentage of 5.00%, used in place of fixed_fee_usd and cover_pct when a snapshot has no governing rule; its rule is reported as none (NULL).",
+    "type": "value_illustration",
+    "children_knowledge": -1,
+    "piece": "R"
+  },
+  {
+    "id": 55,
+    "knowledge": "Warranty Settlement Amount",
+    "description": "Calculates the amount a panel manufacturer settles for one performance snapshot.",
+    "definition": "$S = F + \\frac{c}{100} \\times C_{repl}$, where $F$ is fixed_fee_usd and $c$ is cover_pct of the snapshot's governing rule (the Standard Settlement Terms when it has none), and $C_{repl}$ is the component replacement cost operational_metrics.replcost (operational_metrics.snapops = plant_record.snapkey) in USD, NULL counting as 0. S is in USD and is not rounded per snapshot. Every row of plant_record is settled. A total over several snapshots, such as a manufacturer's monthly settlement (by manufacturer group, 'Unlisted' included, and calendar month of snapts), is the sum of the unrounded per-snapshot amounts; round only the reported result, to 2 decimal places.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [
+      53,
+      54
+    ],
+    "piece": "R"
+  },
+  {
+    "id": 56,
+    "knowledge": "Potential Snapshot Yield",
+    "description": "Estimates the energy a performance snapshot would have yielded had the system been fully available and the panels perfectly clean.",
+    "definition": "$E_{pot} = \\frac{E}{(A / 100) \\times (1 - L_{soil} / 100)}$, where $E$ is energy_yield.energy_yield_kwh, $A$ is energy_yield.availability_pct and $L_{soil}$ is efficiency.soil_loss_pct, all three read from the JSON column electrical_performance.elec_perf_snapshot of the snapshot (electrical_performance.snaplink = plant_record.snapkey). Some of these JSON numbers are stored as integers, so read each as text (->>) and cast it to double precision before dividing. $E$ and $E_{pot}$ are in kWh; $A$ and $L_{soil}$ are percentages on a 0 to 100 scale. A snapshot with any of the three values NULL has no potential yield. The value is not rounded.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [
+      2
+    ],
+    "piece": "C"
+  },
+  {
+    "id": 57,
+    "knowledge": "Recoverable Energy Loss",
+    "description": "Calculates the energy a performance snapshot lost to downtime and soiling, which repair and cleaning could recover.",
+    "definition": "$E_{loss} = E_{pot} - E$, where $E_{pot}$ is the Potential Snapshot Yield and $E$ is energy_yield.energy_yield_kwh of the same snapshot, both in kWh. It is defined only where the Potential Snapshot Yield is, and is not rounded.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [
+      56
+    ],
+    "piece": "C"
+  },
+  {
+    "id": 58,
+    "knowledge": "Technology Monthly Energy Loss Ratio",
+    "description": "Measures, for one panel technology in one calendar month, the share of potential energy lost to downtime and soiling.",
+    "definition": "Snapshots are grouped by panel technology, panel_models.pnlkind of the panel model recorded on the snapshot's plant (plant_record.sitetie = plants.sitekey, plants.modhook = panel_models.modkey; the plant_panel_model table is not used), and by calendar month, the year and month of plant_record.snapts. For each group: $R = 100 \\times \\frac{\\sum E_{loss}}{\\sum E_{pot}}$, summed over the group's snapshots that have a Potential Snapshot Yield. It is a ratio of sums, not an average of per-snapshot ratios, so snapshots with more potential energy weigh more. R is a percentage, reported rounded to 2 decimal places but classified unrounded. A technology with no snapshot in a month has no ratio for that month, not zero.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [
+      56,
+      57
+    ],
+    "piece": "C"
+  },
+  {
+    "id": 59,
+    "knowledge": "Energy Loss Band",
+    "description": "Classifies a panel technology in a calendar month by its Technology Monthly Energy Loss Ratio.",
+    "definition": "Using the unrounded ratio R: 'Low' if R < 6; 'Moderate' if 6 <= R < 10; 'Elevated' if 10 <= R < 14; 'Severe' if R >= 14. Lower bounds are inclusive and upper bounds exclusive. The band belongs to the technology-month, and every snapshot in that group carries it.",
+    "type": "domain_knowledge",
+    "children_knowledge": [
+      58
+    ],
+    "piece": "C"
+  },
+  {
+    "id": 60,
+    "knowledge": "Technology Recoverable Energy",
+    "description": "Totals the energy a panel technology lost to downtime and soiling over a period.",
+    "definition": "$E_{rec} = \\sum E_{loss}$ over the snapshots of one panel technology (panel_models.pnlkind, through plants.modhook) whose plant_record.snapts falls in the period, in kWh, rounded to 2 decimal places only after summing. Over one calendar month it is the numerator of that technology's Technology Monthly Energy Loss Ratio.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [
+      57,
+      58
+    ],
+    "piece": "C"
+  },
+  {
+    "id": 61,
+    "knowledge": "Energy Loss Ratio Interpretation",
+    "description": "Illustrates what a value of the Technology Monthly Energy Loss Ratio means.",
+    "definition": "A ratio of 12% means that of every 100 kWh the technology's snapshots in that month could have yielded with full availability and clean panels, 12 kWh were lost and 88 kWh delivered. Ratios below 6% indicate a well-maintained, clean fleet; ratios of 14% or more point to systematic soiling or downtime that cleaning or repair should address.",
+    "type": "value_illustration",
+    "children_knowledge": [
+      58,
+      59
+    ],
+    "piece": "C"
+  }
+]

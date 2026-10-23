@@ -1,0 +1,154 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cross_border, author: claudeopus5.5
+version: '1.0'
+name: cross-border
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Cross-border data-transfer governance database: data flows (DataFlow, JSON flow_overview),
+      their risk records (RiskManagement, JSON risk_management_profile), data profiles, security profiles,
+      vendor management, regulatory compliance and audit records.'
+    preferred: true
+    tables:
+    - DataFlow
+    - RiskManagement
+    - DataProfile
+    - SecurityProfile
+    - VendorManagement
+    - Compliance
+    - AuditAndCompliance
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_flows
+    summary: Transfer performance, bandwidth, routing and cross-border status of a data flow
+    description: 'One DataFlow row is one data-transfer stream. Its JSON column flow_overview holds routing
+      (origin_country, destination_country, origin_actor, destination_actor, protocol, transfer_frequency),
+      classification (flow_tag, data_category, sensitivity_level, encryption_status) and performance (data_size_mb,
+      duration_min, bandwidth_util_pct, success_pct, error_count, retry_count). Read fields with json_extract_string(df.flow_overview,
+      ''$.performance.success_pct'') and CAST to DOUBLE for numbers. Checked in the data: 999 flows; 36
+      have a NULL flow_overview (all fields NULL), data_size_mb is additionally NULL in other rows (179
+      NULL in total, NULL = data size not measured), no duration_min is 0, and only 9 flows have origin
+      = destination. SUCCESS PERCENTAGE (success_pct): how often data transfers succeed, ranges 0 to 100,
+      higher means more reliable transfers. ERROR COUNT (error_count): how many errors happened during
+      data transfers; a higher value means more problems. Metrics: data_transfer_efficiency, bandwidth_saturation_index,
+      data_flow_reliability_score, data_flow_stability_index, overloaded_data_flow, cross_border_data_flow,
+      transfer_path. A Cross-Border Data Flow is one where the sending and receiving countries differ
+      (origin_country <> destination_country).
+
+      '
+    tables:
+    - main.DataFlow
+  - name: risk
+    summary: Risk assessment scores, control effectiveness, financial impact and incident statistics
+    description: 'RiskManagement has one row per data flow (flow_link = DataFlow.RecordRegistry, 870 rows,
+      1:1). Its JSON column risk_management_profile holds assessment (risk_score, residual_risk_level,
+      control_effectiveness_pct, compliance_score, maturity_level), mitigation, incident_statistics (incident_count,
+      breach_count, near_miss_count, avg_resolution_hrs, sla_compliance_pct) and financial_impact (cost_usd,
+      penalties_usd, insurance_coverage_state). RISK ASSESSMENT SCORE (risk_score): the overall risk level
+      determined in an assessment, ranges 0 to 100 (observed 0.08-99.76); higher means greater risk. CONTROL
+      EFFECTIVENESS SCORE (control_effectiveness_pct): how well controls are working to reduce risk; higher
+      means stronger controls (observed 0.07-99.92, NULL in 128 rows = not evaluated, which makes risk_exposure_score
+      NULL). Compliance cost is financial_impact.cost_usd and the potential penalty amount is financial_impact.penalties_usd.
+      Thresholds stated against the "risk score" (e.g. high-risk data flow: risk score above 0.7) are
+      applied literally to the 0-100 stored value; they are not rescaled.
+
+      '
+    tables:
+    - main.RiskManagement
+    - main.DataFlow
+  - name: data_profile
+    summary: Data volume, sensitivity, retention and integrity checks of a data batch
+    description: 'DataProfile describes the data batch of a flow (Flow_Sign -> DataFlow, riskJoin -> RiskManagement,
+      both consistent). DATA VOLUME (vol_gb): size of the data batch in gigabytes, from small amounts
+      (like 0.1) to large ones (like 1000). dataSense values: Critical, High, Low, Medium. The Data Sensitivity
+      Index weights only High (3), Medium (2) and Low (1); the documentation gives no weight for ''Critical''
+      (217 of 870 rows), so the metric gives it the base weight 1 -- stated on the metric. Int_check NULL
+      means the integrity check was not performed (not a failure). Integrity failure = Int_check = ''Failed'';
+      verification (checksum) failure = CSUMVERIFY = ''Failed''.
+
+      '
+    tables:
+    - main.DataProfile
+  - name: security
+    summary: Encryption, access control, log retention and the Security Robustness Score
+    description: 'SecurityProfile (430 rows) links to a flow (flowKey), risk record (RISKKEY) and data
+      profile (profile_key), all consistent. ENCRYPTION STATUS: whether all data is fully encrypted or
+      only partially encrypted -- options full encryption (''Full'') or partial encryption (''Partial'');
+      enc_state is NULL in 125 rows. "All data is encrypted" = enc_state = ''Full''; "only trusted users
+      can access / strong access control" = acl_state = ''Strong''. AUDIT LOG RETENTION (LogRetDays):
+      for how many days logs are kept; higher means a longer history is available. Secure Data Flow =
+      security robustness score equals 3.
+
+      '
+    tables:
+    - main.SecurityProfile
+  - name: vendors
+    summary: Vendor security rating, contract state, reliability and risk tiers
+    description: 'VendorManagement (240 rows) links to a security profile (SEC_JOIN) and a risk record
+      (riskassoc). VENDOR SECURITY RATING: a partner''s security score where higher means better protection:
+      4 for top tier, 3 for good, 2 for average, 1 for weak. Stored as letters in vendSecRate: A = 4,
+      B = 3, C = 2, D = 1 (see vendor_security_rating_value). Contract active = contrState = ''Active'';
+      Expired, Under Review and NULL (unknown, 36 rows) all count as "otherwise". Vendor Risk Tier: High
+      risk if vendor reliability index < 2, Medium if >= 2 and < 3, Low if >= 3. A Non-Compliant Vendor
+      is a partner marked ''Non-compliant'' in policy (pol_comp) or process (procComp) compliance.
+
+      '
+    tables:
+    - main.VendorManagement
+    - main.RiskManagement
+  - name: compliance_audit
+    summary: Regulatory compliance, audit findings, data-subject requests and remediation deadlines
+    description: 'Compliance (240) links to a risk record (risk_tie) and vendor (vendorTie); AuditAndCompliance
+      (240) links to a data profile (profjoin), compliance record (COMP_JOIN) and vendor (VendJoin). Every
+      chain is 1:1 and consistent (checked), so the full join DataFlow -> RiskManagement -> DataProfile
+      -> SecurityProfile -> VendorManagement -> Compliance -> AuditAndCompliance yields 240 rows, one
+      per audit record. GDPR COMPLIANCE STATUS (gdprComp): how well data-protection requirements are met
+      -- Compliant, Non-compliant or Partial. Where a definition says "compliance is non-compliant / partial"
+      without naming a regulation, the contract uses gdprComp. "Compliance with regulations is missing
+      in at least one country" (Cross-Border Compliance Gap) = any of gdprComp, CCPA_COMP, PIPLcomp, loc_law_comp
+      = ''Non-compliant''. RESPONSE TIME (resp_time_day): how many days it takes to reply to a request;
+      lower means faster, higher means delays. critFindNum NULL means no critical findings recorded and
+      is counted as 0. Remediation deadline is REMED_DUE (DATE; DATE - DATE yields integer days in DuckDB).
+      Request types: access = AccReqNum, deletion = DEL_REQ_NUM, correction = rect_req_num, data transfer/portability
+      = PORTREQNUM.
+
+      '
+    tables:
+    - main.Compliance
+    - main.AuditAndCompliance
+    - main.VendorManagement
+  rules:
+  - name: use_declared_metrics
+    description: 'Compute every documented score, index and flag with the metric of that name in semantic.yml
+      (reusing its sql_expression and from_sql); do not re-derive formulas ad hoc. Thresholds are strict
+      where the definition says above/below/greater/less (>, <) and inclusive where it says >= .
+
+      '
+    enforcement: warn
+  - name: json_numbers_cast
+    description: 'JSON fields must be read with json_extract_string(...) and CAST to DOUBLE before arithmetic;
+      ratios on integer columns must cast to DOUBLE (integer division truncates).
+
+      '
+    enforcement: warn
+  - name: null_semantics
+    description: 'NULL in a status column means "not performed / not recorded" as listed in the column
+      descriptions; it is not a failure value. critFindNum NULL is treated as 0 critical findings; a NULL
+      control_effectiveness_pct leaves risk_exposure_score NULL.
+
+      '
+    enforcement: warn

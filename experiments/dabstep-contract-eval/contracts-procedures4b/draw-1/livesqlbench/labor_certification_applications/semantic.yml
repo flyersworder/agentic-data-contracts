@@ -1,0 +1,1336 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: labor_certification_applications, author: claudeopus5.5
+metrics:
+- name: application_processing_time_days
+  description: 'APT: number of days between the date the application is received (cases.recvDay, text
+    ''YYYY/MM/DD'') and the date a decision is made (cases.decisionDAY, text ''YYYY-MM-DD''). Per case;
+    NULL when decisionDay is NULL (216 cases). Average with AVG(...) for a population.
+
+    '
+  sql_expression: strptime(c.decisionday, '%Y-%m-%d')::DATE - strptime(c.recvday, '%Y/%m/%d')::DATE
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: processing_efficiency_ratio
+  description: 'PER = Average Processing Time / Application Processing Time, per case; values above 1
+    indicate faster than average processing. The average is over all cases with a decision date in the
+    query (window over the result rows). NULL when APT is NULL or 0.
+
+    '
+  sql_expression: 'AVG(CAST(strptime(c.decisionday, ''%Y-%m-%d'')::DATE - strptime(c.recvday, ''%Y/%m/%d'')::DATE
+    AS DOUBLE)) OVER ()
+
+    / NULLIF(strptime(c.decisionday, ''%Y-%m-%d'')::DATE - strptime(c.recvday, ''%Y/%m/%d'')::DATE, 0)
+
+    '
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: approval_rate
+  description: 'AR = (Number of Certified Applications / Total Number of Applications) x 100%. Certified
+    = upper(trim(statustag)) = ''CERTIFIED'' (statustag mixes CERTIFIED/Certified/certified; Certified-Withdrawn
+    would not count). On this data all 981 cases are certified.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE upper(trim(c.statustag)) = 'CERTIFIED') / COUNT(*)
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: visa_class_distribution
+  description: 'VCD = (Number of Applications for Visa Class / Total Number of Applications) x 100%. Use
+    with GROUP BY c.visacls.
+
+    '
+  sql_expression: 100.0 * COUNT(*) / SUM(COUNT(*)) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: occupational_demand_index
+  description: 'ODI = Number of Applications for SOC Code / Average Applications per SOC Code. Use with
+    GROUP BY c.soccd; the average is over the SOC codes in the grouped result.
+
+    '
+  sql_expression: COUNT(*) / AVG(COUNT(*)) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: seasonal_application_index
+  description: 'SAI = Number of Applications in Month / Average Monthly Applications, by month of receipt
+    (cases.recvDay). Use with GROUP BY date_trunc(''month'', strptime(c.recvday, ''%Y/%m/%d'')); the average
+    is over the months present in the result. Data: every recvDay is 2023/12/21, so there is a single
+    month and SAI = 1.
+
+    '
+  sql_expression: COUNT(*) / AVG(COUNT(*)) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: visa_filing_window
+  description: 'Timing of submission (recvDay) relative to employment start (beginDay): ''After Start
+    Date'' when beginDay is before recvDay; otherwise by calendar months between receipt month and start
+    month: 0 ''Same Month'', 1-3 ''1-3 Months Before'', 4-6 ''Optimal Window (4-6 Months)'', more than
+    6 ''Early Filing''. INTERPRETATION: months are counted as calendar-month differences. Data: Optimal
+    321, 1-3 Months 393, Same Month 247, Early 20.
+
+    '
+  sql_expression: "CASE\n  WHEN strptime(c.beginday, '%d/%m/%Y') < strptime(c.recvday, '%Y/%m/%d') THEN\
+    \ 'After Start Date'\n  WHEN (year(strptime(c.beginday, '%d/%m/%Y')) * 12 + month(strptime(c.beginday,\
+    \ '%d/%m/%Y')))\n     - (year(strptime(c.recvday, '%Y/%m/%d')) * 12 + month(strptime(c.recvday, '%Y/%m/%d')))\
+    \ = 0 THEN 'Same Month'\n  WHEN (year(strptime(c.beginday, '%d/%m/%Y')) * 12 + month(strptime(c.beginday,\
+    \ '%d/%m/%Y')))\n     - (year(strptime(c.recvday, '%Y/%m/%d')) * 12 + month(strptime(c.recvday, '%Y/%m/%d')))\
+    \ BETWEEN 1 AND 3 THEN '1-3 Months Before'\n  WHEN (year(strptime(c.beginday, '%d/%m/%Y')) * 12 +\
+    \ month(strptime(c.beginday, '%d/%m/%Y')))\n     - (year(strptime(c.recvday, '%Y/%m/%d')) * 12 + month(strptime(c.recvday,\
+    \ '%Y/%m/%d'))) BETWEEN 4 AND 6 THEN 'Optimal Window (4-6 Months)'\n  ELSE 'Early Filing'\nEND\n"
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: application_complexity_tier
+  description: 'Standard (straightforward cases) or Complex (cases involving H-1B dependency, willful
+    violator status, or special attestations). INTERPRETATION: ''special attestations'' has no column,
+    so Complex = h1bdep = ''Yes'' OR willfulv = ''Yes''.
+
+    '
+  sql_expression: CASE WHEN c.h1bdep = 'Yes' OR c.willfulv = 'Yes' THEN 'Complex' ELSE 'Standard' END
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: complexity_factor_count
+  description: 'ACS proxy. ACS is documented as a weighted sum of binary factors such as H-1B dependency,
+    willful violator status, new employment and amendment status, but no weights are stated; this counts
+    the factors with equal weight 1: h1bdep = ''Yes'', willfulv = ''Yes'', newemp > 0, amendflag > 0.
+
+    '
+  sql_expression: '(CASE WHEN c.h1bdep = ''Yes'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN c.willfulv = ''Yes'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN c.newemp > 0 THEN 1 ELSE 0 END)
+
+    + (CASE WHEN c.amendflag > 0 THEN 1 ELSE 0 END)
+
+    '
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: application_delay_risk_profile
+  description: 'Low Risk (no special factors), Moderate Risk (1-2 complexity factors), High Risk (3 or
+    more complexity factors or from willful violators), based on the complexity factors of complexity_factor_count.
+
+    '
+  sql_expression: "CASE\n  WHEN c.willfulv = 'Yes' THEN 'High Risk'\n  WHEN (CASE WHEN c.h1bdep = 'Yes'\
+    \ THEN 1 ELSE 0 END) + (CASE WHEN c.newemp > 0 THEN 1 ELSE 0 END)\n     + (CASE WHEN c.amendflag >\
+    \ 0 THEN 1 ELSE 0 END) >= 3 THEN 'High Risk'\n  WHEN (CASE WHEN c.h1bdep = 'Yes' THEN 1 ELSE 0 END)\
+    \ + (CASE WHEN c.newemp > 0 THEN 1 ELSE 0 END)\n     + (CASE WHEN c.amendflag > 0 THEN 1 ELSE 0 END)\
+    \ >= 1 THEN 'Moderate Risk'\n  ELSE 'Low Risk'\nEND\n"
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - applications
+- name: employer_h1b_concentration
+  description: 'EHC = (Number of H-1B Applications by Employer / Total Number of H-1B Applications) x
+    100%. Use with GROUP BY c.homefirm (exact text) over all cases; the window total is all H-1B applications
+    in the result.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE c.visacls = 'H-1B') / SUM(COUNT(*) FILTER (WHERE c.visacls
+    = 'H-1B')) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - employers
+- name: application_success_rate_employer
+  description: 'ASR = (Number of Certified Applications by Employer / Total Applications by Employer)
+    x 100%. GROUP BY c.homefirm. Certified = upper(trim(statustag)) = ''CERTIFIED''.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE upper(trim(c.statustag)) = 'CERTIFIED') / COUNT(*)
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - employers
+- name: employer_retention_rate
+  description: 'ERR = (Number of Continuation Applications / Total Number of Applications by Employer)
+    x 100%. GROUP BY c.homefirm. INTERPRETATION: a continuation application is a case with contemp (continued
+    employment positions) > 0.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE c.contemp > 0) / COUNT(*)
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - employers
+- name: employer_scale_indicator
+  description: 'ESI = Employer Number of Applications / Average Applications per Employer. GROUP BY c.homefirm;
+    the average is over the employers in the result.
+
+    '
+  sql_expression: COUNT(*) / AVG(COUNT(*)) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - employers
+- name: employer_size_classification
+  description: 'Small-scale users (fewer than 5 applications annually), Medium-scale (5-25 applications
+    annually), Large-scale (more than 25). GROUP BY c.homefirm, year(strptime(c.recvday, ''%Y/%m/%d'')).
+    INTERPRETATION: ''annually'' = per receipt year (all receipts are in 2023).
+
+    '
+  sql_expression: CASE WHEN COUNT(*) < 5 THEN 'Small-scale' WHEN COUNT(*) <= 25 THEN 'Medium-scale' ELSE
+    'Large-scale' END
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - employers
+- name: continuous_filing_employer
+  description: 'True when an employer submits visa applications in at least 9 months of the year. GROUP
+    BY c.homefirm, year(strptime(c.recvday, ''%Y/%m/%d'')). Submission month = receipt month (recvDay).
+    Data: all receipts are on 2023/12/21, so no employer qualifies.
+
+    '
+  sql_expression: COUNT(DISTINCT month(strptime(c.recvday, '%Y/%m/%d'))) >= 9
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - employers
+- name: industry_application_distribution
+  description: 'IAD = (Number of Applications in Industry / Total Number of Applications) x 100%. Industry
+    = employer NAICS code. GROUP BY e.employer_contact_info->>''$.naics_code''.
+
+    '
+  sql_expression: 100.0 * COUNT(*) / SUM(COUNT(*)) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c JOIN main.employer e ON e.corphandle = c.homefirm AND e.zipref = c.homezip
+  grain: one row per case with its employer
+  domains:
+  - employers
+- name: industry_concentration_ratio
+  description: 'ICR = sum((Applications in Industry i / Total Applications)^2) over all industries (NAICS
+    codes). Returns one number.
+
+    '
+  sql_expression: SUM(i.share * i.share)
+  source_model: main.cases
+  from_sql: "(SELECT e.employer_contact_info->>'$.naics_code' AS naics_code,\n        COUNT(*) * 1.0 /\
+    \ SUM(COUNT(*)) OVER () AS share\n FROM main.cases c\n JOIN main.employer e ON e.corphandle = c.homefirm\
+    \ AND e.zipref = c.homezip\n GROUP BY e.employer_contact_info->>'$.naics_code') i\n"
+  grain: one row per NAICS industry
+  domains:
+  - employers
+- name: attorney_case_load
+  description: ACL = total number of cases handled by each attorney. GROUP BY ca.counselmail.
+  sql_expression: COUNT(DISTINCT ca.docketkey)
+  source_model: main.case_attorney
+  from_sql: main.case_attorney ca
+  grain: one row per (case, attorney)
+  domains:
+  - attorneys
+- name: attorney_success_rate
+  description: 'ASR_Attorney = (Number of Certified Applications by Attorney / Total Applications by Attorney)
+    x 100%. GROUP BY ca.counselmail.
+
+    '
+  sql_expression: 100.0 * COUNT(DISTINCT c.filekey) FILTER (WHERE upper(trim(c.statustag)) = 'CERTIFIED')
+    / COUNT(DISTINCT c.filekey)
+  source_model: main.case_attorney
+  from_sql: main.case_attorney ca JOIN main.cases c ON c.filekey = ca.docketkey
+  grain: one row per (case, attorney)
+  domains:
+  - attorneys
+- name: attorney_performance_rating
+  description: 'High Performers (over 95% approval rate), Standard Performers (85-95%, inclusive), Underperformers
+    (below 85%), from attorney_success_rate. GROUP BY ca.counselmail.
+
+    '
+  sql_expression: "CASE\n  WHEN 100.0 * COUNT(DISTINCT c.filekey) FILTER (WHERE upper(trim(c.statustag))\
+    \ = 'CERTIFIED') / COUNT(DISTINCT c.filekey) > 95 THEN 'High Performer'\n  WHEN 100.0 * COUNT(DISTINCT\
+    \ c.filekey) FILTER (WHERE upper(trim(c.statustag)) = 'CERTIFIED') / COUNT(DISTINCT c.filekey) >=\
+    \ 85 THEN 'Standard Performer'\n  ELSE 'Underperformer'\nEND\n"
+  source_model: main.case_attorney
+  from_sql: main.case_attorney ca JOIN main.cases c ON c.filekey = ca.docketkey
+  grain: one row per (case, attorney)
+  domains:
+  - attorneys
+- name: attorney_specialization_index
+  description: 'ASI = 1 - (Number of Different Visa Types Handled by Attorney / Total Number of Visa Types);
+    closer to 1 = more specialized. Total Number of Visa Types = 4 (E-3 Australian, H-1B, H-1B1 Chile,
+    H-1B1 Singapore; all four occur in the data). GROUP BY ca.counselmail.
+
+    '
+  sql_expression: 1 - COUNT(DISTINCT c.visacls) / 4.0
+  source_model: main.case_attorney
+  from_sql: main.case_attorney ca JOIN main.cases c ON c.filekey = ca.docketkey
+  grain: one row per (case, attorney)
+  domains:
+  - attorneys
+- name: attorney_top_visa_class_share
+  description: 'Share (fraction) of an attorney''s cases in their most frequent visa class; an attorney
+    is a Specialist when it exceeds 0.80 (over 80% of cases in one visa type). Generalist / Hybrid Practitioner
+    have no quantified threshold. GROUP BY av.counselmail.
+
+    '
+  sql_expression: MAX(av.n) * 1.0 / SUM(av.n)
+  source_model: main.case_attorney
+  from_sql: "(SELECT ca.counselmail, c.visacls, COUNT(DISTINCT c.filekey) AS n\n FROM main.case_attorney\
+    \ ca JOIN main.cases c ON c.filekey = ca.docketkey\n GROUP BY ca.counselmail, c.visacls) av\n"
+  grain: one row per (attorney, visa class)
+  domains:
+  - attorneys
+- name: external_counsel_rate
+  description: 'ECR = (Number of Applications with Attorney / Total Number of Applications) x 100%. With
+    attorney = case has a case_attorney row (727 of 981 cases).
+
+    '
+  sql_expression: 100.0 * COUNT(ca.docketkey) / COUNT(*)
+  source_model: main.cases
+  from_sql: main.cases c LEFT JOIN (SELECT DISTINCT docketkey FROM main.case_attorney) ca ON ca.docketkey
+    = c.filekey
+  grain: one row per case
+  domains:
+  - attorneys
+- name: legal_representation_efficacy
+  description: 'Compares approval rate of applications with attorney representation to those without:
+    gap = AR(with attorney) - AR(without), in percentage points. High Impact when the gap is over 10 points
+    higher, Moderate Impact 5-10 higher, Minimal Impact when the difference is less than 5 (in absolute
+    value). A gap of -5 or lower is outside the documented categories (''Unclassified''). INTERPRETATION:
+    ''%'' read as percentage points of AR. On this data both rates are 100, gap 0 -> Minimal Impact.
+
+    '
+  sql_expression: "CASE\n  WHEN g.gap > 10 THEN 'High Impact'\n  WHEN g.gap >= 5 THEN 'Moderate Impact'\n\
+    \  WHEN abs(g.gap) < 5 THEN 'Minimal Impact'\n  ELSE 'Unclassified'\nEND\n"
+  source_model: main.cases
+  from_sql: "(SELECT 100.0 * COUNT(*) FILTER (WHERE ca.docketkey IS NOT NULL AND upper(trim(c.statustag))\
+    \ = 'CERTIFIED')\n          / NULLIF(COUNT(ca.docketkey), 0)\n      - 100.0 * COUNT(*) FILTER (WHERE\
+    \ ca.docketkey IS NULL AND upper(trim(c.statustag)) = 'CERTIFIED')\n          / NULLIF(COUNT(*) FILTER\
+    \ (WHERE ca.docketkey IS NULL), 0) AS gap\n FROM main.cases c\n LEFT JOIN (SELECT DISTINCT docketkey\
+    \ FROM main.case_attorney) ca ON ca.docketkey = c.filekey) g\n"
+  grain: a single row holding the approval-rate gap
+  domains:
+  - attorneys
+- name: state_application_distribution
+  description: 'SAD = (Number of Applications in State / Total Number of Applications) x 100%. State =
+    case_worksite.wsState. GROUP BY cw.wsstate.
+
+    '
+  sql_expression: 100.0 * COUNT(DISTINCT c.filekey) / SUM(COUNT(DISTINCT c.filekey)) OVER ()
+  source_model: main.cases
+  from_sql: main.cases c JOIN main.case_worksite cw ON cw.dockkey = c.filekey
+  grain: one row per case worksite (one per case)
+  domains:
+  - geography
+- name: geographic_concentration_index
+  description: GCI = sum((Applications in State i / Total Applications)^2) over all worksite states. One
+    number.
+  sql_expression: SUM(s.share * s.share)
+  source_model: main.cases
+  from_sql: "(SELECT cw.wsstate, COUNT(DISTINCT c.filekey) * 1.0 / SUM(COUNT(DISTINCT c.filekey)) OVER\
+    \ () AS share\n FROM main.cases c JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n GROUP BY\
+    \ cw.wsstate) s\n"
+  grain: one row per worksite state
+  domains:
+  - geography
+- name: worksite_density
+  description: 'WD = Number of Workers at Worksite / Number of Worksites: total case_worksite.wsHeads
+    divided by distinct worksite addresses (addr1, city, state, zip) in scope.
+
+    '
+  sql_expression: SUM(cw.wsheads) * 1.0 / COUNT(DISTINCT concat_ws('|', cw.ws_addr1, cw.wscity, cw.wsstate,
+    cw.wszip))
+  source_model: main.case_worksite
+  from_sql: main.case_worksite cw
+  grain: one row per case worksite
+  domains:
+  - geography
+- name: worksite_diversity_index
+  description: 'WDI = 1 - sum((Number of Workers at Worksite i / Total Workers)^2) over an employer''s
+    worksites, workers = case_worksite.wsHeads. GROUP BY ws.homefirm.
+
+    '
+  sql_expression: 1 - SUM(ws.share * ws.share)
+  source_model: main.case_worksite
+  from_sql: "(SELECT g.homefirm, g.workers * 1.0 / SUM(g.workers) OVER (PARTITION BY g.homefirm) AS share\n\
+    \ FROM (SELECT c.homefirm, cw.ws_addr1, cw.wscity, cw.wsstate, cw.wszip, SUM(cw.wsheads) AS workers\n\
+    \       FROM main.cases c JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       GROUP BY c.homefirm,\
+    \ cw.ws_addr1, cw.wscity, cw.wsstate, cw.wszip) g) ws\n"
+  grain: one row per (employer, worksite)
+  domains:
+  - geography
+  - employers
+- name: annualized_offered_wage
+  description: 'AOW in US dollars per year: offered_wage.from with ''$'' and commas removed times the
+    offered_wage.unit factor (Hour 2080, Week 52, Month 12, Year 1); ''to'' ignored. Verified: all 981
+    ''from'' values parse; units seen Hour, Week, Year. Columns of the wa row: filekey, homefirm, homezip,
+    soccd, headct, statustag, visa_class, begin_date, start_month, wsstate, naics_code, wage_level, aow,
+    apw, whr, wdr, headroom_points, level_points, cwas.
+
+    '
+  sql_expression: wa.aow
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case with its annualized wages and wage-assurance scores
+  domains:
+  - wages
+  - wage_assurance
+- name: annualized_prevailing_wage
+  description: 'APW in US dollars per year: prevailing_wage.value with ''USD '' and commas removed times
+    the prevailing_wage.unit factor (Hour 2080, Week 52, Month 12, Year 1). Verified: all values start
+    with ''USD '' and parse.
+
+    '
+  sql_expression: wa.apw
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+  - wage_assurance
+- name: wage_differential_rate
+  description: 'WDR = ((Offered Wage - Prevailing Wage) / Prevailing Wage) x 100%, both converted to the
+    same unit first (here annualized: AOW and APW). Percent, per case (20 means 20%). Equals 100 x WHR.
+
+    '
+  sql_expression: 100 * (wa.aow - wa.apw) / wa.apw
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+- name: wage_premium_rate
+  description: 'WPR = ((Offered Wage - Minimum Required Wage) / Minimum Required Wage) x 100%, how much
+    more an employer pays than minimum requirements. Minimum required wage is typically the prevailing
+    wage or higher depending on regulations; the data holds only the prevailing wage, so it is used as
+    the minimum (WPR then equals WDR), on annualized amounts.
+
+    '
+  sql_expression: 100 * (wa.aow - wa.apw) / wa.apw
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+- name: premium_wage_position
+  description: True when the case's WDR exceeds 20% (offering significantly above the prevailing wage).
+  sql_expression: 100 * (wa.aow - wa.apw) / wa.apw > 20
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+- name: wage_competitiveness_tier
+  description: Below-Market (WDR < 0%), Market-Competitive (0% <= WDR <= 10%), Premium (WDR > 10%), per
+    case.
+  sql_expression: "CASE\n  WHEN 100 * (wa.aow - wa.apw) / wa.apw < 0 THEN 'Below-Market'\n  WHEN 100 *\
+    \ (wa.aow - wa.apw) / wa.apw <= 10 THEN 'Market-Competitive'\n  ELSE 'Premium'\nEND\n"
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+- name: premium_wage_employer
+  description: 'True when an employer''s average WDR across all its applications exceeds 15% (a consistent
+    strategy of premium compensation). GROUP BY wa.homefirm.
+
+    '
+  sql_expression: AVG(100 * (wa.aow - wa.apw) / wa.apw) > 15
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+  - employers
+- name: industry_wage_differential
+  description: 'IWD = Sum of Wage Differential Rates in Industry / Number of Applications in Industry
+    (percent). GROUP BY wa.naics_code.
+
+    '
+  sql_expression: SUM(100 * (wa.aow - wa.apw) / wa.apw) / COUNT(*)
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+  - employers
+- name: skill_shortage_occupation_wdr
+  description: 'Skill-shortage test, WDR part: an occupation (SOC code) shows shortage when its WDR exceeds
+    10% and it has a statistically significant number of applications (test not specified - report the
+    application count too). INTERPRETATION: occupation WDR = average case WDR. GROUP BY wa.soccd.
+
+    '
+  sql_expression: AVG(100 * (wa.aow - wa.apw) / wa.apw) > 10
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wages
+- name: wage_competitiveness_index
+  description: 'WCI = Employer Average Offered Wage / Industry Average Offered Wage, on annualized offered
+    wages (AOW); industry = employer NAICS code, industry average over all cases of that NAICS. GROUP
+    BY wi.homefirm, wi.naics_code.
+
+    '
+  sql_expression: AVG(wi.aow) / ANY_VALUE(wi.industry_avg_aow)
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT wa.*, AVG(wa.aow) OVER (PARTITION BY wa.naics_code) AS industry_avg_aow\n FROM (SELECT\
+    \ c.homefirm, e.employer_contact_info->>'$.naics_code' AS naics_code,\n              CAST(replace(replace(pw.wage_details->>'$.offered_wage.from',\
+    \ '$', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN\
+    \ 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow\n      \
+    \ FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN main.prevailing_wage\
+    \ pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle = c.homefirm AND\
+    \ e.zipref = c.homezip) wa) wi\n"
+  grain: one row per case with its industry average offered wage
+  domains:
+  - wages
+  - employers
+- name: wage_growth_rate
+  description: 'WGR = ((Current Year Average Wage - Previous Year Average Wage) / Previous Year Average
+    Wage) x 100%, for similar positions. INTERPRETATION: similar positions = same SOC code; year = year
+    of the employment start (beginDay; 2023 and 2024 occur); wage = AOW. NULL when the immediately previous
+    year has no cases. One value per (soccd, start_year) row; no GROUP BY needed.
+
+    '
+  sql_expression: "CASE WHEN LAG(y.start_year) OVER (PARTITION BY y.soccd ORDER BY y.start_year) = y.start_year\
+    \ - 1\n     THEN 100.0 * (y.avg_aow - LAG(y.avg_aow) OVER (PARTITION BY y.soccd ORDER BY y.start_year))\n\
+    \          / LAG(y.avg_aow) OVER (PARTITION BY y.soccd ORDER BY y.start_year) END\n"
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT c.soccd, year(strptime(c.beginday, '%d/%m/%Y')) AS start_year,\n        AVG(CAST(replace(replace(pw.wage_details->>'$.offered_wage.from',\
+    \ '$', ''), ',', '') AS DOUBLE)\n            * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour'\
+    \ THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END) AS avg_aow\n FROM main.cases\
+    \ c\n JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n JOIN main.prevailing_wage pw ON pw.trackno\
+    \ = cw.wagetrack\n GROUP BY c.soccd, year(strptime(c.beginday, '%d/%m/%Y'))) y\n"
+  grain: one row per (SOC code, start year)
+  domains:
+  - wages
+- name: wage_headroom_ratio
+  description: WHR = (AOW - APW) / APW, a fraction (0.15 = 15% above prevailing), per case, unrounded.
+  sql_expression: (wa.aow - wa.apw) / wa.apw
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wage_assurance
+- name: headroom_points
+  description: 'Headroom Points = 100 x min(max(WHR, 0), 0.40) / 0.40: WHR <= 0 earns 0, WHR >= 0.40 earns
+    100, linear between (WHR 0.10 -> 25).
+
+    '
+  sql_expression: 100 * LEAST(GREATEST((wa.aow - wa.apw) / wa.apw, 0), 0.40) / 0.40
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wage_assurance
+- name: level_points
+  description: 'Level Points from prevailing_wage.level: ''I'' 25, ''II'' 50, ''III'' 75, ''IV'' 100,
+    and 50 when level is NULL (JSON null in the data).'
+  sql_expression: CASE wa.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN
+    100 ELSE 50 END
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wage_assurance
+- name: case_wage_assurance_score
+  description: 'CWAS = 0.7 x Headroom Points + 0.3 x Level Points, 0-100, unrounded (level II, WHR 0.10
+    -> 32.5).
+
+    '
+  sql_expression: wa.cwas
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wage_assurance
+- name: employer_wage_assurance_score
+  description: 'EWAS = sum(CWAS x headCt) / sum(headCt) over an employer''s cases whose Start Month lies
+    in the period (headcount-weighted average). GROUP BY wa.homefirm (exact text). Period filter on wa.start_month
+    (first day of the beginDay month), e.g. WHERE wa.start_month = DATE ''2024-04-01'' or year(wa.start_month)
+    = 2024; no period = all the employer''s cases. Uses unrounded CWAS.
+
+    '
+  sql_expression: SUM(wa.cwas * wa.headct) / CAST(SUM(wa.headct) AS DOUBLE)
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wage_assurance
+- name: wage_assurance_tier
+  description: 'From unrounded EWAS: ''Thin'' < 30; ''Adequate'' 30 <= EWAS < 45; ''Strong'' 45 <= EWAS
+    < 60; ''Exemplary'' >= 60. GROUP BY wa.homefirm with the same period filter as EWAS; employers with
+    no case in the period have no tier (they produce no group).
+
+    '
+  sql_expression: "CASE\n  WHEN SUM(wa.cwas * wa.headct) / CAST(SUM(wa.headct) AS DOUBLE) < 30 THEN 'Thin'\n\
+    \  WHEN SUM(wa.cwas * wa.headct) / CAST(SUM(wa.headct) AS DOUBLE) < 45 THEN 'Adequate'\n  WHEN SUM(wa.cwas\
+    \ * wa.headct) / CAST(SUM(wa.headct) AS DOUBLE) < 60 THEN 'Strong'\n  ELSE 'Exemplary'\nEND\n"
+  source_model: main.prevailing_wage
+  from_sql: "(SELECT b.*,\n        (b.aow - b.apw) / b.apw AS whr,\n        100 * (b.aow - b.apw) / b.apw\
+    \ AS wdr,\n        100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40) / 0.40 AS headroom_points,\n\
+    \        CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN 75 WHEN 'IV' THEN 100\
+    \ ELSE 50 END AS level_points,\n        0.7 * (100 * LEAST(GREATEST((b.aow - b.apw) / b.apw, 0), 0.40)\
+    \ / 0.40)\n          + 0.3 * (CASE b.wage_level WHEN 'I' THEN 25 WHEN 'II' THEN 50 WHEN 'III' THEN\
+    \ 75 WHEN 'IV' THEN 100 ELSE 50 END) AS cwas\n FROM (SELECT c.filekey, c.homefirm, c.homezip, c.soccd,\
+    \ c.headct, c.statustag,\n              CAST(c.visacls AS VARCHAR) AS visa_class,\n              strptime(c.beginday,\
+    \ '%d/%m/%Y')::DATE AS begin_date,\n              date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE\
+    \ AS start_month,\n              cw.wsstate,\n              e.employer_contact_info->>'$.naics_code'\
+    \ AS naics_code,\n              pw.wage_details->>'$.prevailing_wage.level' AS wage_level,\n     \
+    \         CAST(replace(replace(pw.wage_details->>'$.offered_wage.from', '$', ''), ',', '') AS DOUBLE)\n\
+    \                * CASE pw.wage_details->>'$.offered_wage.unit' WHEN 'Hour' THEN 2080 WHEN 'Week'\
+    \ THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS aow,\n              CAST(replace(replace(pw.wage_details->>'$.prevailing_wage.value',\
+    \ 'USD ', ''), ',', '') AS DOUBLE)\n                * CASE pw.wage_details->>'$.prevailing_wage.unit'\
+    \ WHEN 'Hour' THEN 2080 WHEN 'Week' THEN 52 WHEN 'Month' THEN 12 WHEN 'Year' THEN 1 END AS apw\n \
+    \      FROM main.cases c\n       JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n       JOIN\
+    \ main.prevailing_wage pw ON pw.trackno = cw.wagetrack\n       LEFT JOIN main.employer e ON e.corphandle\
+    \ = c.homefirm AND e.zipref = c.homezip) b) wa\n"
+  grain: one row per case
+  domains:
+  - wage_assurance
+- name: employer_monthly_case_volume
+  description: 'EMCV = number of cases of an employer whose Start Month is the given calendar month; every
+    cases row counts once regardless of status or headCt. GROUP BY c.homefirm (exact text, no folding/trimming),
+    date_trunc(''month'', strptime(c.beginday, ''%d/%m/%Y'')). beginDay is ''DD/MM/YYYY''.
+
+    '
+  sql_expression: COUNT(*)
+  source_model: main.cases
+  from_sql: main.cases c
+  grain: one row per case
+  domains:
+  - review_effort
+- name: review_rule_specificity
+  description: Number of the six criteria of a review_schedule rule that place a restriction (not NULL
+    and not the wildcard '*').
+  sql_expression: '(CASE WHEN r.visa_class IS NOT NULL AND r.visa_class <> ''*'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN r.wage_level IS NOT NULL AND r.wage_level <> ''*'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN r.h1b_dependent IS NOT NULL AND r.h1b_dependent <> ''*'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN r.soc_major_group IS NOT NULL AND r.soc_major_group <> ''*'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN r.worksite_state IS NOT NULL AND r.worksite_state <> ''*'' THEN 1 ELSE 0 END)
+
+    + (CASE WHEN r.monthly_volume_band IS NOT NULL AND r.monthly_volume_band <> ''*'' THEN 1 ELSE 0 END)
+
+    '
+  source_model: main.review_schedule
+  from_sql: main.review_schedule r
+  grain: one row per review rule
+  domains:
+  - review_effort
+- name: review_rule_matches_case
+  description: 'True when case cvb matches rule r: every criterion that is not NULL/''*'' equals the case
+    value as exact text (visa_class, wage_level from prevailing_wage.level, h1b_dependent, first two chars
+    of SocCd, worksite state, Monthly Volume Band). A NULL case value only matches a wildcard criterion
+    (equality with NULL is not true). cvb columns: filekey, homefirm, headct, visa_class, h1b_dependent,
+    soc_major_group, start_month, worksite_state, wage_level, emcv, volume_band.
+
+    '
+  sql_expression: '(r.visa_class IS NULL OR r.visa_class = ''*'' OR r.visa_class = cvb.visa_class)
+
+    AND (r.wage_level IS NULL OR r.wage_level = ''*'' OR r.wage_level = cvb.wage_level)
+
+    AND (r.h1b_dependent IS NULL OR r.h1b_dependent = ''*'' OR r.h1b_dependent = cvb.h1b_dependent)
+
+    AND (r.soc_major_group IS NULL OR r.soc_major_group = ''*'' OR r.soc_major_group = cvb.soc_major_group)
+
+    AND (r.worksite_state IS NULL OR r.worksite_state = ''*'' OR r.worksite_state = cvb.worksite_state)
+
+    AND (r.monthly_volume_band IS NULL OR r.monthly_volume_band = ''*'' OR r.monthly_volume_band = cvb.volume_band)
+
+    '
+  source_model: main.review_schedule
+  from_sql: "(SELECT cv.*, CASE WHEN cv.emcv = 1 THEN '1' WHEN cv.emcv BETWEEN 2 AND 4 THEN '2-4'\n  \
+    \                 WHEN cv.emcv BETWEEN 5 AND 14 THEN '5-14' WHEN cv.emcv >= 15 THEN '15+' END AS volume_band\n\
+    \ FROM (SELECT cb.*, COUNT(*) OVER (PARTITION BY cb.homefirm, cb.start_month) AS emcv\n       FROM\
+    \ (SELECT c.filekey, c.homefirm, c.headct, CAST(c.visacls AS VARCHAR) AS visa_class,\n           \
+    \         CAST(c.h1bdep AS VARCHAR) AS h1b_dependent, left(c.soccd, 2) AS soc_major_group,\n     \
+    \               date_trunc('month', strptime(c.beginday, '%d/%m/%Y'))::DATE AS start_month,\n    \
+    \                cw.wsstate AS worksite_state, pw.wage_details->>'$.prevailing_wage.level' AS wage_level\n\
+    \             FROM main.cases c\n             LEFT JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n\
+    \             LEFT JOIN main.prevailing_wage pw ON pw.trackno = cw.wagetrack) cb) cv) cvb\nCROSS JOIN\
+    \ main.review_schedule r\n"
+  grain: one row per (case, review rule) pair
+  domains:
+  - review_effort
+- name: monthly_volume_band
+  description: 'The case''s Monthly Volume Band from its employer''s EMCV in its Start Month: ''1'' (EMCV
+    = 1), ''2-4'', ''5-14'', ''15+'' (inclusive ends). EMCV is computed over all cases before any outer
+    filter. rv columns: filekey, homefirm, start_month, headct, visa_class, wage_level, h1b_dependent,
+    soc_major_group, worksite_state, emcv, volume_band, governing_rule_id, base_hours, position_hours,
+    crh.
+
+    '
+  sql_expression: rv.volume_band
+  source_model: main.cases
+  from_sql: "(SELECT cvb.filekey, cvb.homefirm, cvb.start_month, cvb.headct, cvb.visa_class, cvb.wage_level,\n\
+    \        cvb.h1b_dependent, cvb.soc_major_group, cvb.worksite_state, cvb.emcv, cvb.volume_band,\n\
+    \        r.rule_id AS governing_rule_id,\n        COALESCE(r.base_hours, 3.50) AS base_hours,\n  \
+    \      COALESCE(r.position_hours, 0.50) AS position_hours,\n        COALESCE(r.base_hours, 3.50) +\
+    \ COALESCE(r.position_hours, 0.50) * cvb.headct AS crh\n FROM (SELECT cv.*, CASE WHEN cv.emcv = 1\
+    \ THEN '1' WHEN cv.emcv BETWEEN 2 AND 4 THEN '2-4'\n                         WHEN cv.emcv BETWEEN\
+    \ 5 AND 14 THEN '5-14' WHEN cv.emcv >= 15 THEN '15+' END AS volume_band\n       FROM (SELECT cb.*,\
+    \ COUNT(*) OVER (PARTITION BY cb.homefirm, cb.start_month) AS emcv\n             FROM (SELECT c.filekey,\
+    \ c.homefirm, c.headct, CAST(c.visacls AS VARCHAR) AS visa_class,\n                          CAST(c.h1bdep\
+    \ AS VARCHAR) AS h1b_dependent, left(c.soccd, 2) AS soc_major_group,\n                          date_trunc('month',\
+    \ strptime(c.beginday, '%d/%m/%Y'))::DATE AS start_month,\n                          cw.wsstate AS\
+    \ worksite_state, pw.wage_details->>'$.prevailing_wage.level' AS wage_level\n                   FROM\
+    \ main.cases c\n                   LEFT JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n   \
+    \                LEFT JOIN main.prevailing_wage pw ON pw.trackno = cw.wagetrack) cb) cv) cvb\n LEFT\
+    \ JOIN main.review_schedule r\n   ON (r.visa_class IS NULL OR r.visa_class = '*' OR r.visa_class =\
+    \ cvb.visa_class)\n  AND (r.wage_level IS NULL OR r.wage_level = '*' OR r.wage_level = cvb.wage_level)\n\
+    \  AND (r.h1b_dependent IS NULL OR r.h1b_dependent = '*' OR r.h1b_dependent = cvb.h1b_dependent)\n\
+    \  AND (r.soc_major_group IS NULL OR r.soc_major_group = '*' OR r.soc_major_group = cvb.soc_major_group)\n\
+    \  AND (r.worksite_state IS NULL OR r.worksite_state = '*' OR r.worksite_state = cvb.worksite_state)\n\
+    \  AND (r.monthly_volume_band IS NULL OR r.monthly_volume_band = '*' OR r.monthly_volume_band = cvb.volume_band)\n\
+    \ QUALIFY ROW_NUMBER() OVER (PARTITION BY cvb.filekey ORDER BY\n     (CASE WHEN r.visa_class IS NOT\
+    \ NULL AND r.visa_class <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.wage_level IS NOT NULL AND r.wage_level\
+    \ <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.h1b_dependent IS NOT NULL AND r.h1b_dependent <> '*'\
+    \ THEN 1 ELSE 0 END\n    + CASE WHEN r.soc_major_group IS NOT NULL AND r.soc_major_group <> '*' THEN\
+    \ 1 ELSE 0 END\n    + CASE WHEN r.worksite_state IS NOT NULL AND r.worksite_state <> '*' THEN 1 ELSE\
+    \ 0 END\n    + CASE WHEN r.monthly_volume_band IS NOT NULL AND r.monthly_volume_band <> '*' THEN 1\
+    \ ELSE 0 END) DESC,\n     r.rule_id ASC NULLS LAST) = 1) rv\n"
+  grain: one row per case with its governing review rule and CRH
+  domains:
+  - review_effort
+- name: governing_review_rule_id
+  description: 'The governing rule: among matching rules the one with most restricting criteria, ties
+    to the lowest rule_id; NULL when no rule matches (Default Review Schedule 3.50 / 0.50 applies; 69
+    of 981 cases). Other matching rules are ignored, never added or averaged.
+
+    '
+  sql_expression: rv.governing_rule_id
+  source_model: main.cases
+  from_sql: "(SELECT cvb.filekey, cvb.homefirm, cvb.start_month, cvb.headct, cvb.visa_class, cvb.wage_level,\n\
+    \        cvb.h1b_dependent, cvb.soc_major_group, cvb.worksite_state, cvb.emcv, cvb.volume_band,\n\
+    \        r.rule_id AS governing_rule_id,\n        COALESCE(r.base_hours, 3.50) AS base_hours,\n  \
+    \      COALESCE(r.position_hours, 0.50) AS position_hours,\n        COALESCE(r.base_hours, 3.50) +\
+    \ COALESCE(r.position_hours, 0.50) * cvb.headct AS crh\n FROM (SELECT cv.*, CASE WHEN cv.emcv = 1\
+    \ THEN '1' WHEN cv.emcv BETWEEN 2 AND 4 THEN '2-4'\n                         WHEN cv.emcv BETWEEN\
+    \ 5 AND 14 THEN '5-14' WHEN cv.emcv >= 15 THEN '15+' END AS volume_band\n       FROM (SELECT cb.*,\
+    \ COUNT(*) OVER (PARTITION BY cb.homefirm, cb.start_month) AS emcv\n             FROM (SELECT c.filekey,\
+    \ c.homefirm, c.headct, CAST(c.visacls AS VARCHAR) AS visa_class,\n                          CAST(c.h1bdep\
+    \ AS VARCHAR) AS h1b_dependent, left(c.soccd, 2) AS soc_major_group,\n                          date_trunc('month',\
+    \ strptime(c.beginday, '%d/%m/%Y'))::DATE AS start_month,\n                          cw.wsstate AS\
+    \ worksite_state, pw.wage_details->>'$.prevailing_wage.level' AS wage_level\n                   FROM\
+    \ main.cases c\n                   LEFT JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n   \
+    \                LEFT JOIN main.prevailing_wage pw ON pw.trackno = cw.wagetrack) cb) cv) cvb\n LEFT\
+    \ JOIN main.review_schedule r\n   ON (r.visa_class IS NULL OR r.visa_class = '*' OR r.visa_class =\
+    \ cvb.visa_class)\n  AND (r.wage_level IS NULL OR r.wage_level = '*' OR r.wage_level = cvb.wage_level)\n\
+    \  AND (r.h1b_dependent IS NULL OR r.h1b_dependent = '*' OR r.h1b_dependent = cvb.h1b_dependent)\n\
+    \  AND (r.soc_major_group IS NULL OR r.soc_major_group = '*' OR r.soc_major_group = cvb.soc_major_group)\n\
+    \  AND (r.worksite_state IS NULL OR r.worksite_state = '*' OR r.worksite_state = cvb.worksite_state)\n\
+    \  AND (r.monthly_volume_band IS NULL OR r.monthly_volume_band = '*' OR r.monthly_volume_band = cvb.volume_band)\n\
+    \ QUALIFY ROW_NUMBER() OVER (PARTITION BY cvb.filekey ORDER BY\n     (CASE WHEN r.visa_class IS NOT\
+    \ NULL AND r.visa_class <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.wage_level IS NOT NULL AND r.wage_level\
+    \ <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.h1b_dependent IS NOT NULL AND r.h1b_dependent <> '*'\
+    \ THEN 1 ELSE 0 END\n    + CASE WHEN r.soc_major_group IS NOT NULL AND r.soc_major_group <> '*' THEN\
+    \ 1 ELSE 0 END\n    + CASE WHEN r.worksite_state IS NOT NULL AND r.worksite_state <> '*' THEN 1 ELSE\
+    \ 0 END\n    + CASE WHEN r.monthly_volume_band IS NOT NULL AND r.monthly_volume_band <> '*' THEN 1\
+    \ ELSE 0 END) DESC,\n     r.rule_id ASC NULLS LAST) = 1) rv\n"
+  grain: one row per case
+  domains:
+  - review_effort
+- name: case_review_hours
+  description: 'CRH = base_hours + position_hours x headCt from the governing rule (or default 3.50 +
+    0.50 x headCt). Reviewer-hours, exact to two decimals (DECIMAL), not rounded before aggregation. Total
+    over all cases on this data: 4188.00.
+
+    '
+  sql_expression: rv.crh
+  source_model: main.cases
+  from_sql: "(SELECT cvb.filekey, cvb.homefirm, cvb.start_month, cvb.headct, cvb.visa_class, cvb.wage_level,\n\
+    \        cvb.h1b_dependent, cvb.soc_major_group, cvb.worksite_state, cvb.emcv, cvb.volume_band,\n\
+    \        r.rule_id AS governing_rule_id,\n        COALESCE(r.base_hours, 3.50) AS base_hours,\n  \
+    \      COALESCE(r.position_hours, 0.50) AS position_hours,\n        COALESCE(r.base_hours, 3.50) +\
+    \ COALESCE(r.position_hours, 0.50) * cvb.headct AS crh\n FROM (SELECT cv.*, CASE WHEN cv.emcv = 1\
+    \ THEN '1' WHEN cv.emcv BETWEEN 2 AND 4 THEN '2-4'\n                         WHEN cv.emcv BETWEEN\
+    \ 5 AND 14 THEN '5-14' WHEN cv.emcv >= 15 THEN '15+' END AS volume_band\n       FROM (SELECT cb.*,\
+    \ COUNT(*) OVER (PARTITION BY cb.homefirm, cb.start_month) AS emcv\n             FROM (SELECT c.filekey,\
+    \ c.homefirm, c.headct, CAST(c.visacls AS VARCHAR) AS visa_class,\n                          CAST(c.h1bdep\
+    \ AS VARCHAR) AS h1b_dependent, left(c.soccd, 2) AS soc_major_group,\n                          date_trunc('month',\
+    \ strptime(c.beginday, '%d/%m/%Y'))::DATE AS start_month,\n                          cw.wsstate AS\
+    \ worksite_state, pw.wage_details->>'$.prevailing_wage.level' AS wage_level\n                   FROM\
+    \ main.cases c\n                   LEFT JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n   \
+    \                LEFT JOIN main.prevailing_wage pw ON pw.trackno = cw.wagetrack) cb) cv) cvb\n LEFT\
+    \ JOIN main.review_schedule r\n   ON (r.visa_class IS NULL OR r.visa_class = '*' OR r.visa_class =\
+    \ cvb.visa_class)\n  AND (r.wage_level IS NULL OR r.wage_level = '*' OR r.wage_level = cvb.wage_level)\n\
+    \  AND (r.h1b_dependent IS NULL OR r.h1b_dependent = '*' OR r.h1b_dependent = cvb.h1b_dependent)\n\
+    \  AND (r.soc_major_group IS NULL OR r.soc_major_group = '*' OR r.soc_major_group = cvb.soc_major_group)\n\
+    \  AND (r.worksite_state IS NULL OR r.worksite_state = '*' OR r.worksite_state = cvb.worksite_state)\n\
+    \  AND (r.monthly_volume_band IS NULL OR r.monthly_volume_band = '*' OR r.monthly_volume_band = cvb.volume_band)\n\
+    \ QUALIFY ROW_NUMBER() OVER (PARTITION BY cvb.filekey ORDER BY\n     (CASE WHEN r.visa_class IS NOT\
+    \ NULL AND r.visa_class <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.wage_level IS NOT NULL AND r.wage_level\
+    \ <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.h1b_dependent IS NOT NULL AND r.h1b_dependent <> '*'\
+    \ THEN 1 ELSE 0 END\n    + CASE WHEN r.soc_major_group IS NOT NULL AND r.soc_major_group <> '*' THEN\
+    \ 1 ELSE 0 END\n    + CASE WHEN r.worksite_state IS NOT NULL AND r.worksite_state <> '*' THEN 1 ELSE\
+    \ 0 END\n    + CASE WHEN r.monthly_volume_band IS NOT NULL AND r.monthly_volume_band <> '*' THEN 1\
+    \ ELSE 0 END) DESC,\n     r.rule_id ASC NULLS LAST) = 1) rv\n"
+  grain: one row per case
+  domains:
+  - review_effort
+- name: employer_review_load
+  description: 'ERL = sum of CRH over an employer''s cases whose Start Month lies in the period. GROUP
+    BY rv.homefirm (exact text); period filter on rv.start_month (a month: rv.start_month = DATE ''2024-04-01'';
+    a year: year(rv.start_month) = 2024). Round only when reported.
+
+    '
+  sql_expression: SUM(rv.crh)
+  source_model: main.cases
+  from_sql: "(SELECT cvb.filekey, cvb.homefirm, cvb.start_month, cvb.headct, cvb.visa_class, cvb.wage_level,\n\
+    \        cvb.h1b_dependent, cvb.soc_major_group, cvb.worksite_state, cvb.emcv, cvb.volume_band,\n\
+    \        r.rule_id AS governing_rule_id,\n        COALESCE(r.base_hours, 3.50) AS base_hours,\n  \
+    \      COALESCE(r.position_hours, 0.50) AS position_hours,\n        COALESCE(r.base_hours, 3.50) +\
+    \ COALESCE(r.position_hours, 0.50) * cvb.headct AS crh\n FROM (SELECT cv.*, CASE WHEN cv.emcv = 1\
+    \ THEN '1' WHEN cv.emcv BETWEEN 2 AND 4 THEN '2-4'\n                         WHEN cv.emcv BETWEEN\
+    \ 5 AND 14 THEN '5-14' WHEN cv.emcv >= 15 THEN '15+' END AS volume_band\n       FROM (SELECT cb.*,\
+    \ COUNT(*) OVER (PARTITION BY cb.homefirm, cb.start_month) AS emcv\n             FROM (SELECT c.filekey,\
+    \ c.homefirm, c.headct, CAST(c.visacls AS VARCHAR) AS visa_class,\n                          CAST(c.h1bdep\
+    \ AS VARCHAR) AS h1b_dependent, left(c.soccd, 2) AS soc_major_group,\n                          date_trunc('month',\
+    \ strptime(c.beginday, '%d/%m/%Y'))::DATE AS start_month,\n                          cw.wsstate AS\
+    \ worksite_state, pw.wage_details->>'$.prevailing_wage.level' AS wage_level\n                   FROM\
+    \ main.cases c\n                   LEFT JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n   \
+    \                LEFT JOIN main.prevailing_wage pw ON pw.trackno = cw.wagetrack) cb) cv) cvb\n LEFT\
+    \ JOIN main.review_schedule r\n   ON (r.visa_class IS NULL OR r.visa_class = '*' OR r.visa_class =\
+    \ cvb.visa_class)\n  AND (r.wage_level IS NULL OR r.wage_level = '*' OR r.wage_level = cvb.wage_level)\n\
+    \  AND (r.h1b_dependent IS NULL OR r.h1b_dependent = '*' OR r.h1b_dependent = cvb.h1b_dependent)\n\
+    \  AND (r.soc_major_group IS NULL OR r.soc_major_group = '*' OR r.soc_major_group = cvb.soc_major_group)\n\
+    \  AND (r.worksite_state IS NULL OR r.worksite_state = '*' OR r.worksite_state = cvb.worksite_state)\n\
+    \  AND (r.monthly_volume_band IS NULL OR r.monthly_volume_band = '*' OR r.monthly_volume_band = cvb.volume_band)\n\
+    \ QUALIFY ROW_NUMBER() OVER (PARTITION BY cvb.filekey ORDER BY\n     (CASE WHEN r.visa_class IS NOT\
+    \ NULL AND r.visa_class <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.wage_level IS NOT NULL AND r.wage_level\
+    \ <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.h1b_dependent IS NOT NULL AND r.h1b_dependent <> '*'\
+    \ THEN 1 ELSE 0 END\n    + CASE WHEN r.soc_major_group IS NOT NULL AND r.soc_major_group <> '*' THEN\
+    \ 1 ELSE 0 END\n    + CASE WHEN r.worksite_state IS NOT NULL AND r.worksite_state <> '*' THEN 1 ELSE\
+    \ 0 END\n    + CASE WHEN r.monthly_volume_band IS NOT NULL AND r.monthly_volume_band <> '*' THEN 1\
+    \ ELSE 0 END) DESC,\n     r.rule_id ASC NULLS LAST) = 1) rv\n"
+  grain: one row per case
+  domains:
+  - review_effort
+- name: average_case_review_hours
+  description: Average CRH = sum of CRH divided by the number of cases in scope; unrounded until reported.
+  sql_expression: SUM(rv.crh) / COUNT(*)
+  source_model: main.cases
+  from_sql: "(SELECT cvb.filekey, cvb.homefirm, cvb.start_month, cvb.headct, cvb.visa_class, cvb.wage_level,\n\
+    \        cvb.h1b_dependent, cvb.soc_major_group, cvb.worksite_state, cvb.emcv, cvb.volume_band,\n\
+    \        r.rule_id AS governing_rule_id,\n        COALESCE(r.base_hours, 3.50) AS base_hours,\n  \
+    \      COALESCE(r.position_hours, 0.50) AS position_hours,\n        COALESCE(r.base_hours, 3.50) +\
+    \ COALESCE(r.position_hours, 0.50) * cvb.headct AS crh\n FROM (SELECT cv.*, CASE WHEN cv.emcv = 1\
+    \ THEN '1' WHEN cv.emcv BETWEEN 2 AND 4 THEN '2-4'\n                         WHEN cv.emcv BETWEEN\
+    \ 5 AND 14 THEN '5-14' WHEN cv.emcv >= 15 THEN '15+' END AS volume_band\n       FROM (SELECT cb.*,\
+    \ COUNT(*) OVER (PARTITION BY cb.homefirm, cb.start_month) AS emcv\n             FROM (SELECT c.filekey,\
+    \ c.homefirm, c.headct, CAST(c.visacls AS VARCHAR) AS visa_class,\n                          CAST(c.h1bdep\
+    \ AS VARCHAR) AS h1b_dependent, left(c.soccd, 2) AS soc_major_group,\n                          date_trunc('month',\
+    \ strptime(c.beginday, '%d/%m/%Y'))::DATE AS start_month,\n                          cw.wsstate AS\
+    \ worksite_state, pw.wage_details->>'$.prevailing_wage.level' AS wage_level\n                   FROM\
+    \ main.cases c\n                   LEFT JOIN main.case_worksite cw ON cw.dockkey = c.filekey\n   \
+    \                LEFT JOIN main.prevailing_wage pw ON pw.trackno = cw.wagetrack) cb) cv) cvb\n LEFT\
+    \ JOIN main.review_schedule r\n   ON (r.visa_class IS NULL OR r.visa_class = '*' OR r.visa_class =\
+    \ cvb.visa_class)\n  AND (r.wage_level IS NULL OR r.wage_level = '*' OR r.wage_level = cvb.wage_level)\n\
+    \  AND (r.h1b_dependent IS NULL OR r.h1b_dependent = '*' OR r.h1b_dependent = cvb.h1b_dependent)\n\
+    \  AND (r.soc_major_group IS NULL OR r.soc_major_group = '*' OR r.soc_major_group = cvb.soc_major_group)\n\
+    \  AND (r.worksite_state IS NULL OR r.worksite_state = '*' OR r.worksite_state = cvb.worksite_state)\n\
+    \  AND (r.monthly_volume_band IS NULL OR r.monthly_volume_band = '*' OR r.monthly_volume_band = cvb.volume_band)\n\
+    \ QUALIFY ROW_NUMBER() OVER (PARTITION BY cvb.filekey ORDER BY\n     (CASE WHEN r.visa_class IS NOT\
+    \ NULL AND r.visa_class <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.wage_level IS NOT NULL AND r.wage_level\
+    \ <> '*' THEN 1 ELSE 0 END\n    + CASE WHEN r.h1b_dependent IS NOT NULL AND r.h1b_dependent <> '*'\
+    \ THEN 1 ELSE 0 END\n    + CASE WHEN r.soc_major_group IS NOT NULL AND r.soc_major_group <> '*' THEN\
+    \ 1 ELSE 0 END\n    + CASE WHEN r.worksite_state IS NOT NULL AND r.worksite_state <> '*' THEN 1 ELSE\
+    \ 0 END\n    + CASE WHEN r.monthly_volume_band IS NOT NULL AND r.monthly_volume_band <> '*' THEN 1\
+    \ ELSE 0 END) DESC,\n     r.rule_id ASC NULLS LAST) = 1) rv\n"
+  grain: one row per case
+  domains:
+  - review_effort
+tables:
+- schema: main
+  table: employer
+  description: One row per employer (corphandle + zipref).
+  columns:
+  - name: corphandle
+    description: Employer name / identifier; cases.homefirm references it (exact text).
+  - name: zipref
+    description: Employer postal code; part of the key; cases.homezip references it.
+  - name: employer_contact_info
+    description: 'JSON: address{line1, line2 (NULL = none), city, state, zip, country (NULL = none), province
+      (NULL = none)}, phone{number, extension (NULL = none)}, naics_code (6-digit NAICS industry code
+      identifying the employer''s primary industry, e.g. 541511 Custom Computer Programming Services,
+      561320 Temporary Help Services; read with ->>''$.naics_code''), alternate_name (trade name; NULL
+      = none).'
+- schema: main
+  table: employer_poc
+  description: Employer point of contact.
+  columns:
+  - name: contactmail
+    description: Point-of-contact email (PK).
+  - name: firmlink
+    description: Employer reference -> employer.corphandle.
+  - name: firmzip
+    description: Employer postal code -> employer.zipref.
+  - name: poc_contact_info
+    description: 'JSON: name{first, middle (NULL = none), last}, title, address{line1, line2 (NULL = none),
+      city, state, zip, country, province (NULL = none)}, phone{number (text), extension (NULL = none)}.'
+- schema: main
+  table: preparer
+  description: Person who prepared the application.
+  columns:
+  - name: prepmail
+    description: Preparer email (PK); cases.preplink references it.
+  - name: preplname
+    description: Preparer last name.
+  - name: prepfname
+    description: Preparer first name.
+  - name: prepmi
+    description: Preparer middle initial.
+  - name: prepbiz
+    description: Preparer business name; NULL = no business name provided.
+- schema: main
+  table: cases
+  description: One row per labor condition application (981 rows).
+  columns:
+  - name: filekey
+    description: Case number (PK).
+  - name: statustag
+    description: Case status. Outcomes can be Certified (approved), Denied (rejected), Withdrawn (voluntarily
+      withdrawn by applicant), Certified-Withdrawn (approved but later withdrawn); data holds only CERTIFIED/Certified/certified
+      - compare upper(trim(statustag)) = 'CERTIFIED'.
+  - name: recvday
+    description: Receipt date, text 'YYYY/MM/DD' (all 2023/12/21).
+  - name: decisionday
+    description: Decision date, text 'YYYY-MM-DD'; NULL = not provided (216 cases).
+  - name: origcertday
+    description: Original certification date; NULL = not provided (always NULL in data).
+  - name: visacls
+    description: 'Visa class enum: H-1B (specialty occupations), H-1B1 Singapore (Singapore nationals),
+      H-1B1 Chile (Chilean nationals), E-3 Australian (Australian nationals), all in specialty occupations.'
+  - name: jobtag
+    description: Job title.
+  - name: soccd
+    description: SOC code, e.g. 15-1253.00 Software QA Analysts and Testers, 29-1141.00 Registered Nurses;
+      first two characters = SOC major group.
+  - name: soctitle
+    description: SOC title.
+  - name: fulltimeind
+    description: Full-time indicator 'Y'/'N' (NULL = not given); full-time typically >= 35 hours/week,
+      may vary by employer; non-full-time may be part-time.
+  - name: beginday
+    description: Employment begin date, text 'DD/MM/YYYY'; its year-month is the case's Start Month.
+  - name: endday
+    description: Employment end date, free text like '2026 20th Dec.'; NULL = none.
+  - name: headct
+    description: Total worker positions requested (headCt); used in CRH and EWAS weighting.
+  - name: newemp
+    description: New employment positions.
+  - name: contemp
+    description: Continued employment positions (> 0 = continuation application for ERR).
+  - name: changeprev
+    description: Change in previously approved employment positions.
+  - name: concurrentlynew
+    description: New concurrent employment positions.
+  - name: changefirm
+    description: Change of employer positions.
+  - name: amendflag
+    description: Amended petition positions/flag (> 0 = amended).
+  - name: siteslots
+    description: Total number of worksite locations.
+  - name: agreelc
+    description: Agreement to labor condition statement (Yes).
+  - name: h1bdep
+    description: Employer H-1B dependent (Yes/No/NULL). Dependent when H-1B workers exceed 15% of workforce
+      (> 50 employees), 8 workers (26-50) or 4 workers (<= 25); extra attestation requirements.
+  - name: willfulv
+    description: 'Willful violator (No/NULL in data): found by DOL to have willfully failed LCA conditions
+      or misrepresented material fact on an LCA within the past 5 years; extra attestation requirements.'
+  - name: supporth
+    description: Employer supports H-1B (Yes/NULL).
+  - name: statbasis
+    description: Statutory basis (exemption basis), e.g. '$60,000 or higher annual wage'.
+  - name: appa
+    description: Appendix A attached (always NULL in data).
+  - name: pubdisc
+    description: 'Public disclosure choice: ''Disclose Business'' (consents to public availability), ''Disclose
+      Employment'', ''Disclose Business and Employment'' (other options may restrict disclosure to protect
+      confidential information).'
+  - name: homefirm
+    description: Employer -> employer.corphandle; for employer metrics use exact text, no folding/trimming.
+  - name: homezip
+    description: Employer postal code -> employer.zipref.
+  - name: preplink
+    description: Preparer email -> preparer.prepmail.
+- schema: main
+  table: case_attorney
+  description: Attorney assigned to a case (727 cases, one row each). A case with no row is self-represented.
+  columns:
+  - name: docketkey
+    description: Case -> cases.filekey.
+  - name: counselmail
+    description: Attorney -> attorney.lawmail.
+  - name: counselfor
+    description: Attorney represents the employer (Yes/No; always Yes in data).
+- schema: main
+  table: attorney
+  description: Attorney profiles.
+  columns:
+  - name: lawmail
+    description: Attorney email (PK).
+  - name: attorney_profile
+    description: 'JSON: name{first, middle (NULL = none), last}, address{line1, line2 (NULL = none), city,
+      state, zip, country (CANADA / UNITED STATES OF AMERICA), province (NULL = none)}, contact{phone,
+      extension (NULL = none)}, firm, highest_court{state (NULL = none), name (NULL = none)}.'
+- schema: main
+  table: case_worksite
+  description: Worksite of a case; exactly one row per case. Links to the prevailing wage record.
+  columns:
+  - name: dockkey
+    description: Case -> cases.filekey.
+  - name: ws_addr1
+    description: Worksite address line 1.
+  - name: wscity
+    description: Worksite city.
+  - name: wsstate
+    description: Worksite state (used for SAD, GCI and review rule matching).
+  - name: wszip
+    description: Worksite postal code.
+  - name: wsheads
+    description: Number of workers at the worksite.
+  - name: wagetrack
+    description: Wage record -> prevailing_wage.trackno.
+- schema: main
+  table: worksite
+  description: Worksite address master.
+  columns:
+  - name: w_addr1
+    description: Address line 1 (PK part).
+  - name: wcity
+    description: City (PK part).
+  - name: wstate
+    description: State (PK part).
+  - name: wzip
+    description: Postal code (PK part).
+  - name: secent
+    description: Secondary entity at worksite (Yes/No); NULL = not specified.
+  - name: secentname
+    description: Secondary entity name; NULL = none provided.
+  - name: waddr_2
+    description: Address line 2; NULL = none.
+  - name: wcnty
+    description: County; NULL = none.
+- schema: main
+  table: prevailing_wage
+  description: Offered and prevailing wage record per case worksite.
+  columns:
+  - name: trackno
+    description: Tracking number (PK).
+  - name: wage_details
+    description: 'JSON: offered_wage{from (text ''$130000.00''), to (ignored), unit Hour/Week/Year}, prevailing_wage{value
+      (text ''USD 116,979.00''), unit Hour/Week/Month/Year, level I-IV (I entry-level, II qualified, III
+      experienced, IV fully competent; may be null), oes_year (NULL = none)}, alternate_source{source_type
+      CBA/Survey, source_year, publisher, survey_title}. Acceptable sources: OES, CBA, DOL-compliant published
+      surveys. Annualize with Hour 2080, Week 52, Month 12, Year 1.'
+- schema: main
+  table: review_schedule
+  description: 'Case Review Effort Schedule: one rule per row; six criteria, wildcard stored as ''*''
+    (or NULL); base_hours once per case, position_hours per worker position.'
+  columns:
+  - name: rule_id
+    description: Rule identifier (PK); lowest wins ties.
+  - name: visa_class
+    description: Visa class criterion; '*' / NULL = any.
+  - name: wage_level
+    description: Prevailing wage level criterion (I-IV); '*' / NULL = any.
+  - name: h1b_dependent
+    description: H-1B dependency criterion (Yes/No); '*' / NULL = any.
+  - name: soc_major_group
+    description: First two digits of SOC code; '*' / NULL = any.
+  - name: worksite_state
+    description: Worksite state criterion; '*' / NULL = any.
+  - name: monthly_volume_band
+    description: Employer monthly case volume band ('1','2-4','5-14','15+'); '*' / NULL = any.
+  - name: base_hours
+    description: Reviewer-hours charged once per case.
+  - name: position_hours
+    description: Reviewer-hours charged per worker position (headCt).
+relationships:
+- from: main.cases.homefirm
+  to: main.employer.corphandle
+  type: many_to_one
+  description: Join on homefirm = corphandle AND homezip = zipref.
+- from: main.cases.preplink
+  to: main.preparer.prepmail
+  type: many_to_one
+- from: main.case_attorney.docketkey
+  to: main.cases.filekey
+  type: many_to_one
+- from: main.case_attorney.counselmail
+  to: main.attorney.lawmail
+  type: many_to_one
+- from: main.case_worksite.dockkey
+  to: main.cases.filekey
+  type: one_to_one
+- from: main.case_worksite.wagetrack
+  to: main.prevailing_wage.trackno
+  type: many_to_one
+- from: main.employer_poc.firmlink
+  to: main.employer.corphandle
+  type: many_to_one
+  description: Join on firmlink = corphandle AND firmzip = zipref.

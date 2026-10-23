@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from dce.compile.inputs import CompileInputs
-from dce.compile.session import COMPILER_MODEL, NOTE_MARKER, EntryRecord
+from dce.compile.session import JOIN_KEYS, NOTE_MARKER, EntryRecord
 
 #: As the hand-authored DABStep contract forbids.
 FORBIDDEN_OPERATIONS = [
@@ -68,6 +68,26 @@ def _join(*parts: str) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+def contract_dict(
+    inputs: CompileInputs, tables: dict[str, list[tuple[str, str]]], domains: list
+) -> dict:
+    """`contract.yml`: every table allowed, the operations and rules above.
+    The compiler checks a declared join against it before emitting."""
+    return {
+        "version": "1.0",
+        "name": f"{inputs.benchmark}-{inputs.db_name}",
+        "semantic": {
+            "source": {"type": "yaml", "path": "./semantic.yml", "expected_extras": []},
+            "allowed_tables": [
+                {"schema": "main", "preferred": True, "tables": sorted(tables)}
+            ],
+            "forbidden_operations": FORBIDDEN_OPERATIONS,
+            "domains": domains,
+            "rules": RULES,
+        },
+    }
+
+
 def build(
     inputs: CompileInputs,
     records: list[EntryRecord],
@@ -96,6 +116,7 @@ def build(
                 k: metric[k]
                 for k in ("name", "description", "sql_expression", "source_model")
             }
+            out.update({k: metric[k] for k in JOIN_KEYS if metric.get(k)})
             out["domains"] = [record.domain]
             if metric.get("untranslated"):
                 out["untranslated"] = metric["untranslated"]
@@ -111,19 +132,7 @@ def build(
                 d = domain(record)
                 d["description"] = _join(d["description"], prose["text"])
 
-    contract = {
-        "version": "1.0",
-        "name": f"{inputs.benchmark}-{inputs.db_name}",
-        "semantic": {
-            "source": {"type": "yaml", "path": "./semantic.yml", "expected_extras": []},
-            "allowed_tables": [
-                {"schema": "main", "preferred": True, "tables": sorted(tables)}
-            ],
-            "forbidden_operations": FORBIDDEN_OPERATIONS,
-            "domains": list(domains.values()),
-            "rules": RULES,
-        },
-    }
+    contract = contract_dict(inputs, tables, list(domains.values()))
     semantic_tables = []
     for table in sorted(tables):
         entry: dict = {"schema": "main", "table": table}
@@ -153,7 +162,7 @@ def write(out_dir: Path, contract: dict, semantic: dict, inputs: CompileInputs) 
     header = HEADER.format(
         benchmark=inputs.benchmark,
         db=inputs.db_name,
-        model=COMPILER_MODEL,
+        model=inputs.model + (" (joins)" if inputs.joins else ""),
         inputs=", ".join(p.name for p in inputs.sources),
     )
     for name, data in (("contract.yml", contract), ("semantic.yml", semantic)):
@@ -183,8 +192,13 @@ def render_compiled(contract_dir: Path) -> str:
     for metric in semantic.get("metrics") or []:
         if not metric.get("sql_expression"):
             continue
+        over = (
+            f"Over `FROM {metric['from_sql']}`, {metric['grain']}"
+            if metric.get("from_sql")
+            else f"Over `{metric['source_model']}`"
+        )
         block = (
-            f"### {metric['name']}\n\nOver `{metric['source_model']}`:\n\n"
+            f"### {metric['name']}\n\n{over}:\n\n"
             f"```sql\n{metric['sql_expression']}\n```"
         )
         for note in _notes(metric.get("description")):

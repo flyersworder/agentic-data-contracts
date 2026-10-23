@@ -37,7 +37,7 @@ ANSWERS = {
 
 
 def shop_driver(calls: list):
-    def driver(*, system_prompt, user_prompt, tools):
+    def driver(*, system_prompt, user_prompt, tools, model=None):
         name = user_prompt.split("## Entry: ", 1)[1].split("\n", 1)[0]
         calls.append(name)
         submit = next(t for t in tools if t.__name__ == "submit_entry")

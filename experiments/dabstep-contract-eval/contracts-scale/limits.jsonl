@@ -1,0 +1,18 @@
+{"model": "gpt-6-luna", "chars": 50000, "input_tokens": 12244, "chars_per_token": 4.091, "start_seen": true, "end_seen": true, "output": "4719\n8362"}
+{"model": "gpt-6-luna", "chars": 200000, "input_tokens": 47583, "chars_per_token": 4.205, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-luna", "chars": 400000, "input_tokens": 97338, "chars_per_token": 4.11, "start_seen": true, "end_seen": true, "output": "4719\n8362"}
+{"model": "gpt-6-luna", "chars": 800000, "input_tokens": 197654, "chars_per_token": 4.048, "start_seen": true, "end_seen": true, "output": "4719\n8362"}
+{"model": "gpt-6-luna", "chars": 1200000, "input_tokens": 296834, "chars_per_token": 4.043, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-luna", "chars": 1600000, "input_tokens": 398321, "chars_per_token": 4.017, "start_seen": true, "end_seen": true, "output": "4719\n8362"}
+{"model": "gpt-6-luna", "chars": 2400000, "input_tokens": 596253, "chars_per_token": 4.025, "start_seen": true, "end_seen": true, "output": "4719\n8362"}
+{"model": "gpt-6-sol", "chars": 50000, "input_tokens": 12244, "chars_per_token": 4.091, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-sol", "chars": 200000, "input_tokens": 47583, "chars_per_token": 4.205, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-sol", "chars": 400000, "input_tokens": 97338, "chars_per_token": 4.11, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-sol", "chars": 800000, "input_tokens": 197654, "chars_per_token": 4.048, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-sol", "chars": 1200000, "input_tokens": 296834, "chars_per_token": 4.043, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-sol", "chars": 1600000, "input_tokens": 398321, "chars_per_token": 4.017, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "gpt-6-sol", "chars": 2400000, "input_tokens": 596253, "chars_per_token": 4.025, "start_seen": true, "end_seen": true, "output": "4719 8362"}
+{"model": "qwen3.8-27b", "chars": 50000, "input_tokens": 12869, "chars_per_token": 3.893, "start_seen": true, "end_seen": true, "output": "\n\n4719 8362"}
+{"model": "qwen3.8-27b", "chars": 200000, "input_tokens": 49806, "chars_per_token": 4.017, "start_seen": true, "end_seen": true, "output": "\n\n4719 8362"}
+{"model": "qwen3.8-27b", "chars": 400000, "input_tokens": 102139, "chars_per_token": 3.917, "start_seen": true, "end_seen": true, "output": "\n\n4719 8362"}
+{"model": "qwen3.8-27b", "chars": 800000, "error": "ModelHTTPError: status_code: 400, model_name: qwen3.8-27b, body: {'message': 'litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: Hosted_vllmException - {\"error\":{\"message\":\"This model\\'s maximum context length is 262144 tokens. However, you requested 64000 outpu"}

@@ -1,28 +1,27 @@
 \emph{Context layers}, curated documentation that an analytics agent
 fetches at query time, produce large accuracy gains on text-to-SQL
-benchmarks. A with/without comparison cannot say which part of
-the layer does the work: the semantic content, the retrieval scaffolding that
-delivers it, or the pre-computed views that usually accompany it.
-
-We report a four-arm ablation on DABStep on four models that separates
-the three. The instrument is a data contract: a YAML artifact that
-carries a domain's semantics and the rules an agent's tools enforce. One arm
-empties every field of prose in the frozen contract while holding the tool
-surface, retrieval instruction, table allow-list and operation rules
-byte-for-byte fixed. Compiling the contract's own SQL expressions into views gives the ceiling
-a pre-computed layer would reach: gold on all 176 tasks it covers.
-
-Content dominates. It raises hard-task accuracy from 13.9\% to 55.1\%, 22.6\%
-to 56.6\%, 22.9\% to 68.4\% and 37.0\% to 77.4\%, beating the same knowledge
-pasted into the prompt on every model. Scaffolding without content is worth 0 to 5 points on two flash models and
-14 to 15 on two frontier models. Against the
-compiled ceiling the contract arm's shortfall is a failure to derive, and it
-falls from 39 points to 5 with model capability. The contract beats the
-prompt because the rule it needs is one lookup away rather than buried in a
-long prompt: its SQL carries the fee semantics up to 98\% of the time
-against the prompt arm's 4\%, and at the lowest cost per correct answer on
-three of four models. For practitioners: semantics first, scaffolding second, pre-computed macros only where an agent
-demonstrably fails to derive. Ungoverned arms submitted 166 mutating
-statements; governed arms none. The gain is confined to the contract's
-domain. On one model the benchmark's own withheld golds grade the contract
-arm at 51.9\% against 18.8\% for the prompt baseline.
+benchmarks, but a with/without comparison cannot say which part of the
+layer does the work. Using a data contract as the instrument, we separate
+the knowledge a layer carries from the tools and format that deliver it,
+on DABStep and LiveSQLBench, across seven models, with 53 predictions
+committed before the results they predict. The knowledge does the work:
+emptying the contract's descriptions and SQL definitions while keeping its
+tools and rules costs 26 to 50 points of accuracy on DABStep's hard tasks,
+nearly all of which turn on its fee procedure, on every model that ran it,
+while the tools alone are worth $-9$ to $+15$. Most of what looked like an
+advantage of delivery was knowledge: two facts missing from DABStep's
+manual, stated in words, recover most of the contract's lead over the
+pasted manual, also on held-out tasks; stated alike, the contract's
+representation adds about 4 to 6 points on the rule-matching tasks. A
+contract pays where it states something true that the documentation leaves
+out. A model that checks its definitions against the data recovers what
+the data settles, and a convention only when the gold uses the default
+idiom; on LiveSQLBench, whose documentation leaves a result-changing
+choice open on most tasks, no author we tried gained detectably. Delivery
+buys other things. On questions that name the metric they need, a contract
+four times a database's size costs the prompt no accuracy, but on GPT
+models looking definitions up is cheaper from twice that size and works
+past the context window, and the lookup log traces a wrong answer to the
+definition behind it. No run whose prompt stated the forbidden operations,
+through the tools or as text, corrupted its database copy: none of
+29{,}356, against 50 of 21{,}790 without them.

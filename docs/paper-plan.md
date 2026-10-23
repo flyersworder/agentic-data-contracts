@@ -224,6 +224,25 @@ the rest are writing.
    inspect-rejection count falls 218 -> 29. Report run A as a floor. The
    defect's direction is confirmed, its magnitude is tangled with the model
    change.
+8. **Progressive disclosure is untested at the scale where it should pay**
+   (noted 2026-10-19, from experiment 4b's first gpt-6-luna repeat). With
+   knowledge held equal, the governed arm reaches the same accuracy from a
+   third of the starting context. `contract_gap` starts from about 33k chars
+   and fetches about 12k on demand. `contract_text` puts the whole contract,
+   about 103k, in the prompt. Even so, the governed arm costs more turns
+   (5.2 against 2.5) and more money. Each lookup is a round trip, and
+   fetched text is billed fresh while a static prompt is cached. One
+   database's contract (about 25k tokens) fits in a cached prompt, so loading
+   it all up front is nearly free. **The test:** grow the contract with real
+   but irrelevant domains, for example all of LiveSQLBench's databases in one
+   contract. Then find the size at which `contract_text` starts to lose
+   accuracy or cost while `contract_gap` holds steady. Run it after 4b
+   finishes. Without it, the scale limit goes in §threats.
+   **Closed by experiment 6** (FINDINGS.md, *Disclosure at scale*). Accuracy
+   holds for both arms up to 22 databases; the governed arm is cheaper from
+   2x on (1.7x on luna, 2.4x on sol at 4x) and runs where the text arm does
+   not fit Qwen's window. The case for disclosure is cost and size, not
+   accuracy.
 
 ## PVLDB timing and what remains (2026-09-05)
 

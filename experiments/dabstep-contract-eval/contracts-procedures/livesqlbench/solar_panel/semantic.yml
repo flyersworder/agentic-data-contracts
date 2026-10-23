@@ -1,0 +1,963 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: solar_panel, author: claudeopus5.5
+metrics:
+- name: specific_yield
+  description: 'Specific Yield Y_S = E_out / P_rated, E_out energy yielded in kWh (energy_yield.energy_yield_kwh),
+    P_rated plant rated capacity in kW (plants.cap_mw x 1000). The JSON also stores energy_yield.specific_yield_kwh_kw
+    (kWh/kWp) per snapshot; use that stored field when the question asks for the recorded value.
+
+    '
+  sql_expression: '(e.elec_perf_snapshot->''energy_yield''->>''energy_yield_kwh'')::DOUBLE / NULLIF(p.cap_mw
+    * 1000.0, 0)
+
+    '
+  source_model: main.electrical_performance
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.electrical_performance
+    e ON e.snaplink = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: power_capacity_factor
+  description: 'CF = E_out / (P_rated x T_period) x 100%, T_period hours in the period. No period length
+    is stored, so this reads the per-snapshot stored capacity factor energy_yield.capacity_factor_pct
+    (percent). To apply the formula for a stated period use energy_yield_kwh / (cap_mw*1000 * hours) *
+    100.
+
+    '
+  sql_expression: (e.elec_perf_snapshot->'energy_yield'->>'capacity_factor_pct')::DOUBLE
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: performance_ratio
+  description: 'PR = Specific Yield / (H_POA / G_ref), G_ref = 1 kW/m2. No period H_POA in kWh/m2 is stored
+    (only instantaneous poa_irr_w_m2), so PR is the stored energy_yield.performance_ratio (fraction, 0.70-0.90
+    in data; NULL in 400 snapshots = not reported).
+
+    '
+  sql_expression: (e.elec_perf_snapshot->'energy_yield'->>'performance_ratio')::DOUBLE
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: underperforming_asset
+  description: 'True when Performance Ratio falls below a minimum acceptable threshold, such as 0.75 (the
+    documented example threshold used here). NULL where PR is NULL.
+
+    '
+  sql_expression: (e.elec_perf_snapshot->'energy_yield'->>'performance_ratio')::DOUBLE < 0.75
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: soiling_loss_index
+  description: 'Percentage reduction in power output caused by soiling (10 = current power 10% lower than
+    with perfectly clean panels): efficiency.soil_loss_pct, 0-100 scale.
+
+    '
+  sql_expression: (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: severe_soiling_condition
+  description: 'Soiling Loss Index greater than a significant threshold, for example 15% (documented example
+    used). Data max is 14.99, so none qualify at 15.
+
+    '
+  sql_expression: (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE > 15
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: thermal_loss_factor
+  description: 'L_T = (T_cell - T_ref) x |gamma|, T_cell = env temperatures.cell_temp_c, T_ref = 25 C,
+    gamma = panel_models.tempcoeff (%/C, of the plant''s model via plants.modhook). Result is in percent.
+    NULL when cell_temp_c or tempcoeff is NULL.
+
+    '
+  sql_expression: '((env.env_snapshot->''temperatures''->>''cell_temp_c'')::DOUBLE - 25) * ABS(m.tempcoeff)
+
+    '
+  source_model: main.environmental_conditions
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.panel_models m
+    ON p.modhook = m.modkey JOIN main.environmental_conditions env ON env.snapref = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: temperature_corrected_performance
+  description: 'P_corrected = P_actual / (1 - Thermal Loss Factor), P_actual = power.power_now_w (W).
+    The thermal loss factor is a percentage, so it is divided by 100 here.
+
+    '
+  sql_expression: '(e.elec_perf_snapshot->''power''->>''power_now_w'')::DOUBLE / NULLIF(1 - ((env.env_snapshot->''temperatures''->>''cell_temp_c'')::DOUBLE
+    - 25) * ABS(m.tempcoeff) / 100.0, 0)
+
+    '
+  source_model: main.electrical_performance
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.panel_models m
+    ON p.modhook = m.modkey JOIN main.environmental_conditions env ON env.snapref = r.snapkey JOIN main.electrical_performance
+    e ON e.snaplink = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: inverter_efficiency_loss
+  description: L_inv = 100% - inverter.inverter_eff_pct (percent of DC power lost as heat in conversion).
+  sql_expression: 100 - (e.elec_perf_snapshot->'inverter'->>'inverter_eff_pct')::DOUBLE
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: system_power_loss_ratio
+  description: 'R_loss = P_loss / (P_output + P_loss): power.power_loss_w / (power.power_now_w + power.power_loss_w).
+    NULL where either is NULL.'
+  sql_expression: '(e.elec_perf_snapshot->''power''->>''power_loss_w'')::DOUBLE / NULLIF((e.elec_perf_snapshot->''power''->>''power_now_w'')::DOUBLE
+    + (e.elec_perf_snapshot->''power''->>''power_loss_w'')::DOUBLE, 0)
+
+    '
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: effective_power_output
+  description: 'P_eff = P_gross x (1 - System Power Loss Ratio). INTERPRETATION: P_gross is the reported
+    output power.power_now_w (W).
+
+    '
+  sql_expression: '(e.elec_perf_snapshot->''power''->>''power_now_w'')::DOUBLE * (1 - (e.elec_perf_snapshot->''power''->>''power_loss_w'')::DOUBLE
+    / NULLIF((e.elec_perf_snapshot->''power''->>''power_now_w'')::DOUBLE + (e.elec_perf_snapshot->''power''->>''power_loss_w'')::DOUBLE,
+    0))
+
+    '
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - performance
+- name: plant_age_years
+  description: 'Age in years of the plant at the snapshot: days from plants.goliveon to plant_record.snapts
+    divided by 365.25. Negative for the 445 snapshots dated before go-live.
+
+    '
+  sql_expression: date_diff('day', p.goliveon, CAST(r.snapts AS DATE)) / 365.25
+  source_model: main.plant_record
+  from_sql: main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: annual_degradation_rate
+  description: 'ADR = Cumulative Degradation Pct (efficiency.cumulative_deg_pct) / Age in Years (plant_age_years).
+    Percent per year. NULL when age is 0.
+
+    '
+  sql_expression: '(e.elec_perf_snapshot->''efficiency''->>''cumulative_deg_pct'')::DOUBLE / NULLIF(date_diff(''day'',
+    p.goliveon, CAST(r.snapts AS DATE)) / 365.25, 0)
+
+    '
+  source_model: main.electrical_performance
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.electrical_performance
+    e ON e.snaplink = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: degradation_adjusted_capacity
+  description: 'P_adj = P_rated x (1 - ADR x Age), P_rated = plants.cap_mw (MW); ADR is in percent so
+    ADR x Age is divided by 100 (equals cumulative_deg_pct/100 when age is nonzero).
+
+    '
+  sql_expression: 'p.cap_mw * (1 - ((e.elec_perf_snapshot->''efficiency''->>''cumulative_deg_pct'')::DOUBLE
+    / NULLIF(date_diff(''day'', p.goliveon, CAST(r.snapts AS DATE)) / 365.25, 0)) * (date_diff(''day'',
+    p.goliveon, CAST(r.snapts AS DATE)) / 365.25) / 100.0)
+
+    '
+  source_model: main.plants
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.electrical_performance
+    e ON e.snaplink = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: fill_factor_degradation
+  description: FF_deg = iv_curve.fill_factor_initial - iv_curve.fill_factor_now; higher = more degradation.
+  sql_expression: '(e.elec_perf_snapshot->''iv_curve''->>''fill_factor_initial'')::DOUBLE - (e.elec_perf_snapshot->''iv_curve''->>''fill_factor_now'')::DOUBLE
+
+    '
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: voltage_degradation_factor
+  description: V_deg = (vmp_initial_v - vmp_now_v) / vmp_initial_v (fraction), from iv_curve.
+  sql_expression: '((e.elec_perf_snapshot->''iv_curve''->>''vmp_initial_v'')::DOUBLE - (e.elec_perf_snapshot->''iv_curve''->>''vmp_now_v'')::DOUBLE)
+    / NULLIF((e.elec_perf_snapshot->''iv_curve''->>''vmp_initial_v'')::DOUBLE, 0)
+
+    '
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: current_degradation_factor
+  description: I_deg = (imp_initial_a - imp_now_a) / imp_initial_a (fraction), from iv_curve; imp_now_a
+    is NULL in 399 snapshots.
+  sql_expression: '((e.elec_perf_snapshot->''iv_curve''->>''imp_initial_a'')::DOUBLE - (e.elec_perf_snapshot->''iv_curve''->>''imp_now_a'')::DOUBLE)
+    / NULLIF((e.elec_perf_snapshot->''iv_curve''->>''imp_initial_a'')::DOUBLE, 0)
+
+    '
+  source_model: main.electrical_performance
+  from_sql: main.electrical_performance e
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: high_degradation_panel_model
+  description: Panel model whose specified annual degradation rate panel_models.degyrrate (percent/yr)
+    exceeds 0.7 (documented example threshold).
+  sql_expression: m.degyrrate > 0.7
+  source_model: main.panel_models
+  from_sql: main.panel_models m
+  grain: one row per panel model
+  domains:
+  - degradation
+- name: major_module_degradation
+  description: 'busbar_corrosion = ''Severe'' AND delamination_status = ''Major'' AND microcrack_count
+    > 5 (module_surface of mech_health_snapshot). 89 snapshots qualify.
+
+    '
+  sql_expression: '(mc.mech_health_snapshot->''module_surface''->>''busbar_corrosion'') = ''Severe'' AND
+    (mc.mech_health_snapshot->''module_surface''->>''delamination_status'') = ''Major'' AND (mc.mech_health_snapshot->''module_surface''->>''microcrack_count'')::INTEGER
+    > 5
+
+    '
+  source_model: main.mechanical_condition
+  from_sql: main.mechanical_condition mc
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: accelerated_aging_asset
+  description: 'High ADR AND Major Module Degradation. INTERPRETATION: the documentation gives no "high
+    ADR" threshold; this uses ADR > 0.7 (%/yr), the documented high-degradation threshold for panel models.
+    Substitute the question''s threshold if it states one.
+
+    '
+  sql_expression: "((e.elec_perf_snapshot->'efficiency'->>'cumulative_deg_pct')::DOUBLE\n  / NULLIF(date_diff('day',\
+    \ p.goliveon, CAST(r.snapts AS DATE)) / 365.25, 0)) > 0.7\nAND (mc.mech_health_snapshot->'module_surface'->>'busbar_corrosion')\
+    \ = 'Severe' AND (mc.mech_health_snapshot->'module_surface'->>'delamination_status') = 'Major' AND\
+    \ (mc.mech_health_snapshot->'module_surface'->>'microcrack_count')::INTEGER > 5\n"
+  source_model: main.plant_record
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.electrical_performance
+    e ON e.snaplink = r.snapkey JOIN main.mechanical_condition mc ON mc.snapmk = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - degradation
+- name: system_unavailability
+  description: U = MTTR / (MTBF + MTTR) from operational_metrics.mttrh and mtbfh (hours). NULL where mtbfh
+    is NULL (400 rows).
+  sql_expression: o.mttrh / NULLIF(o.mtbfh + o.mttrh, 0)
+  source_model: main.operational_metrics
+  from_sql: main.operational_metrics o
+  grain: one row per snapshot
+  domains:
+  - reliability_costs
+- name: system_availability
+  description: A = 1 - System Unavailability (fraction; 0.99 = non-operational 1% of the time).
+  sql_expression: 1 - o.mttrh / NULLIF(o.mtbfh + o.mttrh, 0)
+  source_model: main.operational_metrics
+  from_sql: main.operational_metrics o
+  grain: one row per snapshot
+  domains:
+  - reliability_costs
+- name: chronic_downtime_asset
+  description: System Availability below 95% (documented example threshold), i.e. A < 0.95.
+  sql_expression: (1 - o.mttrh / NULLIF(o.mtbfh + o.mttrh, 0)) < 0.95
+  source_model: main.operational_metrics
+  from_sql: main.operational_metrics o
+  grain: one row per snapshot
+  domains:
+  - reliability_costs
+- name: operational_expenditure_index
+  description: 'OEI = (maintcost + cleancost + replcost) / P_rated, P_rated = plants.cap_mw (cost per
+    MW of installed capacity, capacity as stored in MW). High-Cost Asset = OEI above the question''s predefined
+    value (none documented).
+
+    '
+  sql_expression: (o.maintcost + o.cleancost + o.replcost) / NULLIF(p.cap_mw, 0)
+  source_model: main.operational_metrics
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.operational_metrics
+    o ON o.snapops = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - reliability_costs
+- name: revenue_loss_usd
+  description: operational_metrics.revloss parsed from text like '$13,375.59 ' to a number.
+  sql_expression: CAST(replace(replace(trim(o.revloss), '$', ''), ',', '') AS DOUBLE)
+  source_model: main.operational_metrics
+  from_sql: main.operational_metrics o
+  grain: one row per snapshot
+  domains:
+  - reliability_costs
+  - data_access
+- name: maintenance_cost_to_revenue_impact_ratio
+  description: 'Total Maintenance Cost / Total Revenue Loss = SUM(maintcost) / SUM(parsed revloss) over
+    the population (per snapshot when grouped by snapops). < 1 suggests repair cost was less than the
+    revenue saved.
+
+    '
+  sql_expression: 'SUM(o.maintcost) / NULLIF(SUM(CAST(replace(replace(trim(o.revloss), ''$'', ''''), '','',
+    '''') AS DOUBLE)), 0)
+
+    '
+  source_model: main.operational_metrics
+  from_sql: main.operational_metrics o
+  grain: aggregate over snapshots
+  domains:
+  - reliability_costs
+- name: mean_repair_cost
+  description: 'C_repair = Total Maintenance Cost / (Total Time / MTBF). INTERPRETATION: Total Time is
+    the plant''s operating time in hours from goliveon to the snapshot (days x 24); if the question supplies
+    a time span use it instead. NULL where MTBF is NULL or time is 0; negative-age snapshots give negative
+    values.
+
+    '
+  sql_expression: 'o.maintcost / NULLIF((date_diff(''day'', p.goliveon, CAST(r.snapts AS DATE)) * 24.0)
+    / o.mtbfh, 0)
+
+    '
+  source_model: main.operational_metrics
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.operational_metrics
+    o ON o.snapops = r.snapkey
+
+    '
+  grain: one row per snapshot
+  domains:
+  - reliability_costs
+- name: tracker_malfunction
+  description: tracker.tracker_state is 'Error' or 'Maintenance'.
+  sql_expression: (mc.mech_health_snapshot->'tracker'->>'tracker_state') IN ('Error', 'Maintenance')
+  source_model: main.mechanical_condition
+  from_sql: main.mechanical_condition mc
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: structural_integrity_warning
+  description: mount_cleaning.mount_structure_status is 'Unstable' or 'Check Required'.
+  sql_expression: (mc.mech_health_snapshot->'mount_cleaning'->>'mount_structure_status') IN ('Unstable',
+    'Check Required')
+  source_model: main.mechanical_condition
+  from_sql: main.mechanical_condition mc
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: critical_mechanical_health
+  description: Structural Integrity Warning AND Tracker Malfunction at the same snapshot.
+  sql_expression: '(mc.mech_health_snapshot->''mount_cleaning''->>''mount_structure_status'') IN (''Unstable'',
+    ''Check Required'') AND (mc.mech_health_snapshot->''tracker''->>''tracker_state'') IN (''Error'',
+    ''Maintenance'')
+
+    '
+  source_model: main.mechanical_condition
+  from_sql: main.mechanical_condition mc
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: electrical_integrity_failure
+  description: 'grounding_status = ''Failed'' OR bypass_diode_status non-normal (<> ''Normal'': ''Failed''
+    or ''Partial''). 790 snapshots qualify.'
+  sql_expression: '(mc.mech_health_snapshot->''electrical_integrity''->>''grounding_status'') = ''Failed''
+    OR (mc.mech_health_snapshot->''electrical_integrity''->>''bypass_diode_status'') <> ''Normal''
+
+    '
+  source_model: main.mechanical_condition
+  from_sql: main.mechanical_condition mc
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: high_maintenance_priority
+  description: alert.maintprio = 'High' (NULL maintprio is not High).
+  sql_expression: a.maintprio = 'High'
+  source_model: main.alert
+  from_sql: main.alert a
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: high_replacement_priority
+  description: alert.replprio = 'High'.
+  sql_expression: a.replprio = 'High'
+  source_model: main.alert
+  from_sql: main.alert a
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: critical_alert
+  description: High Maintenance Priority AND High Replacement Priority (not alert.alrtstate = 'Critical').
+  sql_expression: a.maintprio = 'High' AND a.replprio = 'High'
+  source_model: main.alert
+  from_sql: main.alert a
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: data_quality_concern
+  description: inspection.dqscore < 50 (out of 100; documented example threshold). Only 'IR Thermal' (19.9)
+    qualifies.
+  sql_expression: i.dqscore < 50
+  source_model: main.inspection
+  from_sql: main.inspection i
+  grain: one row per inspection mode
+  domains:
+  - condition_flags
+- name: overdue_critical_maintenance
+  description: inspection.inspectres = 'Major Issues' AND inspection.maintsched = 'Overdue'.
+  sql_expression: i.inspectres = 'Major Issues' AND i.maintsched = 'Overdue'
+  source_model: main.inspection
+  from_sql: main.inspection i
+  grain: one row per inspection mode
+  domains:
+  - condition_flags
+- name: neglected_asset
+  description: 'Critical Alert AND Overdue Critical Maintenance AND Data Quality Concern. INTERPRETATION:
+    inspection has no link to snapshots, so the two inspection conditions are fleet-level EXISTS checks
+    (currently both true via ''IR Thermal''); effectively a neglected asset is any snapshot with a Critical
+    Alert. Decommissioning Candidate = neglected_asset AND operational_expenditure_index above the question''s
+    high-cost threshold.
+
+    '
+  sql_expression: 'a.maintprio = ''High'' AND a.replprio = ''High'' AND EXISTS (SELECT 1 FROM main.inspection
+    i WHERE i.inspectres = ''Major Issues'' AND i.maintsched = ''Overdue'') AND EXISTS (SELECT 1 FROM
+    main.inspection i2 WHERE i2.dqscore < 50)
+
+    '
+  source_model: main.alert
+  from_sql: main.alert a
+  grain: one row per snapshot
+  domains:
+  - condition_flags
+- name: high_environmental_risk_site
+  description: plants.envtag = 'High'.
+  sql_expression: p.envtag = 'High'
+  source_model: main.plants
+  from_sql: main.plants p
+  grain: one row per plant
+  domains:
+  - risk_compliance
+- name: warranty_claim_risk
+  description: plants.warrstate = 'Claimed' AND plants.warrclaims > 2 (documented example).
+  sql_expression: p.warrstate = 'Claimed' AND p.warrclaims > 2
+  source_model: main.plants
+  from_sql: main.plants p
+  grain: one row per plant
+  domains:
+  - risk_compliance
+- name: uv_index_category
+  description: 'UV index category: 1-2 Low, 3-5 Moderate, 6-7 High, 8-10 Very High, 11+ Extreme (values
+    below 3 are Low; boundaries read on the open scale).'
+  sql_expression: "CASE WHEN (env.env_snapshot->'atmospheric'->>'uv_index')::DOUBLE IS NULL THEN NULL\n\
+    \     WHEN (env.env_snapshot->'atmospheric'->>'uv_index')::DOUBLE < 3 THEN 'Low'\n     WHEN (env.env_snapshot->'atmospheric'->>'uv_index')::DOUBLE\
+    \ < 6 THEN 'Moderate'\n     WHEN (env.env_snapshot->'atmospheric'->>'uv_index')::DOUBLE < 8 THEN 'High'\n\
+    \     WHEN (env.env_snapshot->'atmospheric'->>'uv_index')::DOUBLE < 11 THEN 'Very High'\n     ELSE\
+    \ 'Extreme' END\n"
+  source_model: main.environmental_conditions
+  from_sql: main.environmental_conditions env
+  grain: one row per snapshot
+  domains:
+  - reference_values
+- name: settlement_capacity_band
+  description: '''Small'' cap_mw < 100; ''Mid'' 100 <= cap_mw < 300; ''Large'' cap_mw >= 300, from the
+    snapshot''s plant.'
+  sql_expression: 'CASE WHEN p.cap_mw < 100 THEN ''Small'' WHEN p.cap_mw < 300 THEN ''Mid'' WHEN p.cap_mw
+    >= 300 THEN ''Large'' END
+
+    '
+  source_model: main.plants
+  from_sql: main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey
+  grain: one row per snapshot
+  domains:
+  - warranty_settlement
+- name: manufacturer_monthly_claim_volume
+  description: 'V_s = number of plant_record rows with the same calendar month of snapts and same manufacturer
+    group (makertag via plants.modhook, NULL -> ''Unlisted''), s included. Read ws.claim_volume from the
+    settlement subquery (one value per snapshot).
+
+    '
+  sql_expression: ws.claim_volume
+  source_model: main.plant_record
+  from_sql: "(\n  WITH snap AS (\n    SELECT r.snapkey, r.snapts, COALESCE(m.makertag, 'Unlisted') AS\
+    \ maker_group, m.makertag, m.pnlkind,\n           a.alrtstate, p.warrstate,\n           CASE WHEN\
+    \ p.cap_mw < 100 THEN 'Small' WHEN p.cap_mw < 300 THEN 'Mid' WHEN p.cap_mw >= 300 THEN 'Large' END\
+    \ AS cap_band,\n           COUNT(r.snapkey) OVER (PARTITION BY COALESCE(m.makertag, 'Unlisted'), date_trunc('month',\
+    \ r.snapts)) AS claim_volume,\n           COALESCE(o.replcost, 0) AS replcost\n    FROM main.plant_record\
+    \ r\n    JOIN main.plants p ON r.sitetie = p.sitekey\n    JOIN main.panel_models m ON p.modhook =\
+    \ m.modkey\n    LEFT JOIN main.alert a ON a.snapalrt = r.snapkey\n    LEFT JOIN main.operational_metrics\
+    \ o ON o.snapops = r.snapkey\n  ), tiered AS (\n    SELECT snap.snapkey, snap.snapts, snap.maker_group,\
+    \ snap.makertag, snap.pnlkind, snap.alrtstate,\n           snap.warrstate, snap.cap_band, snap.claim_volume,\
+    \ snap.replcost,\n           CASE WHEN snap.claim_volume = 1 THEN 'Single' WHEN snap.claim_volume\
+    \ <= 3 THEN 'Moderate' ELSE 'Bulk' END AS vol_tier\n    FROM snap\n  ), ranked AS (\n    SELECT t.snapkey,\
+    \ w.rule_id, w.fixed_fee_usd, w.cover_pct,\n           ROW_NUMBER() OVER (PARTITION BY t.snapkey ORDER\
+    \ BY\n             (CASE WHEN w.maker_tag IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.pnl_kind IS\
+    \ NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.alrt_state IS NOT NULL THEN 1 ELSE 0 END\
+    \ + CASE WHEN w.warr_state IS NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.cap_band IS\
+    \ NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.vol_tier IS NOT NULL THEN 1 ELSE 0 END) DESC,\n       \
+    \      w.rule_id) AS rn\n    FROM tiered t JOIN main.warranty_settle_rules w\n      ON (w.maker_tag\
+    \ IS NULL OR w.maker_tag = t.makertag)\n     AND (w.pnl_kind IS NULL OR w.pnl_kind = t.pnlkind)\n\
+    \     AND (w.alrt_state IS NULL OR w.alrt_state = t.alrtstate)\n     AND (w.warr_state IS NULL OR\
+    \ w.warr_state = t.warrstate)\n     AND (w.cap_band IS NULL OR w.cap_band = t.cap_band)\n     AND\
+    \ (w.vol_tier IS NULL OR w.vol_tier = t.vol_tier)\n  )\n  SELECT t.snapkey, t.snapts, t.maker_group,\
+    \ t.makertag, t.pnlkind, t.alrtstate, t.warrstate,\n         t.cap_band, t.claim_volume, t.vol_tier,\
+    \ t.replcost, g.rule_id,\n         COALESCE(g.fixed_fee_usd, 300.00) AS settle_fee, COALESCE(g.cover_pct,\
+    \ 5.00) AS settle_cover_pct\n  FROM tiered t LEFT JOIN ranked g ON g.snapkey = t.snapkey AND g.rn\
+    \ = 1\n) ws\n"
+  grain: one row per snapshot (plant_record row)
+  domains:
+  - warranty_settlement
+- name: claim_volume_tier
+  description: '''Single'' if V_s = 1; ''Moderate'' if 2 or 3; ''Bulk'' if >= 4 (ws.vol_tier). Shared
+    by all snapshots of a manufacturer group-month.'
+  sql_expression: ws.vol_tier
+  source_model: main.plant_record
+  from_sql: "(\n  WITH snap AS (\n    SELECT r.snapkey, r.snapts, COALESCE(m.makertag, 'Unlisted') AS\
+    \ maker_group, m.makertag, m.pnlkind,\n           a.alrtstate, p.warrstate,\n           CASE WHEN\
+    \ p.cap_mw < 100 THEN 'Small' WHEN p.cap_mw < 300 THEN 'Mid' WHEN p.cap_mw >= 300 THEN 'Large' END\
+    \ AS cap_band,\n           COUNT(r.snapkey) OVER (PARTITION BY COALESCE(m.makertag, 'Unlisted'), date_trunc('month',\
+    \ r.snapts)) AS claim_volume,\n           COALESCE(o.replcost, 0) AS replcost\n    FROM main.plant_record\
+    \ r\n    JOIN main.plants p ON r.sitetie = p.sitekey\n    JOIN main.panel_models m ON p.modhook =\
+    \ m.modkey\n    LEFT JOIN main.alert a ON a.snapalrt = r.snapkey\n    LEFT JOIN main.operational_metrics\
+    \ o ON o.snapops = r.snapkey\n  ), tiered AS (\n    SELECT snap.snapkey, snap.snapts, snap.maker_group,\
+    \ snap.makertag, snap.pnlkind, snap.alrtstate,\n           snap.warrstate, snap.cap_band, snap.claim_volume,\
+    \ snap.replcost,\n           CASE WHEN snap.claim_volume = 1 THEN 'Single' WHEN snap.claim_volume\
+    \ <= 3 THEN 'Moderate' ELSE 'Bulk' END AS vol_tier\n    FROM snap\n  ), ranked AS (\n    SELECT t.snapkey,\
+    \ w.rule_id, w.fixed_fee_usd, w.cover_pct,\n           ROW_NUMBER() OVER (PARTITION BY t.snapkey ORDER\
+    \ BY\n             (CASE WHEN w.maker_tag IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.pnl_kind IS\
+    \ NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.alrt_state IS NOT NULL THEN 1 ELSE 0 END\
+    \ + CASE WHEN w.warr_state IS NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.cap_band IS\
+    \ NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.vol_tier IS NOT NULL THEN 1 ELSE 0 END) DESC,\n       \
+    \      w.rule_id) AS rn\n    FROM tiered t JOIN main.warranty_settle_rules w\n      ON (w.maker_tag\
+    \ IS NULL OR w.maker_tag = t.makertag)\n     AND (w.pnl_kind IS NULL OR w.pnl_kind = t.pnlkind)\n\
+    \     AND (w.alrt_state IS NULL OR w.alrt_state = t.alrtstate)\n     AND (w.warr_state IS NULL OR\
+    \ w.warr_state = t.warrstate)\n     AND (w.cap_band IS NULL OR w.cap_band = t.cap_band)\n     AND\
+    \ (w.vol_tier IS NULL OR w.vol_tier = t.vol_tier)\n  )\n  SELECT t.snapkey, t.snapts, t.maker_group,\
+    \ t.makertag, t.pnlkind, t.alrtstate, t.warrstate,\n         t.cap_band, t.claim_volume, t.vol_tier,\
+    \ t.replcost, g.rule_id,\n         COALESCE(g.fixed_fee_usd, 300.00) AS settle_fee, COALESCE(g.cover_pct,\
+    \ 5.00) AS settle_cover_pct\n  FROM tiered t LEFT JOIN ranked g ON g.snapkey = t.snapkey AND g.rn\
+    \ = 1\n) ws\n"
+  grain: one row per snapshot (plant_record row)
+  domains:
+  - warranty_settlement
+- name: governing_rule_id
+  description: 'The warranty_settle_rules.rule_id governing a snapshot: all six criteria satisfied (NULL
+    criterion = any; non-NULL must equal a non-NULL snapshot value), highest specificity (count of non-NULL
+    criteria), tie -> lowest rule_id. NULL = no matching rule (Standard Settlement Terms). The from_sql
+    subquery ws exposes per snapshot: snapkey, snapts, maker_group, makertag, pnlkind, alrtstate, warrstate,
+    cap_band, claim_volume, vol_tier, replcost (NULL->0), rule_id, settle_fee, settle_cover_pct. Verified
+    to run; all 998 snapshots present.
+
+    '
+  sql_expression: ws.rule_id
+  source_model: main.warranty_settle_rules
+  from_sql: "(\n  WITH snap AS (\n    SELECT r.snapkey, r.snapts, COALESCE(m.makertag, 'Unlisted') AS\
+    \ maker_group, m.makertag, m.pnlkind,\n           a.alrtstate, p.warrstate,\n           CASE WHEN\
+    \ p.cap_mw < 100 THEN 'Small' WHEN p.cap_mw < 300 THEN 'Mid' WHEN p.cap_mw >= 300 THEN 'Large' END\
+    \ AS cap_band,\n           COUNT(r.snapkey) OVER (PARTITION BY COALESCE(m.makertag, 'Unlisted'), date_trunc('month',\
+    \ r.snapts)) AS claim_volume,\n           COALESCE(o.replcost, 0) AS replcost\n    FROM main.plant_record\
+    \ r\n    JOIN main.plants p ON r.sitetie = p.sitekey\n    JOIN main.panel_models m ON p.modhook =\
+    \ m.modkey\n    LEFT JOIN main.alert a ON a.snapalrt = r.snapkey\n    LEFT JOIN main.operational_metrics\
+    \ o ON o.snapops = r.snapkey\n  ), tiered AS (\n    SELECT snap.snapkey, snap.snapts, snap.maker_group,\
+    \ snap.makertag, snap.pnlkind, snap.alrtstate,\n           snap.warrstate, snap.cap_band, snap.claim_volume,\
+    \ snap.replcost,\n           CASE WHEN snap.claim_volume = 1 THEN 'Single' WHEN snap.claim_volume\
+    \ <= 3 THEN 'Moderate' ELSE 'Bulk' END AS vol_tier\n    FROM snap\n  ), ranked AS (\n    SELECT t.snapkey,\
+    \ w.rule_id, w.fixed_fee_usd, w.cover_pct,\n           ROW_NUMBER() OVER (PARTITION BY t.snapkey ORDER\
+    \ BY\n             (CASE WHEN w.maker_tag IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.pnl_kind IS\
+    \ NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.alrt_state IS NOT NULL THEN 1 ELSE 0 END\
+    \ + CASE WHEN w.warr_state IS NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.cap_band IS\
+    \ NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.vol_tier IS NOT NULL THEN 1 ELSE 0 END) DESC,\n       \
+    \      w.rule_id) AS rn\n    FROM tiered t JOIN main.warranty_settle_rules w\n      ON (w.maker_tag\
+    \ IS NULL OR w.maker_tag = t.makertag)\n     AND (w.pnl_kind IS NULL OR w.pnl_kind = t.pnlkind)\n\
+    \     AND (w.alrt_state IS NULL OR w.alrt_state = t.alrtstate)\n     AND (w.warr_state IS NULL OR\
+    \ w.warr_state = t.warrstate)\n     AND (w.cap_band IS NULL OR w.cap_band = t.cap_band)\n     AND\
+    \ (w.vol_tier IS NULL OR w.vol_tier = t.vol_tier)\n  )\n  SELECT t.snapkey, t.snapts, t.maker_group,\
+    \ t.makertag, t.pnlkind, t.alrtstate, t.warrstate,\n         t.cap_band, t.claim_volume, t.vol_tier,\
+    \ t.replcost, g.rule_id,\n         COALESCE(g.fixed_fee_usd, 300.00) AS settle_fee, COALESCE(g.cover_pct,\
+    \ 5.00) AS settle_cover_pct\n  FROM tiered t LEFT JOIN ranked g ON g.snapkey = t.snapkey AND g.rn\
+    \ = 1\n) ws\n"
+  grain: one row per snapshot (plant_record row)
+  domains:
+  - warranty_settlement
+- name: warranty_settlement_amount
+  description: 'S = F + c/100 x C_repl per snapshot, F/c from the governing rule or Standard Settlement
+    Terms (300.00 USD, 5.00%), C_repl = operational_metrics.replcost (NULL as 0), USD, unrounded. For
+    totals (e.g. manufacturer monthly settlement: GROUP BY ws.maker_group, strftime(ws.snapts, ''%Y-%m''),
+    ''Unlisted'' included) use ROUND(SUM(ws.settle_fee + ws.settle_cover_pct / 100.0 * ws.replcost), 2).
+
+    '
+  sql_expression: ws.settle_fee + ws.settle_cover_pct / 100.0 * ws.replcost
+  source_model: main.warranty_settle_rules
+  from_sql: "(\n  WITH snap AS (\n    SELECT r.snapkey, r.snapts, COALESCE(m.makertag, 'Unlisted') AS\
+    \ maker_group, m.makertag, m.pnlkind,\n           a.alrtstate, p.warrstate,\n           CASE WHEN\
+    \ p.cap_mw < 100 THEN 'Small' WHEN p.cap_mw < 300 THEN 'Mid' WHEN p.cap_mw >= 300 THEN 'Large' END\
+    \ AS cap_band,\n           COUNT(r.snapkey) OVER (PARTITION BY COALESCE(m.makertag, 'Unlisted'), date_trunc('month',\
+    \ r.snapts)) AS claim_volume,\n           COALESCE(o.replcost, 0) AS replcost\n    FROM main.plant_record\
+    \ r\n    JOIN main.plants p ON r.sitetie = p.sitekey\n    JOIN main.panel_models m ON p.modhook =\
+    \ m.modkey\n    LEFT JOIN main.alert a ON a.snapalrt = r.snapkey\n    LEFT JOIN main.operational_metrics\
+    \ o ON o.snapops = r.snapkey\n  ), tiered AS (\n    SELECT snap.snapkey, snap.snapts, snap.maker_group,\
+    \ snap.makertag, snap.pnlkind, snap.alrtstate,\n           snap.warrstate, snap.cap_band, snap.claim_volume,\
+    \ snap.replcost,\n           CASE WHEN snap.claim_volume = 1 THEN 'Single' WHEN snap.claim_volume\
+    \ <= 3 THEN 'Moderate' ELSE 'Bulk' END AS vol_tier\n    FROM snap\n  ), ranked AS (\n    SELECT t.snapkey,\
+    \ w.rule_id, w.fixed_fee_usd, w.cover_pct,\n           ROW_NUMBER() OVER (PARTITION BY t.snapkey ORDER\
+    \ BY\n             (CASE WHEN w.maker_tag IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.pnl_kind IS\
+    \ NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.alrt_state IS NOT NULL THEN 1 ELSE 0 END\
+    \ + CASE WHEN w.warr_state IS NOT NULL THEN 1 ELSE 0 END\n              + CASE WHEN w.cap_band IS\
+    \ NOT NULL THEN 1 ELSE 0 END + CASE WHEN w.vol_tier IS NOT NULL THEN 1 ELSE 0 END) DESC,\n       \
+    \      w.rule_id) AS rn\n    FROM tiered t JOIN main.warranty_settle_rules w\n      ON (w.maker_tag\
+    \ IS NULL OR w.maker_tag = t.makertag)\n     AND (w.pnl_kind IS NULL OR w.pnl_kind = t.pnlkind)\n\
+    \     AND (w.alrt_state IS NULL OR w.alrt_state = t.alrtstate)\n     AND (w.warr_state IS NULL OR\
+    \ w.warr_state = t.warrstate)\n     AND (w.cap_band IS NULL OR w.cap_band = t.cap_band)\n     AND\
+    \ (w.vol_tier IS NULL OR w.vol_tier = t.vol_tier)\n  )\n  SELECT t.snapkey, t.snapts, t.maker_group,\
+    \ t.makertag, t.pnlkind, t.alrtstate, t.warrstate,\n         t.cap_band, t.claim_volume, t.vol_tier,\
+    \ t.replcost, g.rule_id,\n         COALESCE(g.fixed_fee_usd, 300.00) AS settle_fee, COALESCE(g.cover_pct,\
+    \ 5.00) AS settle_cover_pct\n  FROM tiered t LEFT JOIN ranked g ON g.snapkey = t.snapkey AND g.rn\
+    \ = 1\n) ws\n"
+  grain: one row per snapshot (plant_record row)
+  domains:
+  - warranty_settlement
+- name: potential_snapshot_yield
+  description: 'E_pot = E / ((A/100) x (1 - L_soil/100)) with E energy_yield_kwh, A availability_pct,
+    L_soil soil_loss_pct, each read with ->> and cast to DOUBLE. NULL if any is NULL. kWh, unrounded.
+
+    '
+  sql_expression: "(e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE\
+    \ / 100)\n         * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100), 0)\n"
+  source_model: main.electrical_performance
+  from_sql: main.plant_record r JOIN main.electrical_performance e ON e.snaplink = r.snapkey
+  grain: one row per snapshot
+  domains:
+  - energy_loss
+- name: recoverable_energy_loss
+  description: E_loss = E_pot - E (kWh), defined only where E_pot is; unrounded.
+  sql_expression: "(e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE\
+    \ / 100)\n         * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100), 0)\n\
+    - (e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE\n"
+  source_model: main.electrical_performance
+  from_sql: main.plant_record r JOIN main.electrical_performance e ON e.snaplink = r.snapkey
+  grain: one row per snapshot
+  domains:
+  - energy_loss
+- name: technology_monthly_energy_loss_ratio
+  description: 'R = 100 x SUM(E_loss) / SUM(E_pot) per technology-month: GROUP BY m.pnlkind, strftime(r.snapts,
+    ''%Y-%m''). Ratio of sums; snapshots without E_pot drop out of both sums. Report ROUND(R, 2); classify
+    on unrounded R. Groups with no snapshot have no row (no ratio, not zero).
+
+    '
+  sql_expression: "100 * SUM((e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE\n   \
+    \      / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE / 100)\n    \
+    \              * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100), 0)\n\
+    \         - (e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE)\n/ NULLIF(SUM((e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE\n\
+    \         / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE / 100)\n \
+    \                 * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100), 0)),\
+    \ 0)\n"
+  source_model: main.electrical_performance
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.panel_models m
+    ON p.modhook = m.modkey JOIN main.electrical_performance e ON e.snaplink = r.snapkey
+
+    '
+  grain: one row per panel technology (pnlkind) and calendar month of snapts
+  domains:
+  - energy_loss
+- name: energy_loss_band
+  description: 'Band of the unrounded technology-month ratio R: ''Low'' R < 6; ''Moderate'' 6 <= R < 10;
+    ''Elevated'' 10 <= R < 14; ''Severe'' R >= 14. The from_sql subquery x holds one row per (pnlkind,
+    month ''YYYY-MM'', r); every snapshot of the group carries it.
+
+    '
+  sql_expression: "CASE WHEN x.r IS NULL THEN NULL WHEN x.r < 6 THEN 'Low' WHEN x.r < 10 THEN 'Moderate'\n\
+    \     WHEN x.r < 14 THEN 'Elevated' ELSE 'Severe' END\n"
+  source_model: main.electrical_performance
+  from_sql: "(\n  SELECT m.pnlkind, strftime(r.snapts, '%Y-%m') AS month,\n    100 * SUM((e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE\n\
+    \             / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE / 100)\n\
+    \                      * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100),\
+    \ 0)\n             - (e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE)\n    / NULLIF(SUM((e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE\n\
+    \             / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE / 100)\n\
+    \                      * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100),\
+    \ 0)), 0) AS r\n  FROM main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey\n  JOIN main.panel_models\
+    \ m ON p.modhook = m.modkey\n  JOIN main.electrical_performance e ON e.snaplink = r.snapkey\n  GROUP\
+    \ BY m.pnlkind, strftime(r.snapts, '%Y-%m')\n) x\n"
+  grain: one row per panel technology and calendar month (x.pnlkind, x.month, x.r)
+  domains:
+  - energy_loss
+- name: technology_recoverable_energy
+  description: 'E_rec = SUM(E_loss) over one technology''s (m.pnlkind) snapshots with snapts in the period
+    (filter in WHERE), kWh; ROUND(..., 2) only after summing.
+
+    '
+  sql_expression: "SUM((e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE\n    / NULLIF(((e.elec_perf_snapshot->'energy_yield'->>'availability_pct')::DOUBLE\
+    \ / 100)\n             * (1 - (e.elec_perf_snapshot->'efficiency'->>'soil_loss_pct')::DOUBLE / 100),\
+    \ 0)\n    - (e.elec_perf_snapshot->'energy_yield'->>'energy_yield_kwh')::DOUBLE)\n"
+  source_model: main.electrical_performance
+  from_sql: 'main.plant_record r JOIN main.plants p ON r.sitetie = p.sitekey JOIN main.panel_models m
+    ON p.modhook = m.modkey JOIN main.electrical_performance e ON e.snaplink = r.snapkey
+
+    '
+  grain: aggregate per panel technology over a period
+  domains:
+  - energy_loss
+tables:
+- schema: main
+  table: panel_models
+  columns:
+  - name: modkey
+    type: TEXT
+    description: Unique panel model id, e.g. Model-102.
+  - name: makertag
+    type: TEXT
+    description: 'Manufacturer: Canadian Solar, JA Solar, JinkoSolar, Longi, Trina. NULL (228 models)
+      = not reported/missing; warranty settlement groups it as ''Unlisted''.'
+  - name: pnlkind
+    type: TEXT
+    description: 'Panel technology: Bifacial, HJT, Mono-PERC, Poly-PERC, TOPCon (never NULL).'
+  - name: rated_w
+    type: REAL
+    description: 'Max power output in W under standard test conditions: 450-650.'
+  - name: effpct
+    type: REAL
+    description: Energy conversion efficiency, percent.
+  - name: degyrrate
+    type: REAL
+    description: Specified annual power degradation rate, percent per year (e.g. 0.36). > 0.7 = High Degradation
+      Panel Model.
+  - name: tempcoeff
+    type: REAL
+    description: Temperature coefficient of power, %/C (e.g. -0.389; typical -0.39). NULL = not reported.
+      Used as gamma in the Thermal Loss Factor.
+  - name: nomoptempc
+    type: TEXT
+    description: Nominal operating cell temperature (NOCT), text like '45.7 °C' - strip ' °C' and cast
+      to use numerically. Typical NOCT about 45 C.
+- schema: main
+  table: plants
+  columns:
+  - name: sitekey
+    type: TEXT
+    description: Unique plant id, e.g. SP9227.
+  - name: sitelabel
+    type: TEXT
+    description: Plant name.
+  - name: cap_mw
+    type: REAL
+    description: Installed capacity in MW (P_rated; x1000 for kW). Defines the Settlement Capacity Band.
+  - name: goliveon
+    type: DATE
+    description: Date plant became operational; basis of plant age.
+  - name: modhook
+    type: TEXT
+    description: FK to panel_models.modkey - the plant's panel model used by all documented definitions.
+  - name: tiltdeg
+    type: REAL
+    description: Panel tilt from horizontal, degrees.
+  - name: azmdeg
+    type: REAL
+    description: Panel azimuth relative to true north, degrees.
+  - name: recyclenote
+    type: TEXT
+    description: 'Panel recycling program status: Available, In Development; NULL = not reported.'
+  - name: docstate
+    type: TEXT
+    description: 'Documentation completeness: Complete, Missing, Partial.'
+  - name: warrstate
+    type: TEXT
+    description: 'Equipment warranty status: Active, Claimed, Expired; NULL (378) = not reported.'
+  - name: warrclaims
+    type: BIGINT
+    description: Number of warranty claims (0-5); NULL = not reported. 'Claimed' with > 2 = Warranty Claim
+      Risk.
+  - name: insurstate
+    type: TEXT
+    description: 'Insurance coverage: Covered, Expired, Partial.'
+  - name: complyflag
+    type: TEXT
+    description: 'Regulatory compliance: Compliant, Non-Compliant, Under Review.'
+  - name: envtag
+    type: TEXT
+    description: 'Environmental impact/risk classification: High, Low, Medium. ''High'' = High Environmental
+      Risk Site.'
+- schema: main
+  table: plant_panel_model
+  columns:
+  - name: sitelink
+    type: TEXT
+    description: FK to plants.sitekey.
+  - name: modlink
+    type: TEXT
+    description: FK to panel_models.modkey. Not used by the documented definitions (they use plants.modhook).
+- schema: main
+  table: plant_record
+  columns:
+  - name: snapkey
+    type: TEXT
+    description: Snapshot id, e.g. PV937101; key of all per-snapshot tables.
+  - name: sitetie
+    type: TEXT
+    description: FK to plants.sitekey (never NULL).
+  - name: snapts
+    type: TIMESTAMP
+    description: Snapshot timestamp (2015-03..2025-02). Calendar month = year+month of snapts.
+- schema: main
+  table: electrical_performance
+  columns:
+  - name: snaplink
+    type: TEXT
+    description: PK and FK to plant_record.snapkey.
+  - name: elec_perf_snapshot
+    type: JSON
+    description: 'JSON; read with ->> (parenthesized) and cast to DOUBLE. Paths: efficiency.{instant_eff_pct,
+      eff_loss_pct (since installation), cumulative_deg_pct, soil_loss_pct (0-100), spectral_mismatch
+      (TEXT like ''100.50%'')}; power.{power_now_w (W, NULL 400), power_loss_w (W since installation,
+      NULL 398)}; iv_curve.{isc_initial_a, isc_now_a, voc_initial_v (nullable), voc_now_v, imp_initial_a,
+      imp_now_a (nullable), vmp_initial_v, vmp_now_v, fill_factor_initial, fill_factor_now (> 0.8 = high
+      quality), series_res_ohm (TEXT like ''0.17 Ω''), shunt_res_ohm}; inverter.{inverter_eff_pct, power_factor
+      (-1..1, 0.95 typical, nullable), inverter_temp_c}; grid.{grid_voltage_v (nullable), grid_frequency_hz,
+      power_quality_idx, harmonic_distortion_pct (THD, < 5 desirable), reactive_power_var (nullable)};
+      energy_yield.{energy_yield_kwh (kWh; numbers sometimes stored as integers), performance_ratio (fraction,
+      NULL 400), specific_yield_kwh_kw (kWh/kWp), capacity_factor_pct, availability_pct (0-100)}.'
+- schema: main
+  table: environmental_conditions
+  columns:
+  - name: snapref
+    type: TEXT
+    description: PK and FK to plant_record.snapkey.
+  - name: env_snapshot
+    type: JSON
+    description: 'JSON; read with ->> (parenthesized) and cast. Paths: temperatures.{cell_temp_c (NULL
+      398), ambient_temp_c}; irradiance.{ghi_w_m2 (nullable), dni_w_m2, dhi_w_m2, poa_irr_w_m2} in W/m2;
+      atmospheric.{relative_humidity_pct, air_pressure_hpa, uv_index (1-2 Low, 3-5 Moderate, 6-7 High,
+      8-10 Very High, 11+ Extreme), cloud_cover_pct, dust_density_kg_m3}; wind_rain_snow.{wind_speed_m_s,
+      wind_dir_deg, rain_mm, snow_cover_pct}.'
+- schema: main
+  table: mechanical_condition
+  columns:
+  - name: snapmk
+    type: TEXT
+    description: PK and FK to plant_record.snapkey.
+  - name: mech_health_snapshot
+    type: JSON
+    description: 'JSON; read with ->> inside parentheses before comparing. Paths: tracker.{tracker_state
+      (Error, Maintenance, Normal), tracker_angle_deg}; module_surface.{backsheet_condition (Fair/Good/Poor),
+      glass_condition (Clear/Damaged/Dusty), encapsulant_yellowing (Mild/Severe/NULL), delamination_status
+      (Major/Minor/NULL), busbar_corrosion (Severe/Visible/NULL), hotspot_count (nullable), microcrack_count
+      (cast to INTEGER), snail_trail_severity (Heavy/Light/NULL), pid_severity (High/Low/NULL), lid_status
+      (Ongoing/Stabilized/Unknown)}; electrical_integrity.{bypass_diode_status (Failed/Normal/Partial),
+      junction_box_condition, cable_condition (nullable), connector_condition, grounding_status (Check
+      Required/Failed/Normal)}; mount_cleaning.{mount_structure_status (Check Required/Stable/Unstable),
+      cleaning_cycle_days, last_clean_date (''YYYY-MM-DD'' text)}.'
+- schema: main
+  table: operational_metrics
+  columns:
+  - name: snapops
+    type: TEXT
+    description: PK and FK to plant_record.snapkey.
+  - name: mtbfh
+    type: REAL
+    description: Mean time between failures, hours; NULL (400) = not reported. > 8000 highly reliable,
+      < 1000 fails frequently.
+  - name: mttrh
+    type: REAL
+    description: Mean time to repair, hours.
+  - name: maintcost
+    type: REAL
+    description: Maintenance cost.
+  - name: cleancost
+    type: REAL
+    description: Cleaning cost.
+  - name: replcost
+    type: REAL
+    description: Component replacement cost (USD for settlement; NULL counts as 0, none NULL now).
+  - name: revloss
+    type: TEXT
+    description: Revenue loss as text like '$13,375.59 '; parse with metric revenue_loss_usd.
+  - name: optpot
+    type: TEXT
+    description: 'Optimization potential: High, Low, Medium.'
+- schema: main
+  table: inspection
+  columns:
+  - name: inspectmode
+    type: TEXT
+    description: 'Inspection method (PK): EL Imaging, IR Thermal, IV Curve, Visual. Table has 4 rows and
+      no link to plants/snapshots.'
+  - name: inspectres
+    type: TEXT
+    description: 'Result: Major Issues, Minor Issues, Pass.'
+  - name: inspectdt
+    type: DATE
+    description: Inspection date.
+  - name: maintsched
+    type: TEXT
+    description: 'Maintenance schedule status: Delayed, On Schedule, Overdue.'
+  - name: dqscore
+    type: REAL
+    description: Data quality score 0-100; 95-100 high quality; < 50 = Data Quality Concern.
+- schema: main
+  table: alert
+  columns:
+  - name: snapalrt
+    type: TEXT
+    description: PK and FK to plant_record.snapkey.
+  - name: alrtstate
+    type: TEXT
+    description: 'Alert status: Critical, Warning; NULL (594) = none reported (true NULL, not empty string).'
+  - name: alrtcnt
+    type: TEXT
+    description: Active alert count as text like '6 events'; parse with CAST(regexp_replace(alrtcnt,'[^0-9]','','g')
+      AS INTEGER).
+  - name: maintprio
+    type: TEXT
+    description: 'Maintenance priority: High, Low, Medium; NULL = not reported.'
+  - name: replprio
+    type: TEXT
+    description: 'Replacement priority: High, Low, Medium.'
+- schema: main
+  table: warranty_settle_rules
+  columns:
+  - name: rule_id
+    type: INTEGER
+    description: Rule id; lowest wins ties at equal specificity.
+  - name: maker_tag
+    type: TEXT
+    description: Manufacturer criterion; NULL = any.
+  - name: pnl_kind
+    type: TEXT
+    description: Technology criterion; NULL = any.
+  - name: alrt_state
+    type: TEXT
+    description: Alert status criterion (Critical, Warning); NULL = any.
+  - name: warr_state
+    type: TEXT
+    description: Warranty status criterion (Active, Claimed, Expired); NULL = any.
+  - name: cap_band
+    type: TEXT
+    description: Capacity band criterion (Small, Mid, Large); NULL = any.
+  - name: vol_tier
+    type: TEXT
+    description: Claim volume tier criterion (Single, Moderate, Bulk); NULL = any.
+  - name: fixed_fee_usd
+    type: DOUBLE
+    description: Fixed handling fee per settled snapshot, USD (standard terms 300.00).
+  - name: cover_pct
+    type: DOUBLE
+    description: Coverage percent applied to replcost (standard terms 5.00).

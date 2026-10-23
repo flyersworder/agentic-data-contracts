@@ -1,0 +1,218 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: polar_equipment, author: claudeopus5.5
+version: '1.0'
+name: polar-equipment
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Polar (Arctic / Antarctic) station equipment telemetry. Equipment is the hub: almost
+      every telemetry table holds at most ONE row per equipment (checked: PowerBattery 899, OperationMaintenance
+      859, EngineAndFluids 467, ChassisAndVehicle 1000, Communication 850, CabinEnvironment 346, LightingAndSafety
+      693, WaterAndWaste 1000, Scientific 768, Transmission 976 rows, all with distinct equipment refs,
+      out of 1000 Equipment rows). WeatherAndStructure attaches to equipment only through opmaint_link
+      -> OperationMaintenance (859 of 1000 rows linked, at most one per maintenance record); ThermalSolarWindAndGrid
+      attaches through batt_link -> PowerBattery (899 rows, unique) or comm_link -> Communication (850
+      rows; both links point to the same equipment). Communication.opmaint_link and OperationMaintenance.comm_link
+      are always NULL; EngineAndFluids.opmaint_link is always NULL.'
+    preferred: true
+    tables:
+    - EquipmentType
+    - Equipment
+    - PowerBattery
+    - EngineAndFluids
+    - OperationMaintenance
+    - Transmission
+    - ChassisAndVehicle
+    - Communication
+    - Location
+    - CabinEnvironment
+    - LightingAndSafety
+    - WaterAndWaste
+    - Scientific
+    - WeatherAndStructure
+    - ThermalSolarWindAndGrid
+    - StationEquipmentType
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_handling
+    summary: 'How the data is stored: JSON paths, units-in-text, scales, NULLs, joins'
+    description: 'JSON columns (type_indices, battery_telemetry, engine_fluids_snapshot, ground_vehicle_status,
+      cabin_env_snapshot) are DuckDB JSON. Extract with col->''group''->>''field'' and cast, e.g. (pb.battery_telemetry->''battery_pack''->>''soc_pct'')::DOUBLE.
+      ALWAYS wrap the whole extraction in parentheses before comparing or casting: DuckDB''s ->> binds
+      looser than = / <> / IN, so col->''a''->>''b'' <> ''Off'' is mis-parsed and errors. JSON nulls come
+      back as SQL NULL. Text-with-unit fields: ground_vehicle_status.vehicle_motion.speed_kmh is stored
+      as ''<number> m/s'' for every row (e.g. ''49.30 m/s'') even though the field and the documentation
+      call it km/h; the metrics take the numeric part as the documented speed value without unit conversion.
+      coolant / brake pressure_kpa_or_code are stored as ''<number> hPa''. WaterAndWaste.waterTempC is
+      text ''<number> °C''. Transmission.TRANS_gear is text like ''2.0'' (NULL for 144 rows). Integer
+      columns (waterQualityIdx, snowLoad_kgm2, snowDepth_cm, windRPM) divide as integers: always divide
+      by 100.0, not 100. SCALE WARNING: several indices the documentation describes on a 0-1 scale are
+      stored on a 0-100 scale: EquipmentType safety_idx (17.7-75.9), Equipment.RELIAB_IDX (0-99.7), environmental_impact_idx
+      (36.7-87.3), Scientific.measureAccPct (90-100), conversion_eff_pct (70-95). The metrics apply each
+      documented formula and threshold exactly as written to the stored values; consequences are stated
+      on each metric.
+
+      '
+  - name: equipment_efficiency
+    summary: Equipment-level efficiency, safety and stability composites (EER, OSPI, LOSS, CORI, CIPL)
+    description: 'EER combines the type''s performance score, the equipment''s reliability index and the
+      type''s environmental impact index. OSPI, LOSS, CORI and CIPL build on EER. Reliability index meaning
+      (documentation): typically 0-1; below 0.5 = fails frequently and needs constant maintenance; 0.5-0.8
+      = occasional failures, regular maintenance; above 0.8 = highly reliable, minimal downtime (stored
+      values are 0-99.7, see data_handling). Safety index meaning: typically 0-1; below 0.5 = significant
+      safety concerns needing immediate attention or limited operation; 0.5-0.7 = acceptable for normal
+      operations with precautions; above 0.7 = excellent safety, suitable for all conditions including
+      elevated risk (stored 17.7-75.9). Critical Equipment: ''Safety'' type, safety index > 0.75, associated
+      with a life-critical system (life support status, oxygen supply status, or heater systems where
+      external temperature < 0 °C) - metric critical_equipment.
+
+      '
+    tables:
+    - main.Equipment
+    - main.EquipmentType
+  - name: operations_maintenance
+    summary: Operational readiness, maintenance priority, inspection lockout
+    description: 'Operation hours are the cumulative time the equipment has been in active use: new equipment
+      typically 0-100 h, mid-life 100-1000 h, equipment approaching maintenance or replacement typically
+      exceeds 1000 h (stored 30-49961). The ratio of operation hours to maintenance cycle hours is critical
+      for preventative maintenance scheduling (ORS, maintenance_priority_level). maintCycleHrs is NULL
+      for 124 records. FAILED INSPECTION ACTIVATION LOCKOUT: a critical safety protocol, typically enforced
+      by a database trigger, that blocks any attempt to change an equipment''s operational status (OPER_status)
+      to ''Active'' while its current inspection status (inspect_status) is ''Failed'', so equipment that
+      has not passed safety checks cannot be put into service. The agent cannot write data; when asked
+      about it, identify equipment that would be blocked (inspect_status = ''Failed'') or that violates
+      it (OPER_status = ''Active'' AND inspect_status = ''Failed'').
+
+      '
+    tables:
+    - main.OperationMaintenance
+    - main.Equipment
+  - name: energy
+    summary: Power, battery, renewables (ESI, REC, ESCS, PBESS, sustainable operation)
+    description: 'Power consumption (instant_consumption_w) varies by equipment type: small scientific
+      instruments typically 5-50 W, communication equipment 20-200 W, heating systems 500-5000 W, vehicle
+      systems 1000-10000 W; it is crucial for power budgeting and power source sizing. Energy efficiency
+      percent typically 10-99%: below 30% inefficient/older, 30-60% standard conventional, 60-80% high-efficiency
+      modern, above 80% cutting-edge. Fuel cell efficiency typically 40-90%: below 50% older/degraded,
+      50-70% standard modern, above 70% high-performance. Sustainable Energy Operation (''Energy-Sustainable''):
+      REC above 70% while maintaining full operational capability and adequate power reserves for at least
+      48 hours in an emergency (the last two conditions have no column).
+
+      '
+    tables:
+    - main.PowerBattery
+    - main.ThermalSolarWindAndGrid
+  - name: weather_structure
+    summary: Weather, structural safety, extreme weather and climate adaptation (SSF, ECAC, EWR, EOC,
+      CEAR)
+    description: 'External temperature in polar regions typically -70 to 10 °C: below -40 °C extreme cold
+      requiring special equipment protection; -20 to -40 °C standard cold weather protocols; above -20
+      °C relatively mild but still normal cold weather precautions. Wind speed typically 0-60 m/s: below
+      5 calm; 5-15 moderate, minor operational impact; 15-25 strong, additional safety measures; above
+      25 dangerous, may require suspension of outdoor activities and securing equipment. Weather rows
+      reach equipment via WeatherAndStructure.opmaint_link -> OperationMaintenance.equipRef.
+
+      '
+    tables:
+    - main.WeatherAndStructure
+    - main.Location
+    - main.ThermalSolarWindAndGrid
+  - name: communication
+    summary: Communication reliability (CRI, BSCSI, CNRA, Reliable Coverage) and the complete-data rule
+    description: 'A zone (station, Communication.loc_link) has ''Reliable Coverage'' when equipment within
+      it maintains CRI > 7, satellite status = ''Connected'' and supports emergency beacon functionality
+      (beacon status != ''Inactive''). COMPLETE DATA SET RULE: for BSCSI analysis the source data must
+      be filtered to records where antenna status, network latency (ms) and radio signal (dBm) are all
+      non-null (metric bscsi_complete_record), so incomplete records cannot produce NULL results that
+      skew aggregates. (Currently no such NULLs exist, but the filter must still be applied.)
+
+      '
+    tables:
+    - main.Communication
+    - main.CabinEnvironment
+    - main.Location
+  - name: vehicles
+    summary: Vehicle performance and safety (VPC, PTEC, safe operation, PVSOC, ranking report)
+    description: 'Vehicle Efficiency and Sustainability Report: compute VPC and ESI for each vehicle,
+      use them to compute PTEC, then order vehicles by PTEC (descending, highest first) to create a ranked
+      performance report (metric vehicle_ptec_rank). VPC needs engine load, which exists only for the
+      467 chassis rows with an engine_link; all 1000 equipment have a chassis row, Equipment.EquipType
+      = ''Vehicle'' marks vehicle equipment.
+
+      '
+    tables:
+    - main.ChassisAndVehicle
+    - main.EngineAndFluids
+    - main.Transmission
+    - main.PowerBattery
+  - name: life_support
+    summary: Cabin habitability, thermal insulation, life support reliability, emergency readiness
+    description: 'CO2 in enclosed cabins (ppm): below 600 excellent ventilation; 600-1000 good air quality;
+      1000-2500 poor ventilation that may cause drowsiness and reduced cognitive function; above 2500
+      may cause headaches, sleepiness and significantly impaired cognitive performance. Cabin Habitability
+      Standards: internal temperature 18-24 °C, oxygen above 19.5%, CO2 below 1000 ppm, functioning ventilation
+      and operational heating.
+
+      '
+    tables:
+    - main.CabinEnvironment
+    - main.LightingAndSafety
+    - main.ThermalSolarWindAndGrid
+  - name: water
+    summary: Water resource management (WRMI, WQCS, conservation, WRMSC)
+    description: 'Water conservation measures must be implemented when WRMI falls below 0.5 (low water
+      level, poor quality or high waste tank level requiring immediate attention).
+
+      '
+    tables:
+    - main.WaterAndWaste
+  - name: scientific
+    summary: Scientific equipment reliability and mission success (SER, SMSP, CSES, LSMV, Research Grade)
+    description: 'Research Grade data needs SER > 0.9, valid calibration and appropriate environmental
+      conditions for the equipment type; the latter is not defined anywhere and cannot be computed - say
+      so when answering.
+
+      '
+    tables:
+    - main.Scientific
+    - main.Communication
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_metrics
+    description: 'Every named index, score, classification or status from the documentation (EER, ORS,
+      ESI, SSF, CRI, VPC, TIE, WRMI, SER, REC, OSPI, PTEC, BSCSI, LSSR, SMSP, RSSI, ECAC, LOSS, EWRII,
+      CORI and the classifications built on them) must be computed with the declared metric SQL, thresholds
+      as stated, not an ad-hoc formula.
+
+      '
+    enforcement: warn
+  - name: complete_data_set_for_bscsi
+    description: 'BSCSI analyses must include only Communication records whose antenna_stat, netLatency_ms
+      and radioSignal_dBm are all non-null (metric bscsi_complete_record).
+
+      '
+    enforcement: warn
+  - name: failed_inspection_activation_lockout
+    description: 'Equipment whose inspect_status is ''Failed'' may not have OPER_status changed to ''Active''.
+      Writes are forbidden to the agent anyway; treat Active + Failed records as violations of this protocol.
+
+      '
+    enforcement: warn

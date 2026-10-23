@@ -26,11 +26,11 @@ main.pdf: $(SOURCES)
 	pdflatex -interaction=nonstopmode -halt-on-error main.tex
 	pdflatex -interaction=nonstopmode -halt-on-error main.tex
 
-# Submission build: acmart sigconf, no appendix. PVLDB counts appendices
-# toward its 12 content pages, so the appendix is arXiv-only. Needs acmart:
-#   tlmgr init-usertree && tlmgr --usermode install acmart   (no admin needed)
+# Submission build: the official PVLDB template (acmart.cls, pvldb.sty and
+# ACM-Reference-Format.bst, vendored unmodified), no appendix. PVLDB counts
+# appendices toward its 12 content pages, so the appendix is arXiv-only.
 pvldb: pvldb.pdf
-pvldb.pdf: pvldb.tex refs.bib $(FIGS) $(wildcard sections/*.tex)
+pvldb.pdf: pvldb.tex acmart.cls pvldb.sty refs.bib $(FIGS) $(wildcard sections/*.tex)
 	pdflatex -interaction=nonstopmode -halt-on-error pvldb.tex
 	-bibtex pvldb
 	pdflatex -interaction=nonstopmode -halt-on-error pvldb.tex

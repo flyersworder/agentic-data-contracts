@@ -1,0 +1,1245 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: exchange_traded_funds, author: claudeopus5.5
+metrics:
+- name: annual_fund_outperformance
+  description: 'Excess return of a fund over its category benchmark for a given year: fund''s annual return
+    - category''s average annual return (annual_returns.fundperf - categoryperf, decimals). NULL when
+    either side is NULL. Grain: one fund-year.
+
+    '
+  sql_expression: ar.fundperf - ar.categoryperf
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar
+  grain: one row per fund per calendar year (annual_returns row)
+  domains:
+  - performance
+- name: relative_expense_ratio
+  description: 'Fund''s net expense ratio - its benchmark''s expense ratio (fundmetrics.Expense_Net -
+    fundmetrics.Benchmark_Exp). Negative = cheaper than the benchmark.
+
+    '
+  sql_expression: CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'
+    AS DOUBLE)
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - cost_and_income
+- name: return_on_cost
+  description: 'Return on Cost (ROC): fund''s 1-year return / net expense ratio — return generated per
+    unit of expense. Uses performance.returnmetrics.fund_returns.Return_1Y and fundmetrics.Expense_Net
+    (both decimals).
+
+    '
+  sql_expression: CAST(p.returnmetrics->>'$.fund_returns.Return_1Y' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0)
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym
+  grain: one row per fund
+  domains:
+  - cost_and_income
+- name: yield_to_expense_ratio
+  description: 'Yield-to-Expense Ratio (YTER): fund''s yield rate / net expense ratio (fundmetrics.Yield_Rate
+    / fundmetrics.Expense_Net).
+
+    '
+  sql_expression: CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0)
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - cost_and_income
+- name: price_position_52w
+  description: 'Price Position in 52-Week Range, as a percentage: (recent price - 52-week low) / (52-week
+    high - 52-week low) x 100. Recent price is not stored directly; it is Low_52W + Low_Delta (Low_Delta
+    = current - low; verified equal to High_52W + High_Delta on every row).
+
+    '
+  sql_expression: "((CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE) + CAST(p.pricerange52w->>'$.low_metrics.Low_Delta'\
+    \ AS DOUBLE))\n  - CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE))\n/ NULLIF(CAST(p.pricerange52w->>'$.high_metrics.High_52W'\
+    \ AS DOUBLE) - CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE), 0) * 100"
+  source_model: main.performance
+  from_sql: main.performance p
+  grain: one row per fund (performance row)
+  domains:
+  - technical
+- name: short_term_momentum
+  description: 'Short-Term Momentum Indicator: 50-day moving average - 200-day moving average (tradingdata.moving_averages).'
+  sql_expression: CAST(f.tradingdata->>'$.moving_averages.MA_50' AS DOUBLE) - CAST(f.tradingdata->>'$.moving_averages.MA_200'
+    AS DOUBLE)
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - technical
+- name: information_ratio
+  description: 'Information Ratio (Simplified): (fund''s 3-year return - benchmark''s 3-year return) /
+    fund''s 3-year volatility. Fund and benchmark 3-year returns are performance.returnmetrics Return_3Y
+    and Bench_Return_3Y (annualized, decimals — the only benchmark 3-year return stored); volatility is
+    risk_metrics Volatility_3Y (percent units, e.g. 22.42). The formula is applied as written, without
+    unit rescaling.
+
+    '
+  sql_expression: "(CAST(p.returnmetrics->>'$.fund_returns.Return_3Y' AS DOUBLE)\n  - CAST(p.returnmetrics->>'$.benchmark_returns.Bench_Return_3Y'\
+    \ AS DOUBLE))\n/ NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y' AS DOUBLE), 0)"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - performance
+  - risk
+- name: positive_return_consistency
+  description: 'Positive Return Consistency: number of years with positive returns / (positive years +
+    negative years) x 100, from performance.histstats Positive_Years / Negative_Years.
+
+    '
+  sql_expression: 100.0 * CAST(p.histstats->>'$.Positive_Years' AS DOUBLE) / NULLIF(CAST(p.histstats->>'$.Positive_Years'
+    AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years' AS DOUBLE), 0)
+  source_model: main.performance
+  from_sql: main.performance p
+  grain: one row per fund (performance row)
+  domains:
+  - performance
+- name: cost_adjusted_annual_outperformance
+  description: 'Cost-Adjusted Annual Outperformance: Annual Fund Outperformance combined with the Relative
+    Expense Ratio — outperformance - relative expense (higher positive outperformance and lower/negative
+    relative expense are desirable, so cost is subtracted). Per fund-year.
+
+    '
+  sql_expression: (ar.fundperf - ar.categoryperf) - (CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) -
+    CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE))
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar JOIN main.funds f ON f.tickersym = ar.portfolioref
+  grain: one row per fund per calendar year
+  domains:
+  - performance
+  - cost_and_income
+- name: is_total_return_fund
+  description: 'Total Return Fund: non-zero allocation to stocks (Equity_Weight > 0) and non-zero dividend
+    yield (Yield_Rate > 0).'
+  sql_expression: CAST(f.allocweights->>'$.asset_allocation.Equity_Weight' AS DOUBLE) > 0 AND CAST(f.fundmetrics->>'$.Yield_Rate'
+    AS DOUBLE) > 0
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_alpha_generator
+  description: 'Alpha Generator: 5-year alpha (risk5y.risk_measures_5y.Alpha_5Y) > 0.'
+  sql_expression: CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - risk
+  - classifications
+- name: is_market_tracking_fund
+  description: 'Market-Tracking Fund: 3-year R-squared > 90 (stored on a 0-100 scale).'
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - risk
+  - classifications
+- name: is_low_turnover_strategy
+  description: 'Low-Turnover Strategy: annual portfolio turnover < 30%, i.e. Turnover_Ratio < 0.3 (1.0
+    = 100%).'
+  sql_expression: CAST(f.fundmetrics->>'$.Turnover_Ratio' AS DOUBLE) < 0.3
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - portfolio_composition
+  - classifications
+- name: is_high_conviction_portfolio
+  description: 'High-Conviction Portfolio: weight of the single largest holding > 8% (0.08). histstats
+    Top_Weight is NULL on every row, so the largest holding is MAX(holdings.holdingpct) per fund (subquery
+    h; equals the positionrank = 1 weight for all but 2 funds).
+
+    '
+  sql_expression: h.top_weight > 0.08
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN (SELECT instrumentref, MAX(holdingpct) AS top_weight FROM main.holdings
+    GROUP BY instrumentref) h ON h.instrumentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - portfolio_composition
+  - classifications
+- name: is_efficient_income_generator
+  description: 'Efficient Income Generator: Yield-to-Expense Ratio > 15.'
+  sql_expression: CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0) > 15
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - cost_and_income
+  - classifications
+- name: is_consistent_outperformer
+  description: 'Consistent Outperformer: Alpha Generator (5Y alpha > 0) and Positive Return Consistency
+    > 80.'
+  sql_expression: "CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND 100.0 * CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE)\n  / NULLIF(CAST(p.histstats->>'$.Positive_Years' AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE), 0) > 80"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_passive_alpha_generator
+  description: 'Passive Alpha Generator: Market-Tracking Fund (3Y R-squared > 90) and Alpha Generator
+    (5Y alpha > 0).'
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90 AND CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y'
+    AS DOUBLE) > 0
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - classifications
+- name: is_golden_cross
+  description: 'Golden Cross Signal: Short-Term Momentum Indicator (MA_50 - MA_200) is positive.'
+  sql_expression: CAST(f.tradingdata->>'$.moving_averages.MA_50' AS DOUBLE) - CAST(f.tradingdata->>'$.moving_averages.MA_200'
+    AS DOUBLE) > 0
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - technical
+  - classifications
+- name: high_quality_credit_allocation
+  description: 'Allocation to High-Quality Credit: (us_government + aaa + aa allocationpct) / total bond
+    allocationpct for a fund (creditmark values are lower-case). Each of the 382 bond funds has 9 rating
+    rows summing to 1.
+
+    '
+  sql_expression: bq.hq_share
+  source_model: main.bond_allocations
+  from_sql: "(SELECT b.fundlink, SUM(b.allocationpct) FILTER (WHERE br.creditmark IN ('us_government',\
+    \ 'aaa', 'aa'))\n / NULLIF(SUM(b.allocationpct), 0) AS hq_share\n FROM main.bond_allocations b JOIN\
+    \ main.bond_ratings br ON br.ratekey = b.ratinglink GROUP BY b.fundlink) bq"
+  grain: one row per fund with bond allocations
+  domains:
+  - portfolio_composition
+- name: is_high_quality_credit_portfolio
+  description: 'High-Quality Credit Portfolio: government + AAA + AA allocations exceed 60% of total bond
+    holdings (hq_share > 0.6).'
+  sql_expression: bq.hq_share > 0.6
+  source_model: main.bond_allocations
+  from_sql: "(SELECT b.fundlink, SUM(b.allocationpct) FILTER (WHERE br.creditmark IN ('us_government',\
+    \ 'aaa', 'aa'))\n / NULLIF(SUM(b.allocationpct), 0) AS hq_share\n FROM main.bond_allocations b JOIN\
+    \ main.bond_ratings br ON br.ratekey = b.ratinglink GROUP BY b.fundlink) bq"
+  grain: one row per fund with bond allocations
+  domains:
+  - portfolio_composition
+  - classifications
+- name: performance_cost_efficiency_score
+  description: PCES = Annual Fund Outperformance / Relative Expense Ratio, per fund-year.
+  sql_expression: (ar.fundperf - ar.categoryperf) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE)
+    - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE), 0)
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar JOIN main.funds f ON f.tickersym = ar.portfolioref
+  grain: one row per fund per calendar year
+  domains:
+  - performance
+  - cost_and_income
+- name: momentum_weighted_price_strength
+  description: MWPS = Price Position in 52-Week Range x (1 + Short-Term Momentum / 200-day MA).
+  sql_expression: "(CAST(p.pricerange52w->>'$.low_metrics.Low_Delta' AS DOUBLE)\n  / NULLIF(CAST(p.pricerange52w->>'$.high_metrics.High_52W'\
+    \ AS DOUBLE) - CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE), 0) * 100)\n* (1 + (CAST(f.tradingdata->>'$.moving_averages.MA_50'\
+    \ AS DOUBLE) - CAST(f.tradingdata->>'$.moving_averages.MA_200' AS DOUBLE))\n  / NULLIF(CAST(f.tradingdata->>'$.moving_averages.MA_200'\
+    \ AS DOUBLE), 0))"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym
+  grain: one row per fund
+  domains:
+  - technical
+- name: consistency_adjusted_information_ratio
+  description: CAIR = Information Ratio x Positive Return Consistency / 100.
+  sql_expression: "((CAST(p.returnmetrics->>'$.fund_returns.Return_3Y' AS DOUBLE) - CAST(p.returnmetrics->>'$.benchmark_returns.Bench_Return_3Y'\
+    \ AS DOUBLE))\n  / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y' AS DOUBLE), 0))\n* (100.0\
+    \ * CAST(p.histstats->>'$.Positive_Years' AS DOUBLE)\n  / NULLIF(CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years' AS DOUBLE), 0)) / 100"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - performance
+- name: total_value_score
+  description: 'TVS = cube root of (Return on Cost x Information Ratio x Positive Return Consistency).
+    DuckDB cbrt returns a real (negative) root for a negative product.
+
+    '
+  sql_expression: "cbrt(\n  (CAST(p.returnmetrics->>'$.fund_returns.Return_1Y' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'\
+    \ AS DOUBLE), 0))\n  * ((CAST(p.returnmetrics->>'$.fund_returns.Return_3Y' AS DOUBLE) - CAST(p.returnmetrics->>'$.benchmark_returns.Bench_Return_3Y'\
+    \ AS DOUBLE))\n    / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y' AS DOUBLE), 0))\n \
+    \ * (100.0 * CAST(p.histstats->>'$.Positive_Years' AS DOUBLE)\n    / NULLIF(CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years' AS DOUBLE), 0)))"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - performance
+- name: active_manager_value
+  description: AMV = Information Ratio - (Relative Expense Ratio x 10).
+  sql_expression: "((CAST(p.returnmetrics->>'$.fund_returns.Return_3Y' AS DOUBLE) - CAST(p.returnmetrics->>'$.benchmark_returns.Bench_Return_3Y'\
+    \ AS DOUBLE))\n  / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y' AS DOUBLE), 0))\n- ((CAST(f.fundmetrics->>'$.Expense_Net'\
+    \ AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE)) * 10)"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - performance
+  - cost_and_income
+- name: quality_income_score
+  description: 'Quality-Income Score: the Yield-to-Expense Ratio, only when the fund is a High-Quality
+    Credit Portfolio (hq_share > 0.6); NULL otherwise.'
+  sql_expression: "CASE WHEN bq.hq_share > 0.6\n  THEN CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE)\
+    \ / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE), 0) END"
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT b.fundlink, SUM(b.allocationpct) FILTER (WHERE br.creditmark\
+    \ IN ('us_government', 'aaa', 'aa'))\n / NULLIF(SUM(b.allocationpct), 0) AS hq_share\n FROM main.bond_allocations\
+    \ b JOIN main.bond_ratings br ON br.ratekey = b.ratinglink GROUP BY b.fundlink) bq ON bq.fundlink\
+    \ = f.tickersym"
+  grain: one row per fund
+  domains:
+  - cost_and_income
+  - portfolio_composition
+- name: composite_momentum_strength
+  description: CMS = Short-Term Momentum Indicator x Price Position in 52-Week Range.
+  sql_expression: "(CAST(f.tradingdata->>'$.moving_averages.MA_50' AS DOUBLE) - CAST(f.tradingdata->>'$.moving_averages.MA_200'\
+    \ AS DOUBLE)) * (CAST(p.pricerange52w->>'$.low_metrics.Low_Delta' AS DOUBLE)\n  / NULLIF(CAST(p.pricerange52w->>'$.high_metrics.High_52W'\
+    \ AS DOUBLE) - CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE), 0) * 100)"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym
+  grain: one row per fund
+  domains:
+  - technical
+- name: net_yield_advantage
+  description: NYA = Yield Rate - Relative Expense Ratio.
+  sql_expression: CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE) - (CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE))
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - cost_and_income
+- name: holistic_outperformance_metric
+  description: HOM = (Annual Fund Outperformance + Cost-Adjusted Annual Outperformance) / 2, per fund-year.
+  sql_expression: "((ar.fundperf - ar.categoryperf)\n + ((ar.fundperf - ar.categoryperf)\n    - (CAST(f.fundmetrics->>'$.Expense_Net'\
+    \ AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE)))) / 2"
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar JOIN main.funds f ON f.tickersym = ar.portfolioref
+  grain: one row per fund per calendar year
+  domains:
+  - performance
+- name: risk_return_efficiency_index
+  description: RREI = Return on Cost / 3-Year Volatility (risk3y Volatility_3Y).
+  sql_expression: (CAST(p.returnmetrics->>'$.fund_returns.Return_1Y' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0)) / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y' AS DOUBLE), 0)
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - risk
+  - cost_and_income
+- name: is_elite_active_manager
+  description: 'Elite Active Manager: Consistent Outperformer (5Y alpha > 0 and consistency > 80) and
+    High-Conviction Portfolio (largest holding > 0.08).'
+  sql_expression: "CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND 100.0 * CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE)\n  / NULLIF(CAST(p.histstats->>'$.Positive_Years' AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE), 0) > 80\nAND h.top_weight > 0.08"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym LEFT JOIN (SELECT instrumentref, MAX(holdingpct) AS top_weight
+    FROM main.holdings GROUP BY instrumentref) h ON h.instrumentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_ideal_index_fund
+  description: 'Ideal Index Fund: Market-Tracking (3Y R-squared > 90), Low-Turnover (< 0.3) and negative
+    Relative Expense Ratio.'
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90 AND CAST(f.fundmetrics->>'$.Turnover_Ratio'
+    AS DOUBLE) < 0.3 AND CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'
+    AS DOUBLE) < 0
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_premier_income_fund
+  description: 'Premier Income Fund: Efficient Income Generator (YTER > 15) and High-Quality Credit Portfolio
+    (hq_share > 0.6).'
+  sql_expression: CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0) > 15 AND bq.hq_share > 0.6
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT b.fundlink, SUM(b.allocationpct) FILTER (WHERE br.creditmark\
+    \ IN ('us_government', 'aaa', 'aa'))\n / NULLIF(SUM(b.allocationpct), 0) AS hq_share\n FROM main.bond_allocations\
+    \ b JOIN main.bond_ratings br ON br.ratekey = b.ratinglink GROUP BY b.fundlink) bq ON bq.fundlink\
+    \ = f.tickersym"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: last_year_outperformance
+  description: 'Annual Fund Outperformance for the fund''s last reported year: the latest calendaryear
+    with both fundperf and categoryperf non-NULL (ly.last_year gives that year). INTERPRETATION: "last
+    reported year" read as the latest year where outperformance is computable.
+
+    '
+  sql_expression: ly.last_outperformance
+  source_model: main.annual_returns
+  from_sql: "(SELECT portfolioref, arg_max(fundperf - categoryperf, calendaryear) AS last_outperformance,\
+    \ MAX(calendaryear) AS last_year\n FROM main.annual_returns WHERE fundperf IS NOT NULL AND categoryperf\
+    \ IS NOT NULL GROUP BY portfolioref) ly"
+  grain: one row per fund with annual returns
+  domains:
+  - performance
+- name: is_rebound_prospect
+  description: 'Rebound Prospect: Annual Fund Outperformance for the last reported year is negative and
+    Golden Cross Signal (MA_50 - MA_200 > 0).'
+  sql_expression: ly.last_outperformance < 0 AND CAST(f.tradingdata->>'$.moving_averages.MA_50' AS DOUBLE)
+    - CAST(f.tradingdata->>'$.moving_averages.MA_200' AS DOUBLE) > 0
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT portfolioref, arg_max(fundperf - categoryperf, calendaryear)\
+    \ AS last_outperformance, MAX(calendaryear) AS last_year\n FROM main.annual_returns WHERE fundperf\
+    \ IS NOT NULL AND categoryperf IS NOT NULL GROUP BY portfolioref) ly ON ly.portfolioref = f.tickersym"
+  grain: one row per fund
+  domains:
+  - classifications
+  - technical
+- name: is_high_fee_strategic_bet
+  description: 'High-Fee Strategic Bet: positive Relative Expense Ratio and does not qualify as a Market-Tracking
+    Fund (a fund with no 3Y R-squared does not qualify as market-tracking, hence COALESCE to FALSE).
+
+    '
+  sql_expression: CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'
+    AS DOUBLE) > 0 AND NOT COALESCE(CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90,
+    FALSE)
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_focused_alpha_leader
+  description: 'Focused Alpha Leader: Alpha Generator (5Y alpha > 0) and High-Conviction Portfolio (largest
+    holding > 0.08).'
+  sql_expression: CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND h.top_weight > 0.08
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym LEFT JOIN (SELECT
+    instrumentref, MAX(holdingpct) AS top_weight FROM main.holdings GROUP BY instrumentref) h ON h.instrumentref
+    = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_reliable_core_holding
+  description: 'Reliable Core Holding: Consistent Outperformer and Total Return Fund (Equity_Weight >
+    0 and Yield_Rate > 0).'
+  sql_expression: "CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND 100.0 * CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE)\n  / NULLIF(CAST(p.histstats->>'$.Positive_Years' AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE), 0) > 80\nAND CAST(f.allocweights->>'$.asset_allocation.Equity_Weight' AS DOUBLE) > 0\
+    \ AND CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE) > 0"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_contrarian_value_play
+  description: 'Contrarian Value Play: Price Position in 52-Week Range below 25 (%), Low-Turnover Strategy
+    (< 0.3) and negative Relative Expense Ratio.'
+  sql_expression: "CAST(p.pricerange52w->>'$.low_metrics.Low_Delta' AS DOUBLE)\n  / NULLIF(CAST(p.pricerange52w->>'$.high_metrics.High_52W'\
+    \ AS DOUBLE) - CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE), 0) * 100 < 25\nAND CAST(f.fundmetrics->>'$.Turnover_Ratio'\
+    \ AS DOUBLE) < 0.3 AND CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'\
+    \ AS DOUBLE) < 0"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_global_alpha_specialist
+  description: 'Global Alpha Specialist: Alpha Generator and Geographic Focus (fundclass.GeoZone_Class)
+    anything other than ''UNITED_STATES'' or ''US'', compared exactly as documented. NOTE: every fund''s
+    GeoZone_Class is a spelling of the United States (America, U.S.A., USA, U.S., United States, us, usa
+    also occur), so under the literal rule those other spellings count as non-US; mention this when reporting
+    results.
+
+    '
+  sql_expression: CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND (f.fundclass->>'$.GeoZone_Class')
+    NOT IN ('UNITED_STATES', 'US')
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_high_cost_underperformer
+  description: 'High-Cost Underperformer: positive Relative Expense Ratio and negative Annual Fund Outperformance.
+    INTERPRETATION: outperformance taken for the fund''s last reported year (latest year with both fundperf
+    and categoryperf); for a specific year use annual_fund_outperformance on that year instead.
+
+    '
+  sql_expression: CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'
+    AS DOUBLE) > 0 AND ly.last_outperformance < 0
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT portfolioref, arg_max(fundperf - categoryperf, calendaryear)\
+    \ AS last_outperformance, MAX(calendaryear) AS last_year\n FROM main.annual_returns WHERE fundperf\
+    \ IS NOT NULL AND categoryperf IS NOT NULL GROUP BY portfolioref) ly ON ly.portfolioref = f.tickersym"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: appraisal_ratio
+  description: 'Appraisal Ratio = 3-Year Alpha / Unsystematic Risk, Unsystematic Risk = 3-Year Volatility
+    x sqrt(1 - 3-Year R-Squared). R-squared is stored 0-100, so it is divided by 100 to make 1 - R-squared
+    a fraction (otherwise the square root is undefined).
+
+    '
+  sql_expression: "CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE) / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y'\
+    \ AS DOUBLE)\n  * sqrt(1 - CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) / 100.0),\
+    \ 0)"
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - risk
+- name: composite_valuation_score
+  description: CVS = 1/4 x (1/PE + 1/PS + 1/PB + 1/PCF) from valuationratios.valuation_metrics (no zero
+    ratios exist; NULL if any is missing). Higher = more attractive valuation.
+  sql_expression: "0.25 * (1.0 / NULLIF(CAST(f.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE),\
+    \ 0)\n  + 1.0 / NULLIF(CAST(f.valuationratios->>'$.valuation_metrics.PS_Ratio' AS DOUBLE), 0)\n  +\
+    \ 1.0 / NULLIF(CAST(f.valuationratios->>'$.valuation_metrics.PB_Ratio' AS DOUBLE), 0)\n  + 1.0 / NULLIF(CAST(f.valuationratios->>'$.valuation_metrics.PCF_Ratio'\
+    \ AS DOUBLE), 0))"
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - portfolio_composition
+- name: active_management_footprint
+  description: AMF = (1 - 3-Year R-Squared) / Turnover Ratio, with R-squared converted from its stored
+    0-100 scale to a fraction.
+  sql_expression: (1 - CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) / 100.0) / NULLIF(CAST(f.fundmetrics->>'$.Turnover_Ratio'
+    AS DOUBLE), 0)
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - risk
+- name: cost_adjusted_alpha
+  description: CAA = 3-Year Alpha - Relative Expense Ratio (formula applied as written; alpha is in percent
+    units, expense ratios are decimals).
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE) - (CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE))
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - risk
+  - cost_and_income
+- name: momentum_adjusted_information_ratio
+  description: MAIR = Information Ratio (Simplified) x (1 + Short-Term Momentum / 200-Day MA).
+  sql_expression: "((CAST(p.returnmetrics->>'$.fund_returns.Return_3Y' AS DOUBLE) - CAST(p.returnmetrics->>'$.benchmark_returns.Bench_Return_3Y'\
+    \ AS DOUBLE))\n  / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y' AS DOUBLE), 0))\n* (1\
+    \ + (CAST(f.tradingdata->>'$.moving_averages.MA_50' AS DOUBLE) - CAST(f.tradingdata->>'$.moving_averages.MA_200'\
+    \ AS DOUBLE))\n  / NULLIF(CAST(f.tradingdata->>'$.moving_averages.MA_200' AS DOUBLE), 0))"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - performance
+  - technical
+- name: secure_income_efficiency_score
+  description: SIES = Yield-to-Expense Ratio x Allocation to High-Quality Credit (government + AAA + AA
+    share of bond holdings, 0-1). NULL for funds without bond allocations.
+  sql_expression: (CAST(f.fundmetrics->>'$.Yield_Rate' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0)) * bq.hq_share
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT b.fundlink, SUM(b.allocationpct) FILTER (WHERE br.creditmark\
+    \ IN ('us_government', 'aaa', 'aa'))\n / NULLIF(SUM(b.allocationpct), 0) AS hq_share\n FROM main.bond_allocations\
+    \ b JOIN main.bond_ratings br ON br.ratekey = b.ratinglink GROUP BY b.fundlink) bq ON bq.fundlink\
+    \ = f.tickersym"
+  grain: one row per fund
+  domains:
+  - cost_and_income
+  - portfolio_composition
+- name: manager_skill_ratio
+  description: MSR = 3-Year Alpha / Net Expense Ratio.
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0)
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - risk
+  - cost_and_income
+- name: capital_preservation_index
+  description: 'CPI = (1 / (1 + Negative Years)) x (1 - (52-Week Low - Current Price) / 52-Week Low);
+    Current Price = Low_52W + Low_Delta.
+
+    '
+  sql_expression: "(1.0 / (1 + CAST(p.histstats->>'$.Negative_Years' AS DOUBLE))) * (1 - (CAST(p.pricerange52w->>'$.low_metrics.Low_52W'\
+    \ AS DOUBLE)\n        - (CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE) + CAST(p.pricerange52w->>'$.low_metrics.Low_Delta'\
+    \ AS DOUBLE)))\n     / NULLIF(CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE), 0))"
+  source_model: main.performance
+  from_sql: main.performance p
+  grain: one row per fund (performance row)
+  domains:
+  - technical
+- name: portfolio_liquidity_pressure
+  description: PLP = (Net Worth x Turnover Ratio) / (Average Daily Volume (3M) x 252).
+  sql_expression: CAST(f.fundmetrics->>'$.Net_Worth' AS DOUBLE) * CAST(f.fundmetrics->>'$.Turnover_Ratio'
+    AS DOUBLE) / NULLIF(CAST(f.tradingdata->>'$.volume_metrics.Vol_3M' AS DOUBLE) * 252, 0)
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - technical
+- name: growth_value_spectrum_score
+  description: GVS Score = ln(P/E Ratio / P/B Ratio). Observed range 0.46 to 3.05 (always positive), median
+    about 1.98; higher = more growth-tilted.
+  sql_expression: "ln(CAST(f.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE)\n   / NULLIF(CAST(f.valuationratios->>'$.valuation_metrics.PB_Ratio'\
+    \ AS DOUBLE), 0))"
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - portfolio_composition
+- name: is_closet_indexer
+  description: 'Closet Indexer: Market-Tracking Fund (3Y R-squared > 90) with a positive Relative Expense
+    Ratio.'
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90 AND CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS DOUBLE) > 0
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_strategic_beta_fund
+  description: 'Strategic Beta Fund: Low-Turnover Strategy (< 0.3) and explicitly not a Market-Tracking
+    Fund (missing R-squared = not market-tracking).'
+  sql_expression: CAST(f.fundmetrics->>'$.Turnover_Ratio' AS DOUBLE) < 0.3 AND NOT COALESCE(CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y'
+    AS DOUBLE) > 90, FALSE)
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_fallen_angel
+  description: 'Fallen Angel: was a Consistent Outperformer (5Y alpha > 0 and consistency > 80) but its
+    most recent 3-year alpha is now negative (Alpha_3Y < 0).
+
+    '
+  sql_expression: "CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND 100.0 * CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE)\n  / NULLIF(CAST(p.histstats->>'$.Positive_Years' AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE), 0) > 80\nAND CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE) < 0"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics
+    r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: cvs_category_percentile
+  description: 'PERCENT_RANK (0-1, ascending) of the Composite Valuation Score within the fund''s category
+    (productclass), over funds with a non-NULL CVS and category. Top 50th percentile = >= 0.5; top 25th
+    percentile = >= 0.75.
+
+    '
+  sql_expression: vr.cvs_pct_rank
+  source_model: main.funds
+  from_sql: "(SELECT v.tickersym, v.productclass, PERCENT_RANK() OVER (PARTITION BY v.productclass ORDER\
+    \ BY v.cvs) AS cvs_pct_rank\n FROM (SELECT f2.tickersym, f2.productclass,\n         0.25 * (1.0 /\
+    \ CAST(f2.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE)\n           + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PS_Ratio'\
+    \ AS DOUBLE)\n           + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PB_Ratio' AS DOUBLE)\n\
+    \           + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PCF_Ratio' AS DOUBLE)) AS cvs\n\
+    \       FROM main.funds f2 WHERE f2.productclass IS NOT NULL) v\n WHERE v.cvs IS NOT NULL) vr"
+  grain: one row per fund with a CVS and a category
+  domains:
+  - portfolio_composition
+- name: is_q_garp
+  description: 'Quality-Growth at a Reasonable Price: Consistent Outperformer and Composite Valuation
+    Score in the top 50th percentile of its category (cvs_pct_rank >= 0.5).'
+  sql_expression: "CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0 AND 100.0 * CAST(p.histstats->>'$.Positive_Years'\
+    \ AS DOUBLE)\n  / NULLIF(CAST(p.histstats->>'$.Positive_Years' AS DOUBLE) + CAST(p.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE), 0) > 80\nAND vr.cvs_pct_rank >= 0.5"
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics\
+    \ r ON r.investmentref = f.tickersym LEFT JOIN (SELECT v.tickersym, PERCENT_RANK() OVER (PARTITION\
+    \ BY v.productclass ORDER BY v.cvs) AS cvs_pct_rank\n FROM (SELECT f2.tickersym, f2.productclass,\n\
+    \         0.25 * (1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE)\n    \
+    \       + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PS_Ratio' AS DOUBLE)\n           +\
+    \ 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PB_Ratio' AS DOUBLE)\n           + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PCF_Ratio'\
+    \ AS DOUBLE)) AS cvs\n       FROM main.funds f2 WHERE f2.productclass IS NOT NULL) v\n WHERE v.cvs\
+    \ IS NOT NULL) vr ON vr.tickersym = f.tickersym"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_high_conviction_value_investor
+  description: 'High-Conviction Value Investor: High-Conviction Portfolio (largest holding > 0.08) and
+    Composite Valuation Score in the top 25th percentile of its category (cvs_pct_rank >= 0.75).'
+  sql_expression: h.top_weight > 0.08 AND vr.cvs_pct_rank >= 0.75
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT instrumentref, MAX(holdingpct) AS top_weight FROM main.holdings\
+    \ GROUP BY instrumentref) h ON h.instrumentref = f.tickersym LEFT JOIN (SELECT v.tickersym, PERCENT_RANK()\
+    \ OVER (PARTITION BY v.productclass ORDER BY v.cvs) AS cvs_pct_rank\n FROM (SELECT f2.tickersym, f2.productclass,\n\
+    \         0.25 * (1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE)\n    \
+    \       + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PS_Ratio' AS DOUBLE)\n           +\
+    \ 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PB_Ratio' AS DOUBLE)\n           + 1.0 / CAST(f2.valuationratios->>'$.valuation_metrics.PCF_Ratio'\
+    \ AS DOUBLE)) AS cvs\n       FROM main.funds f2 WHERE f2.productclass IS NOT NULL) v\n WHERE v.cvs\
+    \ IS NOT NULL) vr ON vr.tickersym = f.tickersym"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_efficient_core_holding
+  description: 'Efficient Core Holding: Ideal Index Fund (3Y R-squared > 90, turnover < 0.3, negative
+    relative expense) that also exhibits a high Return on Cost. INTERPRETATION: the documentation gives
+    no threshold for "high"; this metric uses ROC above the median ROC of all funds (md.median_roc, about
+    67.5).
+
+    '
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90 AND CAST(f.fundmetrics->>'$.Turnover_Ratio'
+    AS DOUBLE) < 0.3 AND CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'
+    AS DOUBLE) < 0 AND CAST(p.returnmetrics->>'$.fund_returns.Return_1Y' AS DOUBLE) / NULLIF(CAST(f.fundmetrics->>'$.Expense_Net'
+    AS DOUBLE), 0) > md.median_roc
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics\
+    \ r ON r.investmentref = f.tickersym CROSS JOIN (SELECT median(CAST(p3.returnmetrics->>'$.fund_returns.Return_1Y'\
+    \ AS DOUBLE)\n             / NULLIF(CAST(f3.fundmetrics->>'$.Expense_Net' AS DOUBLE), 0)) AS median_roc\n\
+    \            FROM main.funds f3 LEFT JOIN main.performance p3 ON p3.productref = f3.tickersym) md"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_momentum_driven_growth_fund
+  description: 'Momentum-Driven Growth Fund: Growth-Value Spectrum Score indicates a growth tilt and a
+    Golden Cross Signal. INTERPRETATION: GVS is positive for every fund, so "growth tilt" is taken as
+    GVS above the median GVS of all funds (md.median_gvs, about 1.98).
+
+    '
+  sql_expression: "ln(CAST(f.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE)\n   / NULLIF(CAST(f.valuationratios->>'$.valuation_metrics.PB_Ratio'\
+    \ AS DOUBLE), 0)) > md.median_gvs\nAND CAST(f.tradingdata->>'$.moving_averages.MA_50' AS DOUBLE) -\
+    \ CAST(f.tradingdata->>'$.moving_averages.MA_200' AS DOUBLE) > 0"
+  source_model: main.funds
+  from_sql: "main.funds f CROSS JOIN (SELECT median(ln(CAST(f3.valuationratios->>'$.valuation_metrics.PE_Ratio'\
+    \ AS DOUBLE)\n             / NULLIF(CAST(f3.valuationratios->>'$.valuation_metrics.PB_Ratio' AS DOUBLE),\
+    \ 0))) AS median_gvs\n            FROM main.funds f3) md"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_defensive_anchor
+  description: 'Defensive Anchor: 3-year Beta < 0.75 and a high Capital Preservation Index. INTERPRETATION:
+    "high" has no documented threshold; this metric uses CPI above the median CPI of all funds (md.median_cpi,
+    about 0.48).
+
+    '
+  sql_expression: "CAST(r.risk3y->>'$.risk_measures_3y.Beta_3Y' AS DOUBLE) < 0.75 AND (1.0 / (1 + CAST(p.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE)))\n  * (1 - (CAST(p.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE)\n          - (CAST(p.pricerange52w->>'$.low_metrics.Low_52W'\
+    \ AS DOUBLE) + CAST(p.pricerange52w->>'$.low_metrics.Low_Delta' AS DOUBLE)))\n       / NULLIF(CAST(p.pricerange52w->>'$.low_metrics.Low_52W'\
+    \ AS DOUBLE), 0)) > md.median_cpi"
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN main.performance p ON p.productref = f.tickersym LEFT JOIN main.risk_metrics\
+    \ r ON r.investmentref = f.tickersym CROSS JOIN (SELECT median((1.0 / (1 + CAST(p3.histstats->>'$.Negative_Years'\
+    \ AS DOUBLE)))\n             * (1 - (CAST(p3.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE)\n\
+    \                     - (CAST(p3.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE) + CAST(p3.pricerange52w->>'$.low_metrics.Low_Delta'\
+    \ AS DOUBLE)))\n                  / NULLIF(CAST(p3.pricerange52w->>'$.low_metrics.Low_52W' AS DOUBLE),\
+    \ 0))) AS median_cpi\n            FROM main.performance p3) md"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_true_active_differentiator
+  description: 'True Active Differentiator: Active Management Footprint > 0.5, Appraisal Ratio > 0.2 and
+    High-Conviction Portfolio (largest holding > 0.08).'
+  sql_expression: "(1 - CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) / 100.0)\n  / NULLIF(CAST(f.fundmetrics->>'$.Turnover_Ratio'\
+    \ AS DOUBLE), 0) > 0.5\nAND CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE)\n  / NULLIF(CAST(r.risk3y->>'$.risk_measures_3y.Volatility_3Y'\
+    \ AS DOUBLE)\n    * sqrt(1 - CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) / 100.0),\
+    \ 0) > 0.2\nAND h.top_weight > 0.08"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym LEFT JOIN (SELECT
+    instrumentref, MAX(holdingpct) AS top_weight FROM main.holdings GROUP BY instrumentref) h ON h.instrumentref
+    = f.tickersym
+  grain: one row per fund
+  domains:
+  - classifications
+- name: is_speculative_turnaround_play
+  description: 'Speculative Turnaround Play: High-Cost Underperformer (positive relative expense, negative
+    last-reported-year outperformance) with a Golden Cross Signal.'
+  sql_expression: CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'
+    AS DOUBLE) > 0 AND ly.last_outperformance < 0 AND CAST(f.tradingdata->>'$.moving_averages.MA_50' AS
+    DOUBLE) - CAST(f.tradingdata->>'$.moving_averages.MA_200' AS DOUBLE) > 0
+  source_model: main.funds
+  from_sql: "main.funds f LEFT JOIN (SELECT portfolioref, arg_max(fundperf - categoryperf, calendaryear)\
+    \ AS last_outperformance, MAX(calendaryear) AS last_year\n FROM main.annual_returns WHERE fundperf\
+    \ IS NOT NULL AND categoryperf IS NOT NULL GROUP BY portfolioref) ly ON ly.portfolioref = f.tickersym"
+  grain: one row per fund
+  domains:
+  - classifications
+- name: yoy_performance_trend
+  description: 'Year-over-Year Performance Trend = Outperformance(current year) - Outperformance(previous
+    year). The previous year is matched as calendaryear - 1 (538 funds have year gaps, so do not use LAG
+    by row order); a year whose predecessor is missing yields no row.
+
+    '
+  sql_expression: (cur.fundperf - cur.categoryperf) - (prv.fundperf - prv.categoryperf)
+  source_model: main.annual_returns
+  from_sql: "main.annual_returns cur JOIN main.annual_returns prv\n  ON prv.portfolioref = cur.portfolioref\
+    \ AND prv.calendaryear = cur.calendaryear - 1"
+  grain: one row per fund per current year
+  domains:
+  - performance
+- name: category_average_duration
+  description: 'Category Average Duration: sum of fund durations / number of funds for a given category
+    (AVG of allocweights.bond_characteristics.Duration_Yrs, counting funds that report a duration; 389
+    funds do). GROUP BY f.productclass.
+
+    '
+  sql_expression: AVG(CAST(f.allocweights->>'$.bond_characteristics.Duration_Yrs' AS DOUBLE))
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund; aggregate grouped by f.productclass
+  domains:
+  - portfolio_composition
+- name: duration_advantage
+  description: Duration Advantage = Category Average Duration - Fund's Duration (positive = lower duration
+    than its category).
+  sql_expression: cd.cat_avg_duration - CAST(f.allocweights->>'$.bond_characteristics.Duration_Yrs' AS
+    DOUBLE)
+  source_model: main.funds
+  from_sql: "main.funds f JOIN (SELECT f4.productclass, AVG(CAST(f4.allocweights->>'$.bond_characteristics.Duration_Yrs'\
+    \ AS DOUBLE)) AS cat_avg_duration\n                   FROM main.funds f4 WHERE f4.productclass IS\
+    \ NOT NULL GROUP BY f4.productclass) cd\n  ON cd.productclass = f.productclass"
+  grain: one row per fund with a category
+  domains:
+  - portfolio_composition
+- name: avg_upside_outperformance
+  description: 'Average Upside Outperformance: mean Annual Fund Outperformance over years with positive
+    category returns (categoryperf > 0). GROUP BY ar.portfolioref.'
+  sql_expression: AVG(ar.fundperf - ar.categoryperf) FILTER (WHERE ar.categoryperf > 0)
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar
+  grain: one row per fund-year; aggregate grouped by ar.portfolioref
+  domains:
+  - performance
+- name: avg_downside_outperformance
+  description: 'Average Downside Outperformance: mean Annual Fund Outperformance over years with non-positive
+    category returns (categoryperf <= 0). A smaller negative number indicates better downside protection.
+    GROUP BY ar.portfolioref.'
+  sql_expression: AVG(ar.fundperf - ar.categoryperf) FILTER (WHERE ar.categoryperf <= 0)
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar
+  grain: one row per fund-year; aggregate grouped by ar.portfolioref
+  domains:
+  - performance
+- name: capture_differential
+  description: Capture Differential = Average Upside Outperformance - Average Downside Outperformance.
+    GROUP BY ar.portfolioref.
+  sql_expression: AVG(ar.fundperf - ar.categoryperf) FILTER (WHERE ar.categoryperf > 0) - AVG(ar.fundperf
+    - ar.categoryperf) FILTER (WHERE ar.categoryperf <= 0)
+  source_model: main.annual_returns
+  from_sql: main.annual_returns ar
+  grain: one row per fund-year; aggregate grouped by ar.portfolioref
+  domains:
+  - performance
+- name: avg_daily_value_traded_3m
+  description: ADVT(3M) = Average daily volume (3M) x average share price, using the 200-day moving average
+    as the price.
+  sql_expression: CAST(f.tradingdata->>'$.volume_metrics.Vol_3M' AS DOUBLE) * CAST(f.tradingdata->>'$.moving_averages.MA_200'
+    AS DOUBLE)
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - technical
+- name: beta_drift
+  description: 'Beta Drift = Beta(1st period) - Beta(2nd period). Encoded as recent vs long-term: Beta_3Y
+    - Beta_10Y. For another pair substitute the period (risk5y.risk_measures_5y.Beta_5Y).
+
+    '
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.Beta_3Y' AS DOUBLE) - CAST(r.risk10y->>'$.risk_measures_10y.Beta_10Y'
+    AS DOUBLE)
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - risk
+- name: r_squared_drift
+  description: R-Squared Drift = R-squared(1st period) - R-squared(2nd period); encoded as R_Squared_3Y
+    - R_Squared_10Y (0-100 scale).
+  sql_expression: CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) - CAST(r.risk10y->>'$.risk_measures_10y.R_Squared_10Y'
+    AS DOUBLE)
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - risk
+- name: is_style_drift
+  description: 'Style Drift: recent (3Y) vs long-term (10Y) — |Beta change| > 0.15 or |R-squared change|
+    > 10.'
+  sql_expression: abs(CAST(r.risk3y->>'$.risk_measures_3y.Beta_3Y' AS DOUBLE) - CAST(r.risk10y->>'$.risk_measures_10y.Beta_10Y'
+    AS DOUBLE)) > 0.15 OR abs(CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) - CAST(r.risk10y->>'$.risk_measures_10y.R_Squared_10Y'
+    AS DOUBLE)) > 10
+  source_model: main.risk_metrics
+  from_sql: main.risk_metrics r
+  grain: one row per fund with risk data
+  domains:
+  - risk
+  - classifications
+- name: composite_score
+  description: 'Composite Score = (Percentile Rank(5Y Alpha) + Percentile Rank(3Y Sharpe) + Percentile
+    Rank(Inverse Net Expense = 1 / Expense_Net)) / 3, ranks being PERCENT_RANK within the fund''s category
+    (peer group), over funds with a category and all three inputs non-NULL. cs.category_fund_count is
+    the number of all funds in the category (funds table).
+
+    '
+  sql_expression: cs.composite_score
+  source_model: main.funds
+  from_sql: "(SELECT s.tickersym, s.productclass, s.category_fund_count,\n   (PERCENT_RANK() OVER (PARTITION\
+    \ BY s.productclass ORDER BY s.alpha5y)\n    + PERCENT_RANK() OVER (PARTITION BY s.productclass ORDER\
+    \ BY s.sharpe3y)\n    + PERCENT_RANK() OVER (PARTITION BY s.productclass ORDER BY s.inverse_net_expense))\
+    \ / 3.0 AS composite_score\n FROM (SELECT f.tickersym, f.productclass, cc.category_fund_count,\n \
+    \        CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) AS alpha5y,\n         CAST(r.risk3y->>'$.risk_measures_3y.Sharpe_Ratio_3Y'\
+    \ AS DOUBLE) AS sharpe3y,\n         1.0 / CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) AS inverse_net_expense\n\
+    \       FROM main.funds f JOIN main.risk_metrics r ON r.investmentref = f.tickersym\n       JOIN (SELECT\
+    \ productclass, COUNT(*) AS category_fund_count FROM main.funds WHERE productclass IS NOT NULL GROUP\
+    \ BY productclass) cc\n         ON cc.productclass = f.productclass\n       WHERE (r.risk5y->>'$.risk_measures_5y.Alpha_5Y')\
+    \ IS NOT NULL\n         AND (r.risk3y->>'$.risk_measures_3y.Sharpe_Ratio_3Y') IS NOT NULL\n      \
+    \   AND (f.fundmetrics->>'$.Expense_Net') IS NOT NULL) s) cs"
+  grain: one row per scored fund
+  domains:
+  - risk
+- name: is_category_dominator
+  description: 'Category Dominator: the fund with the highest Composite Score within its category, provided
+    the category contains at least 10 funds (all funds in the category).'
+  sql_expression: cs.category_fund_count >= 10 AND cs.composite_score = MAX(cs.composite_score) OVER (PARTITION
+    BY cs.productclass)
+  source_model: main.funds
+  from_sql: "(SELECT s.tickersym, s.productclass, s.category_fund_count,\n   (PERCENT_RANK() OVER (PARTITION\
+    \ BY s.productclass ORDER BY s.alpha5y)\n    + PERCENT_RANK() OVER (PARTITION BY s.productclass ORDER\
+    \ BY s.sharpe3y)\n    + PERCENT_RANK() OVER (PARTITION BY s.productclass ORDER BY s.inverse_net_expense))\
+    \ / 3.0 AS composite_score\n FROM (SELECT f.tickersym, f.productclass, cc.category_fund_count,\n \
+    \        CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) AS alpha5y,\n         CAST(r.risk3y->>'$.risk_measures_3y.Sharpe_Ratio_3Y'\
+    \ AS DOUBLE) AS sharpe3y,\n         1.0 / CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) AS inverse_net_expense\n\
+    \       FROM main.funds f JOIN main.risk_metrics r ON r.investmentref = f.tickersym\n       JOIN (SELECT\
+    \ productclass, COUNT(*) AS category_fund_count FROM main.funds WHERE productclass IS NOT NULL GROUP\
+    \ BY productclass) cc\n         ON cc.productclass = f.productclass\n       WHERE (r.risk5y->>'$.risk_measures_5y.Alpha_5Y')\
+    \ IS NOT NULL\n         AND (r.risk3y->>'$.risk_measures_3y.Sharpe_Ratio_3Y') IS NOT NULL\n      \
+    \   AND (f.fundmetrics->>'$.Expense_Net') IS NOT NULL) s) cs"
+  grain: one row per scored fund
+  domains:
+  - risk
+  - classifications
+- name: alpha_turnover_slope
+  description: Slope of the linear regression of 3-Year Alpha (Y) on Turnover Ratio (X), over funds with
+    both values.
+  sql_expression: REGR_SLOPE(CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE), CAST(f.fundmetrics->>'$.Turnover_Ratio'
+    AS DOUBLE))
+  source_model: main.funds
+  from_sql: main.funds f JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund with risk data (aggregate)
+  domains:
+  - risk
+- name: alpha_turnover_fit_quality
+  description: 'Fit Quality: R-squared of the regression of 3-Year Alpha (Y) on Turnover Ratio (X).'
+  sql_expression: REGR_R2(CAST(r.risk3y->>'$.risk_measures_3y.Alpha_3Y' AS DOUBLE), CAST(f.fundmetrics->>'$.Turnover_Ratio'
+    AS DOUBLE))
+  source_model: main.funds
+  from_sql: main.funds f JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund with risk data (aggregate)
+  domains:
+  - risk
+- name: valuation_data_availability
+  description: '''Transparent'' if the fund provides numeric values for both P/E and P/B ratios; otherwise
+    ''Opaque''. 1,496 funds have both.'
+  sql_expression: "CASE WHEN CAST(f.valuationratios->>'$.valuation_metrics.PE_Ratio' AS DOUBLE) IS NOT\
+    \ NULL\n      AND CAST(f.valuationratios->>'$.valuation_metrics.PB_Ratio' AS DOUBLE) IS NOT NULL\n\
+    \     THEN 'Transparent' ELSE 'Opaque' END"
+  source_model: main.funds
+  from_sql: main.funds f
+  grain: one row per fund
+  domains:
+  - portfolio_composition
+- name: median_1y_return
+  description: 'Median 1-Year Return: the 50th percentile (interpolated, as percentile_cont) of Return_1Y
+    for a specified group of funds; NULL returns ignored.'
+  sql_expression: MEDIAN(CAST(p.returnmetrics->>'$.fund_returns.Return_1Y' AS DOUBLE))
+  source_model: main.performance
+  from_sql: main.funds f JOIN main.performance p ON p.productref = f.tickersym
+  grain: one row per fund (aggregate over the group)
+  domains:
+  - performance
+- name: wasted_fee_amount
+  description: 'Wasted Fee Amount: fees in excess of the benchmark''s expense ratio paid in a Closet Indexer
+    fund: (Net Expense Ratio - Benchmark Expense Ratio) x Net Worth. NULL for funds that are not Closet
+    Indexers (3Y R-squared > 90 and positive relative expense).
+
+    '
+  sql_expression: "CASE WHEN CAST(r.risk3y->>'$.risk_measures_3y.R_Squared_3Y' AS DOUBLE) > 90\n     \
+    \ AND CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp' AS\
+    \ DOUBLE) > 0\n     THEN (CAST(f.fundmetrics->>'$.Expense_Net' AS DOUBLE) - CAST(f.fundmetrics->>'$.Benchmark_Exp'\
+    \ AS DOUBLE))\n          * CAST(f.fundmetrics->>'$.Net_Worth' AS DOUBLE) END"
+  source_model: main.funds
+  from_sql: main.funds f LEFT JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund
+  domains:
+  - cost_and_income
+- name: family_sector_concentration
+  description: 'Family Sector Concentration Profile: for each fund family (parentgroup), the economic
+    sector (sectors.industrytag) with the highest average weightpct across all of the family''s funds.
+    GROUP BY fs.parentgroup.
+
+    '
+  sql_expression: arg_max(fs.industrytag, fs.avg_weight)
+  source_model: main.sector_allocations
+  from_sql: "(SELECT f.parentgroup, s.industrytag, AVG(sa.weightpct) AS avg_weight\n FROM main.funds f\
+    \ JOIN main.sector_allocations sa ON sa.productlink = f.tickersym\n JOIN main.sectors s ON s.secid\
+    \ = sa.sectorlink\n GROUP BY f.parentgroup, s.industrytag) fs"
+  grain: one row per family and sector
+  domains:
+  - families
+- name: is_top_tier_family
+  description: 'Top-Tier Family: average 3-year beta of the family''s funds < 1.0 and the family manages
+    5 or more alpha-generating funds (5Y alpha > 0). GROUP BY f.parentgroup.
+
+    '
+  sql_expression: AVG(CAST(r.risk3y->>'$.risk_measures_3y.Beta_3Y' AS DOUBLE)) < 1.0 AND COUNT(DISTINCT
+    f.tickersym) FILTER (WHERE CAST(r.risk5y->>'$.risk_measures_5y.Alpha_5Y' AS DOUBLE) > 0) >= 5
+  source_model: main.funds
+  from_sql: main.funds f JOIN main.risk_metrics r ON r.investmentref = f.tickersym
+  grain: one row per fund with risk data; aggregate grouped by f.parentgroup
+  domains:
+  - families
+tables:
+- schema: main
+  table: funds
+  description: 'One row per fund (2,310). JSON columns carry the documented fields; flat float32 mirror
+    columns (expensenet, benchmarkexp, yieldrate, turnoverratio, networth, vol3m, volrecent, ma50, ma200,
+    equityweight, bondweight, pe_ratio, pb_ratio, ps_ratio, pcf_ratio, avgmaturity, duration, geozone,
+    currencybase, strategytype, capsize, quotemode) hold identical values.
+
+    '
+  columns:
+  - name: tickersym
+    description: Unique fund ticker; join key for performance.productref, risk_metrics.investmentref,
+      annual_returns.portfolioref, holdings.instrumentref, sector_allocations.productlink, bond_allocations.fundlink.
+  - name: parentgroup
+    description: Fund family; references families.groupname.
+  - name: listingvenue
+    description: Primary exchange; references exchanges.marketcode (PCX, NGM, BTS, PNK).
+  - name: productclass
+    description: Investment category; references categories.classtype. NULL for 623 funds. Peer group
+      for category percentiles.
+  - name: launchdate
+    description: Date the fund began operations; NULL when unknown.
+  - name: fundclass
+    description: 'JSON: GeoZone_Class (Geographic Focus — documented scopes ''UNITED_STATES'', ''International'',
+      ''Global'', ''Pacific/Asia ex-Japan Stk'', ''Emerging Markets''; in this data only US spellings:
+      America, US, U.S.A., USA, U.S., United States, UNITED_STATES, us, usa), Strategy_Type (Growth/Value/Blend
+      or NULL), Cap_Size (Large/Medium/Small or NULL), Quote_Mode (always ''ETF''), Currency_Base (USD
+      in many spellings). Read with (f.fundclass->>''$.GeoZone_Class'').
+
+      '
+  - name: fundmetrics
+    description: 'JSON: Net_Worth (AUM in base currency), Yield_Rate (annual dividend per share as a fraction
+      of price; 0.02 = 2%; crucial for income investors), Expense_Net (net annual fee as fraction of assets;
+      0.005 = 0.5%; lower is better), Benchmark_Exp (benchmark/category average expense ratio), Turnover_Ratio
+      (1.0 = 100% = whole portfolio replaced once a year; < 0.3 buy-and-hold, > 1.0 active trading; values
+      up to 773.8 occur). Read with CAST(f.fundmetrics->>''$.Expense_Net'' AS DOUBLE).
+
+      '
+  - name: tradingdata
+    description: 'JSON: volume_metrics.Vol_3M (avg daily volume, 3 months), volume_metrics.Vol_Recent
+      (~10 days), moving_averages.MA_50, moving_averages.MA_200.'
+  - name: allocweights
+    description: 'JSON: asset_allocation.Equity_Weight (share in stocks; 0.9 = 90%, growth-oriented),
+      asset_allocation.Bond_Weight, bond_characteristics.Avg_Maturity (years), bond_characteristics.Duration_Yrs
+      (interest-rate sensitivity: 7 years = price falls about 7% if rates rise 1%; reported for 389 funds).
+
+      '
+  - name: valuationratios
+    description: 'JSON: valuation_metrics.PE_Ratio, PB_Ratio, PS_Ratio, PCF_Ratio (weighted averages of
+      equity holdings; all positive when present; 1,496 funds have them).'
+- schema: main
+  table: performance
+  description: Exactly one row per fund (2,310). Flat float32 mirrors of every JSON field exist (low52w,
+    lowdelta, high52w, r1y, benchr3y, positiveyears, ...).
+  columns:
+  - name: productref
+    description: Fund ticker (funds.tickersym).
+  - name: reportdate
+    description: Report date; 1970-01-01 (38 rows) is a placeholder for unknown.
+  - name: pricerange52w
+    description: 'JSON: low_metrics.Low_52W, Low_Delta (current - low), Low_Delta_Pct; high_metrics.High_52W,
+      High_Delta (current - high, <= 0), High_Delta_Pct; range_metrics.Range_Move, Range_Move_Pct. Current
+      price = Low_52W + Low_Delta.'
+  - name: returnmetrics
+    description: 'JSON: fund_returns.Return_YTD/1M/3M/1Y/3Y/5Y/10Y and benchmark_returns.Bench_Return_YTD/1M/3M/1Y/3Y/5Y/10Y,
+      decimals (3Y+ annualized).'
+  - name: histstats
+    description: 'JSON: Positive_Years, Negative_Years (calendar-year counts); Top_Holdings and Top_Weight
+      are NULL on every row — use holdings for the largest holding.'
+- schema: main
+  table: risk_metrics
+  description: At most one row per fund (1,507). Flat float32 mirrors exist (alpha3y, beta3y, rsquared3y,
+    volatility3y, sharperatio3y, ... 5y, 10y).
+  columns:
+  - name: investmentref
+    description: Fund ticker (funds.tickersym).
+  - name: risk3y
+    description: 'JSON risk_measures_3y: Alpha_3Y, Beta_3Y (> 1 more volatile than market, < 1 less, =
+      1 matches), Avg_Return_3Y, R_Squared_3Y (0-100 scale; 95 = 95% of movements explained by benchmark),
+      Volatility_3Y (percent units), Sharpe_Ratio_3Y (higher better; > 1 good, > 2 very good, > 3 excellent),
+      Treynor_Ratio_3Y.
+
+      '
+  - name: risk5y
+    description: 'JSON risk_measures_5y: Alpha_5Y, Beta_5Y, Avg_Return_5Y, R_Squared_5Y, Volatility_5Y,
+      Sharpe_Ratio_5Y, Treynor_Ratio_5Y.'
+  - name: risk10y
+    description: 'JSON risk_measures_10y: Alpha_10Y, Beta_10Y, Avg_Return_10Y, R_Squared_10Y, Volatility_10Y,
+      Sharpe_Ratio_10Y, Treynor_Ratio_10Y.'
+- schema: main
+  table: annual_returns
+  description: One row per fund per calendar year (2000-2020); years can have gaps.
+  columns:
+  - name: portfolioref
+    description: Fund ticker.
+  - name: calendaryear
+    description: Calendar year.
+  - name: fundperf
+    description: Fund annual return, decimal; NULL in 16,298 rows.
+  - name: categoryperf
+    description: Category average annual return, decimal; NULL in 8,004 rows.
+- schema: main
+  table: holdings
+  columns:
+  - name: instrumentref
+    description: Fund ticker.
+  - name: securitykey
+    description: Security id; joins securities.securityref (documented as holdings.securityref).
+  - name: holdingpct
+    description: Fraction (0-1) of fund assets in this security; the max per fund is the single largest
+      holding weight.
+  - name: positionrank
+    description: 1 = largest holding.
+- schema: main
+  table: sector_allocations
+  columns:
+  - name: productlink
+    description: Fund ticker.
+  - name: sectorlink
+    description: sectors.secid.
+  - name: weightpct
+    description: 'Sector Weight: fraction (0-1) of the fund''s assets in this sector; sums to 1 per fund;
+      0.4 (40%) indicates a significant bet on that sector.'
+- schema: main
+  table: sectors
+  columns:
+  - name: industrytag
+    description: 'Lower-case snake_case sector: basic_materials, communication_services, consumer_cyclical,
+      consumer_defensive, energy, financial_services, healthcare, industrials, real_estate, technology,
+      utilities.'
+- schema: main
+  table: bond_allocations
+  columns:
+  - name: fundlink
+    description: Fund ticker (382 bond funds, 9 rows each).
+  - name: ratinglink
+    description: bond_ratings.ratekey.
+  - name: allocationpct
+    description: Fraction (0-1) of bond holdings in this rating; sums to 1 per fund.
+- schema: main
+  table: bond_ratings
+  columns:
+  - name: creditmark
+    description: 'Credit Quality, lower-case: us_government (highest quality), aaa and aa (high-grade
+      investment quality), a, bbb, bb / b / below_b (below BBB = speculative / high-yield), others.'
+- schema: main
+  table: exchanges
+  columns:
+  - name: marketcode
+    description: PCX (NYSEArca), NGM (NasdaqGM), BTS (BATS), PNK (Other OTC).
+  - name: exchangetime
+    description: 'Exchange time zone (documented as localtime); inconsistent spellings of New York: ny,
+      New York, America/NYC, nyc.'
+- schema: main
+  table: families
+  columns:
+  - name: groupname
+    description: Fund family name; equals funds.parentgroup.
+- schema: main
+  table: family_categories
+  columns:
+  - name: familylink
+    description: families.groupname.
+  - name: categorylink
+    description: categories.classtype.
+- schema: main
+  table: family_exchanges
+  columns:
+  - name: familyref
+    description: families.groupname.
+  - name: exchangeref
+    description: exchanges.marketcode.
+- schema: main
+  table: categories
+  columns:
+  - name: classtype
+    description: Category name; equals funds.productclass.
+- schema: main
+  table: securities
+  columns:
+  - name: securityref
+    description: Security id (holdings.securitykey). No instrumentcode column exists.
+  - name: securitylabel
+    description: Security name, often 'TICKER - Company'.
+relationships:
+- from: main.funds.parentgroup
+  to: main.families.groupname
+  type: many_to_one
+- from: main.funds.listingvenue
+  to: main.exchanges.marketcode
+  type: many_to_one
+- from: main.funds.productclass
+  to: main.categories.classtype
+  type: many_to_one
+- from: main.performance.productref
+  to: main.funds.tickersym
+  type: one_to_one
+- from: main.risk_metrics.investmentref
+  to: main.funds.tickersym
+  type: one_to_one
+- from: main.annual_returns.portfolioref
+  to: main.funds.tickersym
+  type: many_to_one
+- from: main.holdings.instrumentref
+  to: main.funds.tickersym
+  type: many_to_one
+- from: main.holdings.securitykey
+  to: main.securities.securityref
+  type: many_to_one
+- from: main.sector_allocations.productlink
+  to: main.funds.tickersym
+  type: many_to_one
+- from: main.sector_allocations.sectorlink
+  to: main.sectors.secid
+  type: many_to_one
+- from: main.bond_allocations.fundlink
+  to: main.funds.tickersym
+  type: many_to_one
+- from: main.bond_allocations.ratinglink
+  to: main.bond_ratings.ratekey
+  type: many_to_one
+- from: main.family_categories.familylink
+  to: main.families.groupname
+  type: many_to_one
+- from: main.family_categories.categorylink
+  to: main.categories.classtype
+  type: many_to_one
+- from: main.family_exchanges.familyref
+  to: main.families.groupname
+  type: many_to_one
+- from: main.family_exchanges.exchangeref
+  to: main.exchanges.marketcode
+  type: many_to_one

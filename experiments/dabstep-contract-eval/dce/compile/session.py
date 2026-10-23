@@ -28,12 +28,13 @@ from dce.compile.db import CompileDB
 from dce.compile.entries import KBEntry, domain_of, metric_names, slug
 from dce.compile.inputs import CompileInputs
 
-COMPILER_MODEL = "claudesonnet5"
 MAX_ATTEMPTS = 3
 #: Starts the paragraph that carries what the compiler learned from the
 #: data. `manual_compiled` collects every such paragraph from the contract,
 #: so both arms see the compiler's knowledge (spec, Compiler: Notes).
 NOTE_MARKER = "Compiler note: "
+#: A metric's declared join (library 0.62), recorded only when given.
+JOIN_KEYS = ("from_sql", "grain")
 
 SYSTEM_PROMPT = """\
 You compile a database's written documentation into a data contract, one \
@@ -43,10 +44,7 @@ and reuse.
 
 Rules:
 - Write DuckDB SQL. {dialect_note}
-- A calculation's sql_expression is evaluated as \
-`SELECT <sql_expression> FROM <source_model>`; a predicate's as \
-`SELECT * FROM <source_model> WHERE <sql_expression>`. Use only columns of \
-source_model; reach other tables through scalar subqueries.
+{table_rule}
 - Encode what the entry states. Where the data forces a choice the entry \
 does not make (how a value is stored, a JSON path, a unit), check it with \
 run_sql, encode it, and say so in `note`. Add nothing else.
@@ -83,6 +81,34 @@ defines without naming it as a dependency. Compile only the entry you are given.
 {kb}
 """
 
+ONE_TABLE_RULE = (
+    "- A calculation's sql_expression is evaluated as "
+    "`SELECT <sql_expression> FROM <source_model>`; a predicate's as "
+    "`SELECT * FROM <source_model> WHERE <sql_expression>`. Use only columns of "
+    "source_model; reach other tables through scalar subqueries."
+)
+
+#: The rule with `joins` on: a metric may declare its FROM (library 0.62).
+JOINS_RULE = (
+    "- A calculation's sql_expression is evaluated as "
+    "`SELECT <sql_expression> FROM <source_model>`; a predicate's as "
+    "`SELECT * FROM <source_model> WHERE <sql_expression>`. When it needs "
+    "columns of several tables, declare the join in from_sql instead: a FROM "
+    "clause only (tables written main.<table>, with aliases; no WHERE, GROUP BY "
+    "or LIMIT) that reads source_model. A join's ON may be any condition, not "
+    "only key equality: ranges, NULL meaning 'any value', several columns at "
+    "once. The FROM may also hold a derived table (an aliased subquery) for an "
+    "aggregate the expression needs, such as a per-month total. The "
+    "expression is then evaluated as `SELECT <sql_expression> FROM <from_sql>`, "
+    "a predicate as `SELECT * FROM <from_sql> WHERE <sql_expression>`, and "
+    "qualifies its columns with the aliases. Say in grain what one row of "
+    "from_sql is (for example 'one row per order, with its customer'). Leave "
+    "from_sql and grain empty for a metric over one table."
+)
+
+#: Appended to an instruction with `joins` on.
+JOINS_INSTRUCTION = " If it needs several tables, also give from_sql and grain."
+
 INSTRUCTIONS: dict[str, str] = {
     "calculation": (
         "Compile this calculation into one metric: a SQL expression computing "
@@ -114,6 +140,13 @@ class SectionMetric(BaseModel):
     sql_expression: str
     source_model: str
     description: str
+
+
+class SectionJoinMetric(SectionMetric):
+    """A section metric with `joins` on: it may declare its FROM."""
+
+    from_sql: str = ""
+    grain: str = ""
 
 
 @dataclass
@@ -153,6 +186,7 @@ class EntryRecord:
 def system_prompt(inputs: CompileInputs) -> str:
     return SYSTEM_PROMPT.format(
         dialect_note=inputs.dialect_note,
+        table_rule=JOINS_RULE if inputs.joins else ONE_TABLE_RULE,
         attempts=MAX_ATTEMPTS,
         ddl=inputs.ddl,
         meanings=inputs.column_meanings or "(none)",
@@ -196,14 +230,62 @@ class _EntrySession:
         want = name.strip().strip('"').lower()
         return next((c for c, _ in self.tables[table] if c.lower() == want), None)
 
-    def _metric(self, expr: str, source: str, *, predicate: bool):
+    def _metric(
+        self,
+        expr: str,
+        source: str,
+        *,
+        predicate: bool,
+        from_sql: str = "",
+        grain: str = "",
+    ):
         table = self._table(source)
         if table is None:
             return None, f"no table {source!r}; tables are {sorted(self.tables)}"
-        error = self.db.check_metric(expr, f"main.{table}", predicate=predicate)
+        source_model = f"main.{table}"
+        if not from_sql.strip():
+            error = self.db.check_metric(expr, source_model, predicate=predicate)
+            if error is not None:
+                return None, error
+            return {"sql_expression": expr.strip(), "source_model": source_model}, None
+        if not grain.strip():
+            return None, "a metric with from_sql needs a grain: what one row of it is"
+        problems = self._gate(expr, source_model, from_sql.strip())
+        if problems:
+            return None, "; ".join(problems)
+        error = self.db.check_metric(expr, from_sql.strip(), predicate=predicate)
         if error is not None:
             return None, error
-        return {"sql_expression": expr.strip(), "source_model": f"main.{table}"}, None
+        return {
+            "sql_expression": expr.strip(),
+            "source_model": source_model,
+            "from_sql": from_sql.strip(),
+            "grain": _one_paragraph(grain),
+        }, None
+
+    def _gate(self, expr: str, source_model: str, from_sql: str) -> list[str]:
+        """The library's gate on a declared join, against the contract this
+        compile emits: only a FROM clause, governed tables, reads
+        source_model, no forbidden operation. Running it is `check_metric`'s."""
+        from agentic_data_contracts import DataContract
+        from agentic_data_contracts.core.schema import DataContractSchema
+        from agentic_data_contracts.semantic.base import MetricDefinition
+        from agentic_data_contracts.validation import validate_metric_from_sql
+        from dce.compile.emit import contract_dict
+
+        contract = DataContract(
+            DataContractSchema.model_validate(
+                contract_dict(self.inputs, self.tables, [])
+            )
+        )
+        metric = MetricDefinition(
+            name="submitted",
+            description="",
+            sql_expression=expr,
+            source_model=source_model,
+            from_sql=from_sql,
+        )
+        return validate_metric_from_sql(contract, [metric], dialect="duckdb")
 
     # -- the submission rule --------------------------------------------------
     def _submit(self, check: Callable[[], tuple[dict | None, str | None]]) -> str:
@@ -271,6 +353,40 @@ class _EntrySession:
 
                 return self._submit(check)
 
+            if self.inputs.joins:
+
+                def submit_entry(  # type: ignore[no-redef]
+                    sql_expression: str,
+                    source_model: str,
+                    note: str = "",
+                    cannot_encode: str = "",
+                    categorical: bool = False,
+                    from_sql: str = "",
+                    grain: str = "",
+                ) -> str:
+                    """Submit this entry's metric: a SQL expression over one table,
+                    or over the FROM clause in from_sql with grain saying what one
+                    row of it is, and a note on anything you checked in the data
+                    to write it. If it cannot be encoded over this database, say
+                    why in cannot_encode and leave the SQL empty. categorical: the
+                    entry assigns labels, and sql_expression is a CASE returning
+                    the label."""
+
+                    def check():
+                        if cannot_encode.strip():
+                            reason = _one_paragraph(cannot_encode)
+                            return {"untranslated": reason, "note": note}, None
+                        accepted, error = self._metric(
+                            sql_expression,
+                            source_model,
+                            predicate=predicate and not categorical,
+                            from_sql=from_sql,
+                            grain=grain,
+                        )
+                        return (accepted and {**accepted, "note": note}), error
+
+                    return self._submit(check)
+
         elif kind == "illustration":
 
             def submit_entry(target: str, note: str = "") -> str:  # type: ignore[no-redef]
@@ -299,6 +415,14 @@ class _EntrySession:
                 return self._submit(check)
 
         else:
+            model: type[SectionMetric] = (
+                SectionJoinMetric if self.inputs.joins else SectionMetric
+            )
+
+            def joins_of(m: SectionMetric) -> dict:
+                if isinstance(m, SectionJoinMetric):
+                    return {"from_sql": m.from_sql, "grain": m.grain}
+                return {}
 
             def submit_entry(metrics: list[SectionMetric], note: str = "") -> str:  # type: ignore[no-redef]
                 """Submit the section's metrics (possibly none), and a note on
@@ -307,7 +431,7 @@ class _EntrySession:
                 def check():
                     out, seen = [], set()
                     for raw in metrics:
-                        m = SectionMetric.model_validate(raw)
+                        m = model.model_validate(raw)
                         name = slug(m.name)
                         if name in self.taken or name in seen:
                             return None, f"metric name {name!r} is already used"
@@ -316,6 +440,7 @@ class _EntrySession:
                             m.sql_expression,
                             m.source_model,
                             predicate=m.kind == "predicate",
+                            **joins_of(m),
                         )
                         if error is not None or accepted is None:
                             return None, f"metric {name!r}: {error}"
@@ -325,6 +450,9 @@ class _EntrySession:
                     return {"metrics": out, "note": note}, None
 
                 return self._submit(check)
+
+            if self.inputs.joins:
+                submit_entry.__annotations__["metrics"] = list[SectionJoinMetric]
 
         return [run_sql, submit_entry]
 
@@ -343,7 +471,13 @@ class _EntrySession:
         record = self.prior.get(child)
         metrics = record.metrics if record else []
         lines = [
-            f"- {m['name']} over {m['source_model']}: {m['sql_expression']}"
+            f"- {m['name']} over "
+            + (
+                f"FROM {m['from_sql']} ({m['grain']})"
+                if m.get("from_sql")
+                else m["source_model"]
+            )
+            + f": {m['sql_expression']}"
             for m in metrics
             if m["sql_expression"]
         ]
@@ -356,7 +490,10 @@ class _EntrySession:
 
     def user_prompt(self) -> str:
         entry = self.entry
-        parts = [INSTRUCTIONS[entry.kind], f"## Entry: {entry.name}\n\n{entry.text}"]
+        instruction = INSTRUCTIONS[entry.kind]
+        if self.inputs.joins and entry.kind != "illustration":
+            instruction += JOINS_INSTRUCTION
+        parts = [instruction, f"## Entry: {entry.name}\n\n{entry.text}"]
         built = [line for child in entry.children for line in self._child_lines(child)]
         if built:
             parts.append("## Entries it builds on\n\n" + "\n".join(built))
@@ -394,6 +531,7 @@ class _EntrySession:
                         "description": self._with_note(text, note),
                         "sql_expression": got["sql_expression"],
                         "source_model": got["source_model"],
+                        **{k: got[k] for k in JOIN_KEYS if k in got},
                     }
                 )
             else:
@@ -429,6 +567,7 @@ class _EntrySession:
                         f'From the manual section "{entry.name}".',
                         "sql_expression": m["sql_expression"],
                         "source_model": m["source_model"],
+                        **{k: m[k] for k in JOIN_KEYS if k in m},
                     }
                 )
             status = "metric" if metrics else "prose"

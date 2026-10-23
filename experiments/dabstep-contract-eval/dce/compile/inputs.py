@@ -9,6 +9,9 @@ from pathlib import Path
 
 from dce.compile.entries import KBEntry
 
+#: The frozen compiler's model; `--model` picks another.
+COMPILER_MODEL = "claudesonnet5"
+
 
 @dataclass(frozen=True)
 class CompileInputs:
@@ -24,3 +27,9 @@ class CompileInputs:
     out_subdir: str  # under the contracts directory
     column_descriptions: dict[tuple[str, str], str] = field(default_factory=dict)
     table_descriptions: dict[str, str] = field(default_factory=dict)
+    #: Let a metric declare the FROM it is written against (`from_sql`, with
+    #: its `grain`). Off, the compiler is the frozen one, prompt and tools
+    #: unchanged.
+    joins: bool = False
+    #: The model that compiles; the log and the contract header record it.
+    model: str = COMPILER_MODEL

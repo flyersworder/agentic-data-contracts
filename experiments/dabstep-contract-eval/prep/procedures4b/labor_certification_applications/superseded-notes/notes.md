@@ -1,0 +1,45 @@
+Review schedule wildcards: The documentation says a NULL criterion is a wildcard. The contract finds that no criterion is stored as SQL NULL: the wildcard is stored as the text '*' (for example, 222 of 496 rules have visa_class '*'). Treat NULL or '*' as “no restriction” in matching and in counting a rule’s restricting criteria. It reports 69 of 981 cases on the default schedule and 4,188.00 total Case Review Hours across all cases.
+
+Application status: The data stores only 'CERTIFIED', 'Certified' and 'certified'. The contract tests certified status after trimming whitespace and converting to uppercase; Certified-Withdrawn would not count. All 981 cases are certified, so the approval and success rates on this data are 100%.
+
+Dates and processing: recvDay is text in YYYY/MM/DD format (all cases are 2023/12/21), decisionDay is text in YYYY-MM-DD format (NULL for 216 cases), and beginDay is text in DD/MM/YYYY format (always present, December 2023–December 2024). Parse the dates rather than comparing their text lexically. endDay is free text such as '2026 20th Dec.' and is not parsed by any metric. APT is NULL if decisionDay is NULL; its population average uses the available APT values. PER uses the average processing time among cases with a decision date in the query’s result rows and is NULL for a missing or zero APT.
+
+Wage Premium Rate: The data holds only the prevailing wage, so the contract uses it as the minimum required wage. WPR therefore equals WDR; both comparisons use annualized offered and prevailing amounts.
+
+Application Complexity Score: The documentation calls ACS a weighted sum but supplies no weights. The contract’s complexity_factor_count is an unweighted count, assigning one point each when h1bDep is 'Yes', willfulV is 'Yes', newemp exceeds zero, or amendflag exceeds zero; it is an ACS proxy, not a specified weighted score. Its delay-risk profile assigns High Risk for willfulV = 'Yes' or at least three of the other counted factors, Moderate Risk for one or two of those factors, and Low Risk otherwise.
+
+Application Complexity Tiers: The contract says “'special attestations' has no column, so Complex = h1bdep = 'Yes' OR willfulv = 'Yes'”; otherwise the case is Standard. The willfulV field contains only 'No' or NULL on this data. H-1B dependency is a recorded Yes/No/NULL flag; workforce size is not in the data, so use the flag, never recompute it.
+
+Visa Filing Window: The contract counts months as calendar-month differences between receipt and employment start, not elapsed-day intervals. It labels a case After Start Date if its actual start date precedes its receipt date; otherwise zero calendar months is Same Month, one to three is 1-3 Months Before, four to six is Optimal Window (4-6 Months), and more than six is Early Filing. It reports 321 Optimal, 393 at 1-3 Months, 247 Same Month, and 20 Early.
+
+Employer identity and industry storage: The employer table’s key is (corphandle, zipref), and cases join on both homefirm = corphandle and homezip = zipref (all 981 join). For employer metrics the contract uses the exact text of cases.homeFirm without folding case or trimming: 546 distinct names, versus 540 if case-folded. Industry is the NAICS code in employer_contact_info, at naics_code; some stored codes have fewer than six digits, such as 54151, and are used as stored.
+
+Attorney representation: A case is represented when it has a case_attorney row; 727 of 981 cases do, each with exactly one attorney row, and counselFor is always 'Yes'. Cases without a row are treated as self-represented. Attorney identity joins case_attorney.counselMail to attorney.lawMail. External Counsel Rate counts cases with such a row, and attorney caseload and success rate count distinct cases for each counselMail.
+
+Attorney Performance Rating: The contract treats the Standard Performer range of 85–95% as inclusive at both ends: exactly 85% and exactly 95% are Standard, High requires more than 95%, and below 85% is Underperformer.
+
+Legal Representation Efficacy: The contract reads the documented percentages as a difference in approval-rate percentage points, subtracting the unrepresented rate from the represented rate. High Impact requires a gap over 10 points; Moderate Impact is 5–10 points; Minimal Impact is an absolute gap under 5 points. A gap of −5 points or lower is 'Unclassified'. Here both rates are 100%, yielding a zero gap and Minimal Impact.
+
+Attorney specialization: For ASI, the contract sets the total number of visa types to four, all represented in the data. Its attorney_top_visa_class_share is the fraction of an attorney’s distinct cases in that attorney’s most frequent visa class; Specialist requires a share over 80%. It gives no quantified threshold for Generalist or Hybrid Practitioner, so does not assign those categories by a numeric rule.
+
+Worksite geography and workers: A case’s state is case_worksite.wsState from its single worksite row. For Worksite Density the contract sums case_worksite.wsHeads and divides by the number of distinct worksite addresses, identified by address line 1, city, state and ZIP, in scope. For Worksite Diversity Index it adds wsHeads across cases at each such address for each exact-text employer, then calculates the index from each address’s share of that employer’s total wsHeads.
+
+Annualized wage storage beyond the documentation: Every case has exactly one case_worksite row and its wageTrack finds a prevailing_wage record, with no orphan links. wage_details also contains prevailing_wage.oes_year and alternate_source fields source_type, source_year, publisher and survey_title; OES is represented through oes_year, and alternate_source.source_type is CBA or Survey. The contract reports that all 981 offered 'from' amounts parse, observed offered units are Hour, Week and Year, and all prevailing amounts begin with 'USD ' and parse; prevailing wage level can be JSON null.
+
+Employer Retention Rate: “a continuation application is a case with contemp (continued employment positions) > 0.” The numerator counts such cases once, rather than summing continued positions.
+
+Employer Size Classification and Continuous Filing Employer: The contract interprets “annually” as receipt year for size classification, counting applications per exact-text employer and receipt year; all receipts are in 2023. For continuous filing, submission month means receipt month, and it counts distinct receipt months within each employer’s receipt year. Since every receipt is on 2023/12/21, no employer qualifies as filing in at least nine months.
+
+Seasonal Application Index and Seasonal Application Pattern: SAI averages application counts over receipt months present in the result, rather than adding zero-application months; with all receipts in one month, SAI is 1. The contract gives no thresholds for Peak Season, Off-Peak Season or Transition Periods and uses SAI as evidence rather than assigning those labels by a specified rule.
+
+Grouped KPI comparison populations: ODI divides an SOC code’s case count by the average count over SOC codes in the grouped result; ESI divides an employer’s count by the average over employers in the grouped result; VCD, IAD and EHC use their respective total applications or total H-1B applications in the result. EHC groups by exact-text employer and counts only visa class 'H-1B' in its numerator and denominator. IAD and ICR group industries by the employer’s stored NAICS code.
+
+Wage Competitiveness Index: The contract uses annualized offered wages for both averages; the employer average is over its cases and the industry average is over all cases with the same stored NAICS code.
+
+Wage Growth Rate: The contract interprets “similar positions” as the same SOC code, “year” as the employment-start year from beginDay, and “wage” as annualized offered wage. It compares the average for each SOC and start year with that SOC’s immediately preceding calendar year; the result is NULL when that preceding year has no cases. Start years 2023 and 2024 occur in the data.
+
+Skill Shortage Occupation: The contract interprets occupation WDR as the average case WDR for an SOC code and computes whether that average exceeds 10%, with the application count reported too. It does not specify the statistical-significance test, so this is only the WDR part, not a complete shortage determination.
+
+Unavailable inputs: The contract says Cost of Living Adjusted Wage and Worksite Cost Index lack cost-of-living data; Premium Processing Rate lacks a premium-processing column; Visa-Dependent Industry and Employer Dependency Level lack workforce data; and Geographic Application Hotspot lacks population data. These are not computed from the available data; the recorded H-1B dependency flag does not supply workforce size.
+
+Undefined classifications: The contract supplies no rule for Occupational Specialization Levels or Position Scarcity Index. For Worksite Geographic Diversity, regions are not defined; only Single-Location, identified as one distinct worksite, is determinable. It does not supply a rule to determine Regional or National.

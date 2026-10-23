@@ -214,6 +214,23 @@ MODELS: dict[str, ModelSpec] = {
             role="frontier_subset",
             route="litellm_anthropic",
         ),
+        # Claude Opus 5.5 on the same gateway and route as `claudesonnet5`,
+        # resolved to `eu.anthropic.claude-opus-5-5`; the same pin caveat and
+        # the same lack of temperature and seed. Used only as a compiler
+        # model (`dce.compile --model`), not as an agent. Prices from the
+        # gateway's `/model/info` on 2026-10-12: $4.00 / $20.00 per MTok,
+        # $0.20 per MTok cache read, $5.00 per MTok cache write.
+        ModelSpec(
+            "claudeopus5.5",
+            provider_tag="bedrock-eu/eu.anthropic.claude-opus-5-5",
+            quantization="unknown",
+            price_in=4.00,
+            price_out=20.00,
+            price_cached=0.20,
+            supports_temperature=False,
+            role="frontier_subset",
+            route="litellm_anthropic",
+        ),
         # ALSO NOT AN OPENROUTER MODEL, AND NOT THE SAME ROUTE AS THE ONE
         # ABOVE. Qwen3.6-27B self-hosted on vLLM in-house and reached
         # through the same production LiteLLM gateway, but over its

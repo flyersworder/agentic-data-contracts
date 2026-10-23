@@ -67,10 +67,29 @@ COMPILED_CONTRACT_PATH = (
 )
 
 
-def load_compiled_contract() -> DataContract:
-    # Read at call time, so a test can point it elsewhere.
-    return load_contract_at(COMPILED_CONTRACT_PATH)
+#: The other compiled DABStep contracts, by arm: claudeopus5.5 as the
+#: compiler model, without and with declared joins (88484eb).
+COMPILED_ARM_DIRS: dict[str, str] = {
+    "contract_compiled_opus": "contracts-opus",
+    "contract_compiled_opus_joins": "contracts-opus-joins",
+}
 
 
-def compiled_digest() -> str:
-    return contract_digest(load_compiled_contract())
+def compiled_contract_path(arm: str = "contract_compiled") -> Path:
+    # Read at call time, so a test can point COMPILED_CONTRACT_PATH elsewhere.
+    if arm == "contract_compiled":
+        return COMPILED_CONTRACT_PATH
+    return (
+        Path(__file__).parent.parent
+        / COMPILED_ARM_DIRS[arm]
+        / "dabstep"
+        / "contract.yml"
+    )
+
+
+def load_compiled_contract(arm: str = "contract_compiled") -> DataContract:
+    return load_contract_at(compiled_contract_path(arm))
+
+
+def compiled_digest(arm: str = "contract_compiled") -> str:
+    return contract_digest(load_compiled_contract(arm))

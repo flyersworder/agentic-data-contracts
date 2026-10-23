@@ -13,6 +13,7 @@ from dce.arms import (
     ARMS,
     DATA_NOTE,
     EXTRA_ARMS,
+    SUM_NOTE,
     build_arm,
     check_and_restore,
     make_working_copy,
@@ -59,6 +60,11 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "contract_uninterpreted",
         "manual_resolved",
         "contract_compiled",
+        "contract_compiled_opus",
+        "contract_compiled_opus_joins",
+        "contract_text",
+        "manual_summed",
+        "contract_text_noted",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
@@ -74,6 +80,73 @@ def test_manual_resolved_is_the_manual_prompt_plus_the_data_note(db):
     )
     assert [t.name for t in resolved.tools] == [t.name for t in manual.tools]
     assert resolved.session is None
+
+
+def test_manual_summed_is_manual_resolved_plus_the_sum_note(db):
+    """The second fact the contract carries and the manual lacks: how the
+    fees of overlapping rules combine. Nothing else may differ."""
+    resolved = build_arm("manual_resolved", db, DOCS)
+    summed = build_arm("manual_summed", db, DOCS)
+    assert summed.system_prompt == (
+        f"{resolved.system_prompt}\n\n## Fee note\n\n{SUM_NOTE}"
+    )
+    assert [t.name for t in summed.tools] == [t.name for t in resolved.tools]
+    assert summed.session is None
+
+
+def test_the_sum_note_states_the_convention_and_no_sql():
+    note = " ".join(SUM_NOTE.split())
+    assert "each of them applies" in note
+    assert "every matching (transaction, rule) pair" in note
+    assert "adds nothing" in note
+    assert "SUM(" not in note.upper()
+    assert "SELECT" not in note.upper()
+
+
+def test_contract_text_is_the_whole_contract_in_the_prompt_over_plain_tools(db):
+    """Experiment 5: the contract's files verbatim, delivered as text, with
+    the ungoverned tools `manual_resolved` has. Only the route differs from
+    `contract`."""
+    from dce.frozen import CONTRACT_PATH
+
+    text = build_arm("contract_text", db, DOCS)
+    manual = build_arm("manual_resolved", db, DOCS)
+    for name in ("contract.yml", "semantic.yml"):
+        body = (CONTRACT_PATH.parent / name).read_text(encoding="utf-8").strip()
+        assert body in text.system_prompt
+    assert [t.name for t in text.tools] == [t.name for t in manual.tools]
+    assert text.session is None
+    assert DOCS["manual"] not in text.system_prompt
+
+
+def test_contract_text_noted_is_contract_text_plus_both_notes(db):
+    """The two facts manual_summed states as notes, in the same words, under
+    the same headings, in the same order: the facts are then as plain in the
+    contract's text as in the prose, and only the form differs."""
+    text = build_arm("contract_text", db, DOCS)
+    noted = build_arm("contract_text_noted", db, DOCS)
+    assert noted.system_prompt == (
+        f"{text.system_prompt}\n\n## Data note\n\n{DATA_NOTE}"
+        f"\n\n## Fee note\n\n{SUM_NOTE}"
+    )
+    assert [t.name for t in noted.tools] == [t.name for t in text.tools]
+    assert noted.session is None
+
+
+def test_contract_text_noted_and_manual_summed_end_alike(db):
+    summed = build_arm("manual_summed", db, DOCS).system_prompt
+    noted = build_arm("contract_text_noted", db, DOCS).system_prompt
+    tail = f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
+    assert summed.endswith(tail)
+    assert noted.endswith(tail)
+
+
+def test_contract_text_carries_the_contract_digest():
+    from dce.benchmarks.dabstep import arm_digest
+    from dce.frozen import digest
+
+    assert arm_digest("contract_text") == digest()
+    assert arm_digest("contract_text_noted") == digest()
 
 
 def test_the_data_note_states_the_fact_and_no_sql():

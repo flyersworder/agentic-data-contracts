@@ -21,6 +21,7 @@ from dce.compile.entries import KBEntry
 from dce.compile.inputs import CompileInputs
 from dce.data import DATASET_REVISION
 from dce.frozen import (
+    CONTRACT_PATH,
     compiled_digest,
     digest,
     hollow_digest,
@@ -60,10 +61,38 @@ ARMS: tuple[str, ...] = (
 #: `contract_compiled` is `contract` with the contract `dce.compile` produced
 #: from the same two documents in place of the hand-authored one (spec, Part
 #: 5): it separates how a contract was made from which benchmark it runs on.
+#:
+#: `contract_compiled_opus` and `contract_compiled_opus_joins` are
+#: `contract_compiled` with claudeopus5.5 as the compiler model, without and
+#: with declared joins (`dce.frozen.COMPILED_ARM_DIRS`).
+#:
+#: `manual_summed` is `manual_resolved` plus `SUM_NOTE` (see there).
+#:
+#: `contract_text` is the hand-authored contract's two files, verbatim, in
+#: the prompt, over the ungoverned tools `manual_resolved` has (experiment
+#: 5): the contract's knowledge delivered as a document rather than behind
+#: the governed tools, so it separates what the contract says from how the
+#: agent reaches it.
+#:
+#: `contract_text_noted` is `contract_text` plus `DATA_NOTE` and `SUM_NOTE`,
+#: under the headings and in the order `manual_summed` has them. The contract
+#: carries both facts, but less plainly than the notes: the empty-list
+#: wildcard sits in `semantic.yml`, far from the matching rule, and
+#: `total_transaction_fees` speaks of "the fee rule that matches" a
+#: transaction. With the notes in both, the two arms state the facts alike and
+#: differ only in the form of the rest.
+COMPILED_ARMS: tuple[str, ...] = (
+    "contract_compiled",
+    "contract_compiled_opus",
+    "contract_compiled_opus_joins",
+)
 EXTRA_ARMS: tuple[str, ...] = (
     "contract_uninterpreted",
     "manual_resolved",
-    "contract_compiled",
+    *COMPILED_ARMS,
+    "contract_text",
+    "manual_summed",
+    "contract_text_noted",
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -82,10 +111,34 @@ DATA_NOTE = (
     "the manual treats null: the rule applies to all values of that field."
 )
 
+#: The second thing the contract knows that the manual does not, found after
+#: experiment 5's first runs: how the fees of overlapping rules combine. The
+#: manual defines the fee of a transaction under one rule and the null
+#: wildcard, and never says what happens when several rules match one
+#: transaction. The contract's `total_transaction_fees` sums over every matched
+#: (transaction, rule) pair, the gold convention, without marking it as an
+#: INTERPRETATION. `manual_summed` is `manual_resolved` plus this note, so that
+#: it and the contract know the same things again. As with `DATA_NOTE`: the
+#: fact only, in words; fixed before the arm's first run, never reworded.
+SUM_NOTE = (
+    "Several fee rules can match the same transaction; when they do, each of "
+    "them applies. Total fees over a set of transactions are the fees summed "
+    "over every matching (transaction, rule) pair. A transaction that no rule "
+    "matches adds nothing."
+)
+
+#: Introduces the contract files in `contract_text`. Fixed before the arm's
+#: first run.
+CONTRACT_TEXT_NOTE = (
+    "The data contract for this database follows: its two files, verbatim. "
+    "They define the tables, the metrics as SQL, and how the domain's rules "
+    "are to be read."
+)
+
 #: Every arm built through `_governed_tools`, and so carrying a contract, a
 #: session and the governed-tool counters.
 GOVERNED_ARMS: frozenset[str] = frozenset(
-    {"contract", "contract_hollow", "contract_uninterpreted", "contract_compiled"}
+    {"contract", "contract_hollow", "contract_uninterpreted", *COMPILED_ARMS}
 )
 
 BASE_PROMPT = (
@@ -100,13 +153,26 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
     if arm == "schema_only":
         return ArmSetup(BASE_PROMPT, _ungoverned_tools(db_path), None)
 
-    if arm in ("manual_prompt", "manual_resolved"):
+    if arm in ("manual_prompt", "manual_resolved", "manual_summed"):
         prompt = (
             f"{BASE_PROMPT}\n\n## Domain manual\n\n{docs['manual']}\n\n"
             f"## Payments table reference\n\n{docs['payments_readme']}"
         )
-        if arm == "manual_resolved":
+        if arm in ("manual_resolved", "manual_summed"):
             prompt += f"\n\n## Data note\n\n{DATA_NOTE}"
+        if arm == "manual_summed":
+            prompt += f"\n\n## Fee note\n\n{SUM_NOTE}"
+        return ArmSetup(prompt, _ungoverned_tools(db_path), None)
+
+    if arm in ("contract_text", "contract_text_noted"):
+        files = "\n\n".join(
+            f"### {path.name}\n\n```yaml\n"
+            f"{path.read_text(encoding='utf-8').strip()}\n```"
+            for path in (CONTRACT_PATH, CONTRACT_PATH.parent / "semantic.yml")
+        )
+        prompt = f"{BASE_PROMPT}\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
+        if arm == "contract_text_noted":
+            prompt += f"\n\n## Data note\n\n{DATA_NOTE}\n\n## Fee note\n\n{SUM_NOTE}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
     if arm in GOVERNED_ARMS:
@@ -115,12 +181,14 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
         # written once and shared rather than copied — a divergence here would
         # silently reintroduce the confound the control was built to remove.
         # The procedural sentence is `dce.tools.CONTRACT_PROCEDURE`.
-        contract = {
-            "contract": load_contract,
-            "contract_hollow": load_hollow_contract,
-            "contract_uninterpreted": load_uninterpreted_contract,
-            "contract_compiled": load_compiled_contract,
-        }[arm]()
+        if arm in COMPILED_ARMS:
+            contract = load_compiled_contract(arm)
+        else:
+            contract = {
+                "contract": load_contract,
+                "contract_hollow": load_hollow_contract,
+                "contract_uninterpreted": load_uninterpreted_contract,
+            }[arm]()
         return governed_arm(BASE_PROMPT, db_path, contract)
 
     raise ValueError(f"unknown arm: {arm!r}; expected one of {ALL_ARMS}")
@@ -141,8 +209,8 @@ def arm_digest(arm: str) -> str:
         return hollow_digest()
     if arm == "contract_uninterpreted":
         return uninterpreted_digest()
-    if arm == "contract_compiled":
-        return compiled_digest()
+    if arm in COMPILED_ARMS:
+        return compiled_digest(arm)
     return digest()
 
 
@@ -453,22 +521,22 @@ class DABStep:
         return _clean(answer)
 
     def check_arms(self, arms: tuple[str, ...], tasks: list[Task]) -> None:
-        if "contract_compiled" not in arms:
-            return
         from dce import frozen
 
-        if not frozen.COMPILED_CONTRACT_PATH.is_file():
-            raise SystemExit(
-                f"no compiled contract at {frozen.COMPILED_CONTRACT_PATH}; run "
-                "`python -m dce.compile --benchmark dabstep` first"
-            )
-        try:
-            # `from_yaml` alone does not open `semantic.yml`; the digest does.
-            frozen.compiled_digest()
-        except Exception as exc:
-            raise SystemExit(
-                f"the compiled DABStep contract does not load: {exc}"
-            ) from exc
+        for arm in (a for a in arms if a in COMPILED_ARMS):
+            path = frozen.compiled_contract_path(arm)
+            if not path.is_file():
+                raise SystemExit(
+                    f"no compiled contract at {path}; run "
+                    "`python -m dce.compile --benchmark dabstep` first"
+                )
+            try:
+                # `from_yaml` alone does not open `semantic.yml`; the digest does.
+                frozen.compiled_digest(arm)
+            except Exception as exc:
+                raise SystemExit(
+                    f"the compiled DABStep contract for {arm} does not load: {exc}"
+                ) from exc
 
     def golds_hash(self) -> str:
         return self._golds_hash

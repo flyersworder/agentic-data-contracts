@@ -1,0 +1,350 @@
+# Compiled by dce.compile -- do not edit; recompile instead.
+# benchmark: dabstep, database: dabstep, compiler: claudeopus5.5 (joins)
+# inputs: manual.md, payments-readme.md, dabstep.duckdb
+metrics:
+- name: account_type_description
+  description: 'Description of the merchant''s account type code (R, D, H, F, S, O) per the Account Type
+    table.
+
+
+    From the manual section "2 Account Type".'
+  sql_expression: CASE account_type WHEN 'R' THEN 'Enterprise - Retail' WHEN 'D' THEN 'Enterprise - Digital'
+    WHEN 'H' THEN 'Enterprise - Hospitality' WHEN 'F' THEN 'Platform - Franchise' WHEN 'S' THEN 'Platform
+    - SaaS' WHEN 'O' THEN 'Other' END
+  source_model: main.merchant_data
+  domains:
+  - 2_account_type
+- name: mcc_category
+  description: 'MCC category: the first two digits of the four-digit merchant category code.
+
+
+    From the manual section "3 Merchant Category Code".'
+  sql_expression: merchant_category_code // 100
+  source_model: main.merchant_data
+  domains:
+  - 3_merchant_category_code
+- name: mcc_subcategory
+  description: 'MCC subcategory: the last two digits of the four-digit merchant category code.
+
+
+    From the manual section "3 Merchant Category Code".'
+  sql_expression: merchant_category_code % 100
+  source_model: main.merchant_data
+  domains:
+  - 3_merchant_category_code
+- name: merchant_mcc_description
+  description: 'Business type description of the merchant''s MCC, looked up in the merchant_category_codes
+    list.
+
+
+    From the manual section "3 Merchant Category Code".'
+  sql_expression: c.description
+  source_model: main.merchant_data
+  from_sql: main.merchant_data m LEFT JOIN main.merchant_category_codes c ON CAST(c.mcc AS BIGINT) = m.merchant_category_code
+  grain: one row per merchant, with its MCC description
+  domains:
+  - 3_merchant_category_code
+- name: aci_description
+  description: 'Description of the payment''s Authorization Characteristics Indicator (ACI) code, per
+    the manual''s ACI table (A-G).
+
+
+    From the manual section "4 Authorization Characteristics Indicator (ACI)".'
+  sql_expression: CASE aci WHEN 'A' THEN 'Card present - Non-authenticated' WHEN 'B' THEN 'Card Present
+    - Authenticated' WHEN 'C' THEN 'Tokenized card with mobile device' WHEN 'D' THEN 'Card Not Present
+    - Card On File' WHEN 'E' THEN 'Card Not Present - Recurring Bill Payment' WHEN 'F' THEN 'Card Not
+    Present - 3-D Secure' WHEN 'G' THEN 'Card Not Present - Non-3-D Secure' END
+  source_model: main.payments
+  domains:
+  - 4_authorization_characteristics_indicator_aci
+- name: is_intracountry
+  description: 'Domestic transaction: card issuing country equals acquiring country (matches fee rules
+    with intracountry = true; otherwise international).
+
+
+    From the manual section "5 Understanding Payment Processing Fees".'
+  sql_expression: issuing_country = acquirer_country
+  source_model: main.payments
+  domains:
+  - 5_understanding_payment_processing_fees
+- name: merchant_monthly_volume
+  description: 'Per payment row: the merchant''s total EUR volume in the natural calendar month of the
+    payment (month derived from year + day_of_year).
+
+
+    From the manual section "5 Understanding Payment Processing Fees".'
+  sql_expression: sum(eur_amount) OVER (PARTITION BY merchant, year, month(make_date(year::INT,1,1) +
+    (day_of_year::INT - 1)))
+  source_model: main.payments
+  domains:
+  - 5_understanding_payment_processing_fees
+- name: merchant_monthly_fraud_level
+  description: 'Per payment row: the merchant''s monthly fraud level in percent = fraudulent-dispute EUR
+    volume / total EUR volume within the natural calendar month of the payment.
+
+
+    From the manual section "5 Understanding Payment Processing Fees".'
+  sql_expression: 100.0 * sum(CASE WHEN has_fraudulent_dispute THEN eur_amount ELSE 0 END) OVER (PARTITION
+    BY merchant, year, month(make_date(year::INT,1,1) + (day_of_year::INT - 1))) / sum(eur_amount) OVER
+    (PARTITION BY merchant, year, month(make_date(year::INT,1,1) + (day_of_year::INT - 1)))
+  source_model: main.payments
+  domains:
+  - 5_understanding_payment_processing_fees
+- name: fee_rule_applies
+  description: 'Fee rule f applies to payment p: every rule field matches the payment/merchant characteristics,
+    where a null (or empty list) field applies to all values. Monthly volume and fraud level are evaluated
+    over the natural month of the payment.
+
+
+    From the manual section "5 Understanding Payment Processing Fees".'
+  sql_expression: (len(f.account_type) = 0 OR list_contains(f.account_type, m.account_type)) AND (len(f.merchant_category_code)
+    = 0 OR list_contains(f.merchant_category_code, m.merchant_category_code)) AND (len(f.aci) = 0 OR list_contains(f.aci,
+    p.aci)) AND (f.is_credit IS NULL OR f.is_credit = p.is_credit) AND (f.intracountry IS NULL OR (f.intracountry
+    = 1) = (p.issuing_country = p.acquirer_country)) AND (f.capture_delay IS NULL OR f.capture_delay =
+    m.capture_delay OR (f.capture_delay = '<3' AND TRY_CAST(m.capture_delay AS INT) < 3) OR (f.capture_delay
+    = '3-5' AND TRY_CAST(m.capture_delay AS INT) BETWEEN 3 AND 5) OR (f.capture_delay = '>5' AND TRY_CAST(m.capture_delay
+    AS INT) > 5)) AND (f.monthly_volume IS NULL OR (f.monthly_volume = '<100k' AND ms.monthly_volume <
+    100000) OR (f.monthly_volume = '100k-1m' AND ms.monthly_volume BETWEEN 100000 AND 1000000) OR (f.monthly_volume
+    = '1m-5m' AND ms.monthly_volume BETWEEN 1000000 AND 5000000) OR (f.monthly_volume = '>5m' AND ms.monthly_volume
+    > 5000000)) AND (f.monthly_fraud_level IS NULL OR (f.monthly_fraud_level = '<7.2%' AND ms.monthly_fraud_pct
+    < 7.2) OR (f.monthly_fraud_level = '7.2%-7.7%' AND ms.monthly_fraud_pct BETWEEN 7.2 AND 7.7) OR (f.monthly_fraud_level
+    = '7.7%-8.3%' AND ms.monthly_fraud_pct BETWEEN 7.7 AND 8.3) OR (f.monthly_fraud_level = '>8.3%' AND
+    ms.monthly_fraud_pct > 8.3))
+  source_model: main.payments
+  from_sql: main.payments p JOIN main.merchant_data m ON m.merchant = p.merchant JOIN (SELECT merchant,
+    year, month(make_date(year::INT,1,1) + (day_of_year::INT - 1)) AS mon, sum(eur_amount) AS monthly_volume,
+    100.0 * sum(CASE WHEN has_fraudulent_dispute THEN eur_amount ELSE 0 END) / sum(eur_amount) AS monthly_fraud_pct
+    FROM main.payments GROUP BY merchant, year, month(make_date(year::INT,1,1) + (day_of_year::INT - 1)))
+    ms ON ms.merchant = p.merchant AND ms.year = p.year AND ms.mon = month(make_date(p.year::INT,1,1)
+    + (p.day_of_year::INT - 1)) JOIN main.fees f ON f.card_scheme = p.card_scheme
+  grain: one row per payment x fee rule of the same card scheme, with the payment's merchant data and
+    the merchant's monthly volume/fraud stats for the payment's month
+  domains:
+  - 5_understanding_payment_processing_fees
+- name: payment_fee
+  description: 'Fee of a payment under an applicable fee rule: fixed_amount + rate * eur_amount / 10000
+    (EUR).
+
+
+    From the manual section "5 Understanding Payment Processing Fees".'
+  sql_expression: f.fixed_amount + f.rate * p.eur_amount / 10000
+  source_model: main.payments
+  from_sql: main.payments p JOIN main.merchant_data m ON m.merchant = p.merchant JOIN (SELECT merchant,
+    year, month(make_date(year::INT,1,1) + (day_of_year::INT - 1)) AS mon, sum(eur_amount) AS monthly_volume,
+    100.0 * sum(CASE WHEN has_fraudulent_dispute THEN eur_amount ELSE 0 END) / sum(eur_amount) AS monthly_fraud_pct
+    FROM main.payments GROUP BY merchant, year, month(make_date(year::INT,1,1) + (day_of_year::INT - 1)))
+    ms ON ms.merchant = p.merchant AND ms.year = p.year AND ms.mon = month(make_date(p.year::INT,1,1)
+    + (p.day_of_year::INT - 1)) JOIN main.fees f ON f.card_scheme = p.card_scheme AND (len(f.account_type)
+    = 0 OR list_contains(f.account_type, m.account_type)) AND (len(f.merchant_category_code) = 0 OR list_contains(f.merchant_category_code,
+    m.merchant_category_code)) AND (len(f.aci) = 0 OR list_contains(f.aci, p.aci)) AND (f.is_credit IS
+    NULL OR f.is_credit = p.is_credit) AND (f.intracountry IS NULL OR (f.intracountry = 1) = (p.issuing_country
+    = p.acquirer_country)) AND (f.capture_delay IS NULL OR f.capture_delay = m.capture_delay OR (f.capture_delay
+    = '<3' AND TRY_CAST(m.capture_delay AS INT) < 3) OR (f.capture_delay = '3-5' AND TRY_CAST(m.capture_delay
+    AS INT) BETWEEN 3 AND 5) OR (f.capture_delay = '>5' AND TRY_CAST(m.capture_delay AS INT) > 5)) AND
+    (f.monthly_volume IS NULL OR (f.monthly_volume = '<100k' AND ms.monthly_volume < 100000) OR (f.monthly_volume
+    = '100k-1m' AND ms.monthly_volume BETWEEN 100000 AND 1000000) OR (f.monthly_volume = '1m-5m' AND ms.monthly_volume
+    BETWEEN 1000000 AND 5000000) OR (f.monthly_volume = '>5m' AND ms.monthly_volume > 5000000)) AND (f.monthly_fraud_level
+    IS NULL OR (f.monthly_fraud_level = '<7.2%' AND ms.monthly_fraud_pct < 7.2) OR (f.monthly_fraud_level
+    = '7.2%-7.7%' AND ms.monthly_fraud_pct BETWEEN 7.2 AND 7.7) OR (f.monthly_fraud_level = '7.7%-8.3%'
+    AND ms.monthly_fraud_pct BETWEEN 7.7 AND 8.3) OR (f.monthly_fraud_level = '>8.3%' AND ms.monthly_fraud_pct
+    > 8.3))
+  grain: 'one row per payment x applicable fee rule (a payment can match several rules: 137,433 rows for
+    81,772 payments)'
+  domains:
+  - 5_understanding_payment_processing_fees
+- name: is_local_acquiring
+  description: 'Local acquiring transaction: the card''s issuing country is the same as the acquirer''s
+    country.
+
+
+    From the manual section "5.1.1 Optimizing Transactions through Local Acquiring".'
+  sql_expression: issuing_country = acquirer_country
+  source_model: main.payments
+  domains:
+  - 5_1_1_optimizing_transactions_through_local_acquiring
+- name: fraud_rate
+  description: 'Fraud rate: the euro volume of payments with a fraudulent dispute divided by total euro
+    volume (a ratio between 0 and 1, not a percentage). Group by merchant or month as needed.
+
+
+    From the manual section "7 Reducing Fraud-Related Fees".'
+  sql_expression: SUM(CASE WHEN has_fraudulent_dispute THEN eur_amount ELSE 0 END) / NULLIF(SUM(eur_amount),
+    0)
+  source_model: main.payments
+  domains:
+  - 7_reducing_fraud_related_fees
+- name: authorization_rate
+  description: 'Authorization rate KPI: share of transactions that succeeded, i.e. were not refused (is_refused_by_adyen
+    = false), over all transactions. Higher is better.
+
+
+    From the manual section "8.2 Leveraging Reporting Tools for Data-Driven Insights".'
+  sql_expression: AVG(CASE WHEN NOT is_refused_by_adyen THEN 1.0 ELSE 0.0 END)
+  source_model: main.payments
+  domains:
+  - 8_2_leveraging_reporting_tools_for_data_driven_insights
+tables:
+- schema: main
+  table: acquirer_countries
+  columns:
+  - name: column0
+    type: BIGINT
+    description: ''
+  - name: acquirer
+    type: VARCHAR
+    description: ''
+  - name: country_code
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: fees
+  columns:
+  - name: ID
+    type: BIGINT
+    description: ''
+  - name: card_scheme
+    type: VARCHAR
+    description: ''
+  - name: account_type
+    type: VARCHAR[]
+    description: ''
+  - name: capture_delay
+    type: VARCHAR
+    description: ''
+  - name: monthly_fraud_level
+    type: VARCHAR
+    description: ''
+  - name: monthly_volume
+    type: VARCHAR
+    description: ''
+  - name: merchant_category_code
+    type: BIGINT[]
+    description: ''
+  - name: is_credit
+    type: BOOLEAN
+    description: ''
+  - name: aci
+    type: VARCHAR[]
+    description: ''
+  - name: fixed_amount
+    type: DOUBLE
+    description: ''
+  - name: rate
+    type: BIGINT
+    description: ''
+  - name: intracountry
+    type: DOUBLE
+    description: ''
+- schema: main
+  table: merchant_category_codes
+  columns:
+  - name: column0
+    type: BIGINT
+    description: ''
+  - name: mcc
+    type: VARCHAR
+    description: ''
+  - name: description
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: merchant_data
+  columns:
+  - name: merchant
+    type: VARCHAR
+    description: ''
+  - name: capture_delay
+    type: VARCHAR
+    description: ''
+  - name: acquirer
+    type: VARCHAR[]
+    description: ''
+  - name: merchant_category_code
+    type: BIGINT
+    description: ''
+  - name: account_type
+    type: VARCHAR
+    description: ''
+- schema: main
+  table: payments
+  description: "This is documentation for the payments.csv dataset\n\n\n- **Description**: Synthetic dataset\
+    \ of payment transactions processed by the Payments Processor.\n- **Columns**:\n  - `psp_reference`:\
+    \ Unique payment identifier (ID).\n  - `merchant`: Merchant name (Categorical), eg Starbucks or Netflix*.\n\
+    \  - `card_scheme`: Card Scheme used (Categorical) - *[MasterCard, Visa, Amex, Other]*.\n  - `year`:\
+    \ Payment initiation year (Numeric).\n  - `hour_of_day`: Payment initiation hour (Numeric).\n  - `minute_of_hour`:\
+    \ Payment initiation minute (Numeric).\n  - `day_of_year`: Day of the year of payment initiation (Numeric).\n\
+    \  - `is_credit`: Credit or Debit card indicator (Categorical).\n  - `eur_amount`: Payment amount\
+    \ in euro (Numeric).\n  - `ip_country`: The country the shopper was in at time of transaction (determined\
+    \ by IP address) (Categorical) - *[SE, NL, LU, IT, BE, FR, GR, ES]*.\n  - `issuing_country`: Card-issuing\
+    \ country (Categorical) - *[SE, NL, LU, IT, BE, FR, GR, ES]*.\n  - `device_type`: Device type used\
+    \ (Categorical) - *[Windows, Linux, MacOS, iOS, Android, Other]*.\n  - `ip_address`: Hashed shopper's\
+    \ IP (ID).\n  - `email_address`: Hashed shopper's email (ID).\n  - `card_number`: Hashed card number\
+    \ (ID).\n  - `shopper_interaction`: Payment method (Categorical) - *[Ecommerce, POS]*. POS means an\
+    \ in-person or in-store transaction.\n  - `card_bin`: Bank Identification Number (ID).\n  - `has_fraudulent_dispute`:\
+    \ Indicator of fraudulent dispute from issuing bank (Boolean).\n  - `is_refused_by_adyen`: Adyen refusal\
+    \ indicator (Boolean).\n  - `aci`: Authorization Characteristics Indicator (Categorical).\n  - `acquirer_country`:\
+    \ The location (country) of the acquiring bank (Categorical) - *[SE, NL, LU, IT, BE, FR, GR, ES]*."
+  columns:
+  - name: psp_reference
+    type: BIGINT
+    description: ''
+  - name: merchant
+    type: VARCHAR
+    description: ''
+  - name: card_scheme
+    type: VARCHAR
+    description: ''
+  - name: year
+    type: BIGINT
+    description: ''
+  - name: hour_of_day
+    type: BIGINT
+    description: ''
+  - name: minute_of_hour
+    type: BIGINT
+    description: ''
+  - name: day_of_year
+    type: BIGINT
+    description: ''
+  - name: is_credit
+    type: BOOLEAN
+    description: ''
+  - name: eur_amount
+    type: DOUBLE
+    description: ''
+  - name: ip_country
+    type: VARCHAR
+    description: ''
+  - name: issuing_country
+    type: VARCHAR
+    description: ''
+  - name: device_type
+    type: VARCHAR
+    description: ''
+  - name: ip_address
+    type: VARCHAR
+    description: ''
+  - name: email_address
+    type: VARCHAR
+    description: ''
+  - name: card_number
+    type: VARCHAR
+    description: ''
+  - name: shopper_interaction
+    type: VARCHAR
+    description: ''
+  - name: card_bin
+    type: BIGINT
+    description: ''
+  - name: has_fraudulent_dispute
+    type: BOOLEAN
+    description: ''
+  - name: is_refused_by_adyen
+    type: BOOLEAN
+    description: ''
+  - name: aci
+    type: VARCHAR
+    description: ''
+  - name: acquirer_country
+    type: VARCHAR
+    description: ''

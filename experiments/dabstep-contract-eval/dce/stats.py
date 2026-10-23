@@ -172,7 +172,17 @@ ANSWER_VERDICTS: frozenset[str] = frozenset({"correct", "incorrect"})
 #: cap, or scorer failing. None of the five is an answer, so none belongs
 #: in an accuracy numerator, or (for SCORED accuracy) denominator.
 HARNESS_VERDICTS: frozenset[str] = frozenset(
-    {"hit_limit", "error", "scoring_error", "post_run_error", "construction_error"}
+    {
+        "hit_limit",
+        "error",
+        "scoring_error",
+        "post_run_error",
+        "construction_error",
+        # Experiment 6: the route's context window could not hold the run,
+        # or the route truncated its prompt.
+        "overflow",
+        "truncated",
+    }
 )
 
 #: A verdict that is neither an answer nor a harness outcome: the task was

@@ -3,20 +3,27 @@
     uv run python -m dce.compile --benchmark livesqlbench --db households --max-spend 5
     uv run python -m dce.compile --benchmark livesqlbench --all --max-spend 60
     uv run python -m dce.compile --benchmark dabstep --max-spend 10
+    uv run python -m dce.compile --benchmark dabstep --joins --max-spend 10
     uv run python -m dce.compile --benchmark livesqlbench --db households \
         --recompile 12 31 --max-spend 60
 
-Output goes to `<out>/<benchmark>/[<db>/]`. `--max-spend` caps the spend
-recorded across every log under `<out>/<benchmark>/`, resumes included.
+Output goes to `<out>/<benchmark>/[<db>/]`; `--joins` lets a metric declare
+the FROM it is written against, and writes to `contracts-joins` by default.
+`--max-spend` caps the spend recorded across every log under
+`<out>/<benchmark>/`, resumes included.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import functools
 import os
 from pathlib import Path
 
 from dce.compile import run as run_module
+from dce.compile.inputs import COMPILER_MODEL
+from dce.pricing import MODELS
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -35,7 +42,22 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         default=Path(os.environ.get("LSB_DATA", Path.home() / "data" / "livesqlbench")),
     )
-    parser.add_argument("--out", type=Path, default=Path("contracts"))
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="default: contracts, or contracts-joins with --joins",
+    )
+    parser.add_argument(
+        "--model",
+        default=COMPILER_MODEL,
+        help=f"the compiler model (default {COMPILER_MODEL}, the frozen one)",
+    )
+    parser.add_argument(
+        "--joins",
+        action="store_true",
+        help="let a metric declare the FROM it is written against (from_sql and grain)",
+    )
     parser.add_argument("--max-spend", type=float, required=True)
     parser.add_argument(
         "--recompile",
@@ -46,6 +68,10 @@ def main(argv: list[str] | None = None) -> None:
         "every entry built on them",
     )
     args = parser.parse_args(argv)
+    if args.model not in MODELS:
+        raise SystemExit(f"--model {args.model!r} has no price in dce.pricing")
+    if args.out is None:
+        args.out = Path("contracts-joins" if args.joins else "contracts")
 
     if args.benchmark == "livesqlbench":
         from dce.benchmarks.livesqlbench import compile_inputs
@@ -63,6 +89,12 @@ def main(argv: list[str] | None = None) -> None:
 
         work = [dabstep_inputs()]
 
+    work = [
+        dataclasses.replace(inputs, joins=args.joins, model=args.model)
+        for inputs in work
+    ]
+    driver = functools.partial(run_module.claude_driver, model=args.model)
+
     if args.recompile:
         if args.all or len(work) != 1:
             raise SystemExit("--recompile takes one database (--db NAME)")
@@ -73,7 +105,7 @@ def main(argv: list[str] | None = None) -> None:
         status, spent = run_module.compile_database(
             inputs,
             args.out / inputs.out_subdir,
-            run_module.claude_driver,
+            driver,
             spend_cap=args.max_spend,
             spent=spent,
         )

@@ -69,8 +69,29 @@ def test_class_attributes(bench):
         "manual_compiled",
         "contract",
     )
-    assert LiveSQLBench.extra_arms == ()
-    assert LiveSQLBench.governed_arms == frozenset({"contract"})
+    assert LiveSQLBench.extra_arms == (
+        "contract_opus",
+        "contract_authored",
+        "contract_gap",
+        "manual_corrected",
+        "contract_corrected",
+        "manual_styled",
+        "manual_gap",
+        "manual_full",
+        "manual_noted",
+        "contract_text",
+        *livesqlbench_module.SCALE_ARMS,
+    )
+    assert LiveSQLBench.governed_arms == frozenset(
+        {
+            "contract",
+            "contract_opus",
+            "contract_authored",
+            "contract_gap",
+            "contract_corrected",
+            *livesqlbench_module.SCALE_GOVERNED,
+        }
+    )
     assert LiveSQLBench.roles == {
         "baseline": "schema_only",
         "manual": "manual_prompt",
@@ -262,6 +283,23 @@ def test_builds_from_its_command_line_flag(data):
     LiveSQLBench.add_arguments(parser)
     args = parser.parse_args(["--lsb-data", str(data)])
     assert [t.task_id for t in LiveSQLBench.from_args(args).tasks()][0] == "shop_1"
+
+
+def test_the_contracts_root_has_a_flag(data, tmp_path):
+    """Experiment 4 runs the same arms on its own data and contracts."""
+    import argparse
+
+    from dce.benchmarks.livesqlbench import DEFAULT_CONTRACTS
+
+    parser = argparse.ArgumentParser()
+    LiveSQLBench.add_arguments(parser)
+    args = parser.parse_args(["--lsb-data", str(data)])
+    assert LiveSQLBench.from_args(args)._contracts == DEFAULT_CONTRACTS
+    args = parser.parse_args(
+        ["--lsb-data", str(data), "--lsb-contracts", str(tmp_path / "c")]
+    )
+    bench = LiveSQLBench.from_args(args)
+    assert bench._contract_dir("shop") == tmp_path / "c" / "shop"
 
 
 def test_no_gold_reaches_a_row(bench, data, tmp_path):

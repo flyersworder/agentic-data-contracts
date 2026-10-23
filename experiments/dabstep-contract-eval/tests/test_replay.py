@@ -6,7 +6,9 @@ the agent's own formatting conventions. Imported by path because `analysis/`
 is a directory of scripts, not a package.
 """
 
+import gzip
 import importlib.util
+import json
 from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -62,12 +64,23 @@ def test_nulls_become_empty_cells_not_the_string_none():
     assert render([("A", None)]) == "A, "
 
 
-def test_sql_statements_are_ordered_and_only_from_sql_tools():
-    # The one trace fixture that ships with the repo; asserting order rather
-    # than content, since the transcript is real and may be long.
-    trace = next(
-        (Path(__file__).parent.parent / "traces" / "glm-full").glob("*__contract__*.gz")
-    )
-    stmts = sql_statements(trace)
-    assert isinstance(stmts, list)
-    assert all(isinstance(s, str) and s.strip() for s in stmts)
+def test_sql_statements_are_ordered_and_only_from_sql_tools(tmp_path):
+    # A small synthetic transcript, since the real ones are release assets and
+    # not in the repo. It covers both argument encodings and every skip rule.
+    def call(tool, args):
+        return {"part_kind": "tool-call", "tool_name": tool, "args": args}
+
+    messages = [
+        {"parts": [{"part_kind": "user-prompt", "content": "q"}]},
+        {"parts": [call("run_query", {"sql": "SELECT 1"})]},
+        {"parts": [call("describe_table", {"sql": "SELECT 'not answering'"})]},
+        {"parts": [call("execute_sql", json.dumps({"sql": "SELECT 2"}))]},
+        {"parts": [call("run_query", "{not json")]},
+        {"parts": [call("run_query", {"sql": "   "})]},
+        {"parts": [call("run_query", {"sql": "SELECT 3"})]},
+    ]
+    trace = tmp_path / "t__contract__m.json.gz"
+    with gzip.open(trace, "wt", encoding="utf-8") as fh:
+        json.dump(messages, fh)
+
+    assert sql_statements(trace) == ["SELECT 1", "SELECT 2", "SELECT 3"]

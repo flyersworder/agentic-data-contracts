@@ -1,0 +1,679 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: planets_data, author: claudeopus5.5
+metrics:
+- name: distance_light_years
+  description: 'Distance to the host star in light-years: stellardist (parsecs) * 3.26156. NULL when stellardist
+    is NULL.'
+  sql_expression: s.stellardist * 3.26156
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - unit_conversions
+- name: planet_mass_earth
+  description: 'Planet mass in Earth masses: M_E = massjup * 317.83.'
+  sql_expression: ph.massjup * 317.83
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - unit_conversions
+- name: planet_radius_earth
+  description: 'Planet radius in Earth radii: R_E = radjup * 11.209.'
+  sql_expression: ph.radjup * 11.209
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - unit_conversions
+- name: stellar_luminosity
+  description: 'Luminosity relative to the Sun (Stefan-Boltzmann): L = (R/R_sun)^2 * (T/5778)^4, T_sun
+    = 5778 K. Radius_Value is already in solar radii, Temp_Value in K, both read from the stellarprops
+    JSON. NULL if either is missing.
+
+    '
+  sql_expression: power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value'
+    AS DOUBLE) / 5778.0, 4)
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - stellar_astrophysics
+- name: hr_diagram_position
+  description: 'Hertzsprung-Russell diagram position: the pair (effective temperature T in K, stellar
+    luminosity L in L_sun).'
+  sql_expression: "struct_pack(teff := TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE),\n\
+    \            luminosity := power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE),\
+    \ 2)\n              * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE) / 5778.0,\
+    \ 4))"
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - stellar_astrophysics
+- name: hz_inner_boundary_au
+  description: 'Habitable Zone Inner Boundary in AU (too hot for liquid water inside): r_i = sqrt(L /
+    1.1), L = stellar_luminosity.'
+  sql_expression: sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value'
+    AS DOUBLE) / 5778.0, 4) / 1.1)
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - stellar_astrophysics
+- name: hz_outer_boundary_au
+  description: 'Habitable Zone Outer Boundary in AU (too cold for liquid water beyond): r_o = sqrt(L /
+    0.53), L = stellar_luminosity.'
+  sql_expression: sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value'
+    AS DOUBLE) / 5778.0, 4) / 0.53)
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - stellar_astrophysics
+- name: stellar_density_g_cm3
+  description: 'Average stellar density rho = M / (4/3 pi R^3). Computed in g/cm^3 with M_sun = 1.98847e33
+    g and R_sun = 6.957e10 cm (the Sun gives ~1.41). For solar units drop the constants.
+
+    '
+  sql_expression: TRY_CAST(s.stellarprops->'physical'->>'Mass_Value' AS DOUBLE) * 1.98847e33 / (4.0 /
+    3.0 * pi() * power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE) * 6.957e10, 3))
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - stellar_astrophysics
+- name: stellar_gravitational_parameter
+  description: Standard gravitational parameter mu = G * M_star, in m^3/s^2, with G = 6.674e-11 and M_sun
+    = 1.98847e30 kg.
+  sql_expression: 6.674e-11 * TRY_CAST(s.stellarprops->'physical'->>'Mass_Value' AS DOUBLE) * 1.98847e30
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - stellar_astrophysics
+- name: kepler_third_law_stellar_mass
+  description: 'Host-star mass in solar masses derived from Kepler''s Third Law: M = a^3 / P^2, a = semimajor
+    (AU), P = period in years (period days / 365.25).'
+  sql_expression: power(o.semimajor, 3) / power(o.period / 365.25, 2)
+  source_model: main.orbital_characteristics
+  from_sql: main.orbital_characteristics o
+  grain: one planet
+  domains:
+  - stellar_astrophysics
+- name: planet_surface_gravity
+  description: 'Surface gravity relative to Earth: g = M_E / R_E^2 with M_E = massjup*317.83 and R_E =
+    radjup*11.209.'
+  sql_expression: (ph.massjup * 317.83) / power(ph.radjup * 11.209, 2)
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: mass_radius_ratio
+  description: Mass-radius ratio MRR = M_E / R_E (Earth units).
+  sql_expression: (ph.massjup * 317.83) / (ph.radjup * 11.209)
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: planet_escape_velocity_km_s
+  description: 'Escape velocity v_e = sqrt(2 G M_p / R_p) in km/s, from Earth-unit mass and radius converted
+    to SI (M_earth = 5.972e24 kg, R_earth = 6.371e6 m, G = 6.674e-11); Earth ~11.2 km/s.
+
+    '
+  sql_expression: sqrt(2 * 6.674e-11 * (ph.massjup * 317.83 * 5.972e24) / (ph.radjup * 11.209 * 6.371e6))
+    / 1000
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: planet_equilibrium_temperature
+  description: 'T_eq = T_star * sqrt(R_star / (2a)) in K. R_star (solar radii) is converted to AU (1 R_sun
+    = 0.00465047 AU) so it shares units with semimajor a.
+
+    '
+  sql_expression: TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE) * sqrt(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value'
+    AS DOUBLE) * 0.00465047 / (2 * o.semimajor))
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.orbital_characteristics
+    o ON o.bodylink = p.planetref
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: transit_depth
+  description: Transit depth dF = (R_p / R_star)^2 (fraction). R_p in R_J converted to solar radii with
+    R_J/R_sun = 0.102763.
+  sql_expression: power(ph.radjup * 0.102763 / TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS
+    DOUBLE), 2)
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.physical_properties
+    ph ON ph.objectlink = p.planetref
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: orbital_velocity_km_s
+  description: Circular orbital velocity v = sqrt(G M_star / a) in km/s, G*M_sun = 1.32712440018e20 m^3/s^2,
+    1 AU = 1.495978707e11 m.
+  sql_expression: sqrt(1.32712440018e20 * TRY_CAST(s.stellarprops->'physical'->>'Mass_Value' AS DOUBLE)
+    / (o.semimajor * 1.495978707e11)) / 1000
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.orbital_characteristics
+    o ON o.bodylink = p.planetref
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: planet_star_mass_ratio
+  description: 'q = M_p / M_star in the same units: massjup converted to solar masses (M_J/M_sun = 9.5458e-4)
+    over Mass_Value.'
+  sql_expression: ph.massjup * 9.5458e-4 / TRY_CAST(s.stellarprops->'physical'->>'Mass_Value' AS DOUBLE)
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.physical_properties
+    ph ON ph.objectlink = p.planetref
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: orbital_period_ratio
+  description: 'Ratio P_out / P_in of a planet''s period to that of the next inner adjacent planet in
+    the same system (planets of a host ordered by period, NULL periods excluded via WHERE o.period IS
+    NOT NULL). NULL for the innermost planet. Window expression.
+
+    '
+  sql_expression: o.period / LAG(o.period) OVER (PARTITION BY p.hostlink ORDER BY o.period)
+  source_model: main.orbital_characteristics
+  from_sql: main.planets p JOIN main.orbital_characteristics o ON o.bodylink = p.planetref
+  grain: one planet with known period
+  domains:
+  - planetary_astrophysics
+  - planet_classification
+- name: goldilocks_value
+  description: G = (a - r_i) / (r_o - r_i); 0.5 = perfectly centred in the habitable zone, 0..1 inside
+    it.
+  sql_expression: "(o.semimajor - sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE),\
+    \ 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE) / 5778.0, 4) / 1.1)) /\
+    \ (sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value'\
+    \ AS DOUBLE) / 5778.0, 4) / 0.53)\n   - sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value'\
+    \ AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE) / 5778.0, 4)\
+    \ / 1.1))"
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.orbital_characteristics
+    o ON o.bodylink = p.planetref
+  grain: one planet
+  domains:
+  - planetary_astrophysics
+- name: is_gas_giant
+  description: 'Gas Giant Planet: mass > 0.1 Jupiter masses.'
+  sql_expression: ph.massjup > 0.1
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_rocky_planet
+  description: 'Rocky Planet: bulk density > 3 g/cm^3.'
+  sql_expression: ph.densvalue > 3
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_short_period_planet
+  description: 'Short-Period Planet: orbital period < 10 days.'
+  sql_expression: o.period < 10
+  source_model: main.orbital_characteristics
+  from_sql: main.orbital_characteristics o
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_hot_jupiter
+  description: 'Hot Jupiter: Gas Giant (massjup > 0.1) AND Short-Period (period < 10 days).'
+  sql_expression: ph.massjup > 0.1 AND o.period < 10
+  source_model: main.planets
+  from_sql: main.planets p LEFT JOIN main.orbital_characteristics o ON o.bodylink = p.planetref LEFT JOIN
+    main.physical_properties ph ON ph.objectlink = p.planetref
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_super_earth
+  description: 'Super-Earth: Rocky Planet (densvalue > 3) with mass between 1 and 10 Earth masses inclusive
+    (massjup*317.83).'
+  sql_expression: ph.densvalue > 3 AND ph.massjup * 317.83 BETWEEN 1 AND 10
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_in_habitable_zone
+  description: 'Planet in Habitable Zone: semimajor axis a between r_i = sqrt(L/1.1) and r_o = sqrt(L/0.53)
+    (inclusive).'
+  sql_expression: o.semimajor BETWEEN sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value'
+    AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE) / 5778.0, 4)
+    / 1.1) AND sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value'
+    AS DOUBLE) / 5778.0, 4) / 0.53)
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.orbital_characteristics
+    o ON o.bodylink = p.planetref
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_potentially_habitable
+  description: 'Potentially Habitable Exoplanet: Rocky Planet (densvalue > 3) AND Planet in Habitable
+    Zone.'
+  sql_expression: ph.densvalue > 3 AND o.semimajor BETWEEN sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value'
+    AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value' AS DOUBLE) / 5778.0, 4)
+    / 1.1) AND sqrt(power(TRY_CAST(s.stellarprops->'physical'->>'Radius_Value' AS DOUBLE), 2) * power(TRY_CAST(s.stellarprops->'physical'->>'Temp_Value'
+    AS DOUBLE) / 5778.0, 4) / 0.53)
+  source_model: main.planets
+  from_sql: main.planets p JOIN main.stars s ON s.stellarref = p.hostlink LEFT JOIN main.orbital_characteristics
+    o ON o.bodylink = p.planetref LEFT JOIN main.physical_properties ph ON ph.objectlink = p.planetref
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_high_eccentricity
+  description: 'High Eccentricity Planet: eccentricity > 0.25.'
+  sql_expression: o.eccentricity > 0.25
+  source_model: main.orbital_characteristics
+  from_sql: main.orbital_characteristics o
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_retrograde_orbit
+  description: 'Retrograde Orbit: inclination > 90 degrees.'
+  sql_expression: o.inclination > 90
+  source_model: main.orbital_characteristics
+  from_sql: main.orbital_characteristics o
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_inflated_gas_giant
+  description: 'Inflated Gas Giant: Gas Giant (massjup > 0.1) with density < 0.5 g/cm^3.'
+  sql_expression: ph.massjup > 0.1 AND ph.densvalue < 0.5
+  source_model: main.physical_properties
+  from_sql: main.physical_properties ph
+  grain: one planet
+  domains:
+  - planet_classification
+- name: is_multi_planetary_system
+  description: 'Multi-planetary System: star with compcount (total confirmed planetary companions) > 1.'
+  sql_expression: s.compcount > 1
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - planet_classification
+- name: is_compact_system
+  description: 'Compact System: Multi-planetary System (compcount > 1) where the period ratio of every
+    adjacent pair (host''s planets with known period ordered by period) is < 3; requires at least one
+    computable pair. 333 stars qualify.
+
+    '
+  sql_expression: "s.compcount > 1 AND COALESCE((SELECT count(r.ratio) >= 1 AND bool_and(r.ratio < 3)\n\
+    \  FROM (SELECT o2.period / LAG(o2.period) OVER (ORDER BY o2.period) AS ratio\n        FROM main.planets\
+    \ p2 JOIN main.orbital_characteristics o2 ON o2.bodylink = p2.planetref\n        WHERE p2.hostlink\
+    \ = s.stellarref AND o2.period IS NOT NULL) r), false)"
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - planet_classification
+- name: relative_uncertainty_period_pct
+  description: 'Relative Uncertainty of orbital period (%): ((perioderr1 - perioderr2)/2) / period * 100.
+    perioderr2 is stored negative.'
+  sql_expression: ((q.perioderr1 - q.perioderr2) / 2) / NULLIF(o.period, 0) * 100
+  source_model: main.data_quality_tracking
+  from_sql: main.planets p LEFT JOIN main.orbital_characteristics o ON o.bodylink = p.planetref LEFT JOIN
+    main.data_quality_tracking q ON q.targetlink = p.planetref
+  grain: one planet
+  domains:
+  - data_quality
+- name: relative_uncertainty_mass_pct
+  description: 'Relative Uncertainty of planet mass (%): ((masserr1 - masserr2)/2) / massjup * 100.'
+  sql_expression: ((q.masserr1 - q.masserr2) / 2) / NULLIF(ph.massjup, 0) * 100
+  source_model: main.data_quality_tracking
+  from_sql: main.planets p LEFT JOIN main.physical_properties ph ON ph.objectlink = p.planetref LEFT JOIN
+    main.data_quality_tracking q ON q.targetlink = p.planetref
+  grain: one planet
+  domains:
+  - data_quality
+- name: relative_uncertainty_radius_pct
+  description: 'Relative Uncertainty of planet radius (%): ((raderr1 - raderr2)/2) / radjup * 100.'
+  sql_expression: ((q.raderr1 - q.raderr2) / 2) / NULLIF(ph.radjup, 0) * 100
+  source_model: main.data_quality_tracking
+  from_sql: main.planets p LEFT JOIN main.physical_properties ph ON ph.objectlink = p.planetref LEFT JOIN
+    main.data_quality_tracking q ON q.targetlink = p.planetref
+  grain: one planet
+  domains:
+  - data_quality
+- name: is_high_precision_period
+  description: 'High-Precision Measurement of period: relative uncertainty < 5%. Same rule applies to
+    any parameter (value with its err1/err2 pair).'
+  sql_expression: ((q.perioderr1 - q.perioderr2) / 2) / NULLIF(o.period, 0) * 100 < 5
+  source_model: main.data_quality_tracking
+  from_sql: main.planets p LEFT JOIN main.orbital_characteristics o ON o.bodylink = p.planetref LEFT JOIN
+    main.data_quality_tracking q ON q.targetlink = p.planetref
+  grain: one planet
+  domains:
+  - data_quality
+- name: is_well_characterized
+  description: 'Well-Characterized Planet: mass, radius and orbital period all High-Precision (each relative
+    uncertainty < 5%).'
+  sql_expression: ((q.masserr1 - q.masserr2) / 2) / NULLIF(ph.massjup, 0) * 100 < 5 AND ((q.raderr1 -
+    q.raderr2) / 2) / NULLIF(ph.radjup, 0) * 100 < 5 AND ((q.perioderr1 - q.perioderr2) / 2) / NULLIF(o.period,
+    0) * 100 < 5
+  source_model: main.planets
+  from_sql: main.planets p LEFT JOIN main.orbital_characteristics o ON o.bodylink = p.planetref LEFT JOIN
+    main.physical_properties ph ON ph.objectlink = p.planetref LEFT JOIN main.data_quality_tracking q
+    ON q.targetlink = p.planetref
+  grain: one planet
+  domains:
+  - data_quality
+- name: is_minimum_mass
+  description: 'Minimum Mass Status: masssource = ''Msini'' (M sin i lower limit, inclination unknown,
+    e.g. radial velocity).'
+  sql_expression: q.masssource = 'Msini'
+  source_model: main.data_quality_tracking
+  from_sql: main.data_quality_tracking q
+  grain: one planet
+  domains:
+  - data_quality
+- name: is_mass_upper_limit
+  description: 'Upper Limit Value for planet mass: Mass_Lim = 1 (true value <= stated value). For other
+    parameters substitute the JSON key (planetary_limits.Period_Lim, Semimaj_Lim, Ecc_Lim, Incl_Lim, Rad_Lim,
+    Dens_Lim; stellar_limits.Dist_Lim, OptMag_Lim, Temp_Lim, StellarMass_Lim, StellarRad_Lim). Values
+    stored as JSON numbers 0/1/-1 or null.
+
+    '
+  sql_expression: TRY_CAST(q.limitflags->'planetary_limits'->>'Mass_Lim' AS DOUBLE) = 1
+  source_model: main.data_quality_tracking
+  from_sql: main.data_quality_tracking q
+  grain: one planet
+  domains:
+  - data_quality
+- name: has_blended_stellar_measurement
+  description: 'Blended Measurement: any stellar blend flag = 1 (Mag_Blend, Temp_Blend, Mass_Blend, Rad_Blend),
+    i.e. affected by light of unresolved stellar companions. For a single parameter test only its flag.
+    Only Mag_Blend = 1 occurs in the data (7 stars).
+
+    '
+  sql_expression: "COALESCE(TRY_CAST(s.stellarprops->'photometry'->>'Mag_Blend' AS DOUBLE) = 1\n  OR TRY_CAST(s.stellarprops->'physical'->>'Temp_Blend'\
+    \ AS DOUBLE) = 1\n  OR TRY_CAST(s.stellarprops->'physical'->>'Mass_Blend' AS DOUBLE) = 1\n  OR TRY_CAST(s.stellarprops->'physical'->>'Rad_Blend'\
+    \ AS DOUBLE) = 1, false)"
+  source_model: main.stars
+  from_sql: main.stars s
+  grain: one host star
+  domains:
+  - data_quality
+- name: discovery_method_standardized
+  description: Standard discovery category from raw planets.discmethod; anything outside the five groups
+    is 'Other'.
+  sql_expression: "CASE\n  WHEN p.discmethod IN ('RadVel','RV','RV Method','Radial Velocity','Doppler')\
+    \ THEN 'Radial Velocity'\n  WHEN p.discmethod IN ('Transit','TR','Transit Method','Photometry','Photometric')\
+    \ THEN 'Transit'\n  WHEN p.discmethod IN ('Direct Imaging','DI','Imaging','IMG','Direct') THEN 'Imaging'\n\
+    \  WHEN p.discmethod IN ('TTV','Transit Timing Variations','Transit Timing','TTV Method','Timing Var')\
+    \ THEN 'TTV'\n  WHEN p.discmethod IN ('Microlensing','ML','μLens','Lensing','Gravitational') THEN\
+    \ 'Microlensing'\n  ELSE 'Other'\nEND"
+  source_model: main.planets
+  from_sql: main.planets p
+  grain: one planet
+  domains:
+  - discovery
+- name: is_transit_discovery
+  description: 'Discovery via Transit Method: discmethod in Transit, TR, Transit Method, Photometry, Photometric.'
+  sql_expression: p.discmethod IN ('Transit','TR','Transit Method','Photometry','Photometric')
+  source_model: main.planets
+  from_sql: main.planets p
+  grain: one planet
+  domains:
+  - discovery
+- name: is_radial_velocity_discovery
+  description: 'Discovery via Radial Velocity: discmethod in RadVel, RV, RV Method, Radial Velocity, Doppler.'
+  sql_expression: p.discmethod IN ('RadVel','RV','RV Method','Radial Velocity','Doppler')
+  source_model: main.planets
+  from_sql: main.planets p
+  grain: one planet
+  domains:
+  - discovery
+- name: is_kepler_discovery
+  description: 'Kepler Mission Discovery: planet with an observation record linked to facility ''kep''.'
+  sql_expression: "EXISTS (SELECT 1 FROM main.planet_instrument_observations x\n        JOIN main.instruments_surveys\
+    \ i ON i.instrumentref = x.facilitylink\n        WHERE x.subjectlink = p.planetref AND i.facilityname\
+    \ = 'kep')"
+  source_model: main.planets
+  from_sql: main.planets p
+  grain: one planet
+  domains:
+  - discovery
+- name: is_ttv_planet
+  description: 'Transit Timing Variation (TTV) Method planet: observation record linked to facility ''ttv''.'
+  sql_expression: "EXISTS (SELECT 1 FROM main.planet_instrument_observations x\n        JOIN main.instruments_surveys\
+    \ i ON i.instrumentref = x.facilitylink\n        WHERE x.subjectlink = p.planetref AND i.facilityname\
+    \ = 'ttv')"
+  source_model: main.planets
+  from_sql: main.planets p
+  grain: one planet
+  domains:
+  - discovery
+tables:
+- schema: main
+  table: stars
+  columns:
+  - name: stellarref
+    type: BIGINT
+    description: Host star primary key.
+  - name: hostplname
+    type: VARCHAR
+    description: Unique host star name, e.g. '11 Com'.
+  - name: stellardist
+    type: REAL
+    description: Distance in parsecs (1 pc ~ 3.26 ly; light-years = pc*3.26156). Nearby stars ~1.3 pc
+      to thousands of pc; data 3.21-8500; NULL for 513 stars.
+  - name: compcount
+    type: BIGINT
+    description: 'Total confirmed planetary companions (pl_pnum). > 1 = Multi-planetary System. Integer:
+      multiply by 1.0 before dividing.'
+  - name: coordsys
+    type: JSON
+    description: 'JSON: RA_Text, Dec_Text (sexagesimal strings), RA_Decimal (0-360 deg), Dec_Decimal (-90..90
+      deg). Read with ->> and TRY_CAST.'
+  - name: stellarprops
+    type: JSON
+    description: 'JSON. physical: Temp_Value (K; red dwarf ~3000, Sun ~5800, hot blue >30000), Mass_Value
+      (M_sun; hosts ~0.1 to several), Radius_Value (R_sun; neutron stars to giants), Temp_Blend/Mass_Blend/Rad_Blend
+      (0 clean, 1 blended). photometry: Opt_Mag (apparent magnitude, logarithmic, smaller = brighter,
+      mag 1 is 100x brighter than mag 6, Sirius -1.46), Mag_Blend (1 = blended by stellar companions),
+      Photo_Band (noisy: ''V (Johnson)'',''Johnson'',''V'',''Johnson V'' = Johnson V; ''Kepler-band'',''Kepler'',''Kep-b'',''Kep''
+      = Kepler band; also ''V-band'',''K-band''). JSON nulls read as SQL NULL via ->>.'
+- schema: main
+  table: planets
+  columns:
+  - name: planetref
+    type: BIGINT
+    description: Planet primary key (1-3372).
+  - name: hostlink
+    type: BIGINT
+    description: FK to stars.stellarref (never NULL).
+  - name: completter
+    type: VARCHAR
+    description: Planet letter b, c, d... ('b' typically first discovered).
+  - name: notecount
+    type: BIGINT
+    description: Number of literature notes.
+  - name: discmethod
+    type: VARCHAR
+    description: Raw, noisy discovery method label; standardize with metric discovery_method_standardized
+      (see discovery domain).
+- schema: main
+  table: orbital_characteristics
+  columns:
+  - name: orbitalref
+    type: BIGINT
+    description: Primary key.
+  - name: bodylink
+    type: BIGINT
+    description: FK to planets.planetref; one row per planet.
+  - name: period
+    type: REAL
+    description: Orbital period in days (hot Jupiters a few days; distant orbits thousands of years).
+      < 10 = Short-Period.
+  - name: semimajor
+    type: REAL
+    description: Semi-major axis in AU.
+  - name: eccentricity
+    type: REAL
+    description: 'Dimensionless 0 to <1: 0 circle, 0.1 slightly elliptical, 0.7 very elongated. > 0.25
+      = High Eccentricity.'
+  - name: inclination
+    type: REAL
+    description: Degrees relative to sky plane, 0-180. > 90 = Retrograde Orbit.
+- schema: main
+  table: physical_properties
+  columns:
+  - name: physref
+    type: BIGINT
+    description: Primary key.
+  - name: objectlink
+    type: BIGINT
+    description: FK to planets.planetref; one row per planet.
+  - name: massjup
+    type: REAL
+    description: Planet mass in Jupiter masses (Earth ~0.003 M_J; from below Earth mass to >20 M_J). Earth
+      masses = *317.83. > 0.1 = Gas Giant.
+  - name: radjup
+    type: REAL
+    description: Planet radius in Jupiter radii (Earth ~0.09 R_J). Earth radii = *11.209.
+  - name: densvalue
+    type: REAL
+    description: Bulk density g/cm^3 (puffy gas giants <1, rocky Earth ~5.5). > 3 = Rocky; < 0.5 with
+      gas giant = Inflated.
+- schema: main
+  table: instruments_surveys
+  columns:
+  - name: instrumentref
+    type: BIGINT
+    description: Primary key.
+  - name: facilityname
+    type: VARCHAR
+    description: '''ttv'' (Transit Timing Variations), ''kep'' (Kepler mission), ''k2'' (K2 mission).'
+- schema: main
+  table: planet_instrument_observations
+  columns:
+  - name: obsref
+    type: BIGINT
+    description: Primary key.
+  - name: subjectlink
+    type: BIGINT
+    description: FK to planets.planetref.
+  - name: facilitylink
+    type: BIGINT
+    description: FK to instruments_surveys.instrumentref.
+- schema: main
+  table: data_quality_tracking
+  columns:
+  - name: qualityref
+    type: BIGINT
+    description: Primary key.
+  - name: targetlink
+    type: BIGINT
+    description: FK to planets.planetref; one row per planet.
+  - name: perioderr1
+    type: REAL
+    description: +1 sigma period error (days).
+  - name: perioderr2
+    type: REAL
+    description: -1 sigma period error (days), stored negative.
+  - name: semimajerr1
+    type: REAL
+    description: +1 sigma semi-major axis error (AU).
+  - name: semimajerr2
+    type: REAL
+    description: -1 sigma semi-major axis error (AU), negative.
+  - name: eccerr1
+    type: REAL
+    description: +1 sigma eccentricity error.
+  - name: eccerr2
+    type: REAL
+    description: -1 sigma eccentricity error, negative.
+  - name: inclerr1
+    type: REAL
+    description: +1 sigma inclination error (deg).
+  - name: inclerr2
+    type: REAL
+    description: -1 sigma inclination error (deg), negative.
+  - name: masserr1
+    type: REAL
+    description: +1 sigma planet mass error (M_J).
+  - name: masserr2
+    type: REAL
+    description: -1 sigma planet mass error (M_J), negative.
+  - name: raderr1
+    type: REAL
+    description: +1 sigma planet radius error (R_J).
+  - name: raderr2
+    type: REAL
+    description: -1 sigma planet radius error (R_J), negative.
+  - name: denserr1
+    type: REAL
+    description: +1 sigma density error (g/cm^3).
+  - name: denserr2
+    type: REAL
+    description: -1 sigma density error, negative.
+  - name: disterr1
+    type: REAL
+    description: +1 sigma stellar distance error (pc).
+  - name: disterr2
+    type: REAL
+    description: -1 sigma stellar distance error (pc), negative.
+  - name: optmagerr
+    type: REAL
+    description: Symmetric 1 sigma optical magnitude error.
+  - name: temperr1
+    type: REAL
+    description: +1 sigma stellar temperature error (K).
+  - name: temperr2
+    type: REAL
+    description: -1 sigma stellar temperature error (K), negative.
+  - name: stellarmasserr1
+    type: REAL
+    description: +1 sigma stellar mass error (M_sun).
+  - name: stellarmasserr2
+    type: REAL
+    description: -1 sigma stellar mass error, negative.
+  - name: stellarraderr1
+    type: REAL
+    description: +1 sigma stellar radius error (R_sun).
+  - name: stellarraderr2
+    type: REAL
+    description: -1 sigma stellar radius error, negative.
+  - name: masssource
+    type: VARCHAR
+    description: '''Msini'' = minimum mass (Minimum Mass Status), ''Mass'' = true mass, ''Msin(i)/sin(i)''
+      = inclination-corrected; NULL (2198 planets) = no mass measurement.'
+  - name: updatestamp
+    type: DATE
+    description: Last update date (2014-05-14 to 2016-07-07).
+  - name: limitflags
+    type: JSON
+    description: 'JSON limit flags: planetary_limits.{Period_Lim, Semimaj_Lim, Ecc_Lim, Incl_Lim, Mass_Lim,
+      Rad_Lim, Dens_Lim}, stellar_limits.{Dist_Lim, OptMag_Lim, Temp_Lim, StellarMass_Lim, StellarRad_Lim}.
+      0 measured, 1 upper limit (true value <= stated), -1 lower limit, null unknown.'
+relationships:
+- from: main.planets.hostlink
+  to: main.stars.stellarref
+  type: many_to_one
+- from: main.orbital_characteristics.bodylink
+  to: main.planets.planetref
+  type: one_to_one
+- from: main.physical_properties.objectlink
+  to: main.planets.planetref
+  type: one_to_one
+- from: main.data_quality_tracking.targetlink
+  to: main.planets.planetref
+  type: one_to_one
+- from: main.planet_instrument_observations.subjectlink
+  to: main.planets.planetref
+  type: many_to_one
+- from: main.planet_instrument_observations.facilitylink
+  to: main.instruments_surveys.instrumentref
+  type: many_to_one

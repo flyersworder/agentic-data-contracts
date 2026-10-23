@@ -1,0 +1,436 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cybermarket_pattern, author: claudeopus5.5
+metrics:
+- name: marketplace_risk_score
+  description: 'Marketplace Risk Score (MRS), overall risk of a platform: (0.4 * vuln_count + 0.3 * event_count
+    + 0.3 * reputation_score) / 100. vuln_count = platform_compliance.vuln_inst_count, event_count = platform_compliance.sec_event_count,
+    reputation_score = RepScore parsed from text like ''$65.20 '' (0–100). NULL when RepScore is NULL
+    (reputation not assessed; 387 of 954 platforms). One value per platform.
+
+    '
+  sql_expression: "(0.4 * CAST(m.platform_compliance->>'$.vuln_inst_count' AS DOUBLE)\n + 0.3 * CAST(m.platform_compliance->>'$.sec_event_count'\
+    \ AS DOUBLE)\n + 0.3 * TRY_CAST(replace(replace(trim(m.\"RepScore\"), '$', ''), ',', '') AS DOUBLE))\
+    \ / 100\n"
+  source_model: main.markets
+  from_sql: main.markets m
+  grain: one platform
+  domains:
+  - platforms
+- name: data_protection_efficiency
+  description: 'Data Protection Efficiency (DPE) per platform: protection_measures / vulnerability_instances
+    = platform_compliance.protection_meas_count / platform_compliance.vuln_inst_count (never 0 in the
+    data; NULLIF guards).
+
+    '
+  sql_expression: 'CAST(m.platform_compliance->>''$.protection_meas_count'' AS DOUBLE) / NULLIF(CAST(m.platform_compliance->>''$.vuln_inst_count''
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.markets
+  from_sql: main.markets m
+  grain: one platform
+  domains:
+  - platforms
+- name: is_secure_platform
+  description: 'Secure Platform: fewer than ten unresolved security vulnerabilities AND more than fifteen
+    active protection measures (vuln_inst_count < 10 AND protection_meas_count > 15, both strict).
+
+    '
+  sql_expression: "(CAST(m.platform_compliance->>'$.vuln_inst_count' AS BIGINT) < 10\n AND CAST(m.platform_compliance->>'$.protection_meas_count'\
+    \ AS BIGINT) > 15)\n"
+  source_model: main.markets
+  from_sql: main.markets m
+  grain: one platform
+  domains:
+  - platforms
+- name: transaction_velocity_rate
+  description: 'Transaction Velocity Rate (TVR), transaction completion speed: total_transactions / active_time_in_hours,
+    computed per vendor as TotalTxns (text like ''$917 '' or ''$1,020 ''; strip ''$'', '','' and spaces)
+    / (DaysActive * 24). Distinct from the stored transactions.Transaction_Velocity text (USD/hour).
+
+    '
+  sql_expression: 'CAST(replace(replace(trim(v."TotalTxns"), ''$'', ''''), '','', '''') AS DOUBLE) / NULLIF(v."DaysActive"
+    * 24.0, 0)
+
+    '
+  source_model: main.vendors
+  from_sql: main.vendors v
+  grain: one vendor
+  domains:
+  - vendors
+- name: compliance_efficiency_index
+  description: 'Compliance Efficiency Index (CEI): compliance_score / violation_count = vendor_compliance_ratings.reg_compliance_scr
+    / viol_count (viol_count is never 0 or NULL in the data). RegStandeff holds a precomputed text form.
+
+    '
+  sql_expression: 'CAST(v.vendor_compliance_ratings->>''$.reg_compliance_scr'' AS DOUBLE) / NULLIF(CAST(v.vendor_compliance_ratings->>''$.viol_count''
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.vendors
+  from_sql: main.vendors v
+  grain: one vendor
+  domains:
+  - vendors
+- name: platform_liquidity_rate
+  description: 'Platform Liquidity Rate (PLR): successful_txns * average_price / days_active, per vendor
+    = CompletedTxns * AVG(products.product_availability price_amt over the vendor''s listings) / DaysActive.
+    Group by v."SellerKey". The stored liq_rate text is precomputed and does not equal this formula.
+
+    '
+  sql_expression: 'MAX(v."CompletedTxns") * AVG(CAST(p.product_availability->>''$.price_amt'' AS DOUBLE))
+    / NULLIF(MAX(v."DaysActive"), 0)
+
+    '
+  source_model: main.vendors
+  from_sql: main.vendors v LEFT JOIN main.products p ON p."SellerPointer" = v."SellerKey"
+  grain: one vendor (GROUP BY v."SellerKey")
+  domains:
+  - vendors
+- name: is_high_risk_vendor
+  description: 'High Risk Vendor: an active regulatory or law-enforcement investigation is in progress
+    (InvestigationFlag = ''Active'') OR formal records indicate high interest from authorities (LE_Interest
+    = ''High''). NULLs count as not meeting that condition.
+
+    '
+  sql_expression: (COALESCE(v."InvestigationFlag" = 'Active', FALSE) OR COALESCE(v."LE_Interest" = 'High',
+    FALSE))
+  source_model: main.vendors
+  from_sql: main.vendors v
+  grain: one vendor
+  domains:
+  - vendors
+- name: is_advanced_verification_tier
+  description: 'Advanced Verification Tier: vendors who completed multi factor or document backed identity
+    validation (VerTier = ''Advanced''; ''Premium'' and ''Basic'' are other tiers; NULL = not assigned).
+
+    '
+  sql_expression: COALESCE(v."VerTier" = 'Advanced', FALSE)
+  source_model: main.vendors
+  from_sql: main.vendors v
+  grain: one vendor
+  domains:
+  - vendors
+- name: vendor_escrow_usage_rate
+  description: 'Share of a vendor''s transactions with known escrow usage (escrow_used_stat not NULL)
+    that used escrow (''Yes''). Basis for Escrow Compliance. Group by v."SellerKey". The vendor-level
+    vendor_compliance_ratings.escrow_adher_score (percent of transactions adhering to escrow requirements,
+    0.2–100) is an alternative stored signal.
+
+    '
+  sql_expression: 'COUNT(*) FILTER (WHERE t.transaction_financials->>''$.escrow_used_stat'' = ''Yes'')::DOUBLE
+    / NULLIF(COUNT(*) FILTER (WHERE t.transaction_financials->>''$.escrow_used_stat'' IS NOT NULL), 0)
+
+    '
+  source_model: main.transactions
+  from_sql: main.vendors v JOIN main.transactions t ON t."VendorLink" = v."SellerKey"
+  grain: one vendor (GROUP BY v."SellerKey")
+  domains:
+  - vendors
+  - transactions
+- name: is_escrow_compliant_vendor
+  description: 'Escrow Compliant vendor: consistently routes payments through an escrow mechanism until
+    delivery is confirmed. INTERPRETATION ("consistently" has no stated threshold): every transaction
+    of the vendor with known escrow status used escrow (''Yes''), with at least one such transaction.
+    Group by v."SellerKey".
+
+    '
+  sql_expression: "(COUNT(*) FILTER (WHERE t.transaction_financials->>'$.escrow_used_stat' IS NOT NULL)\
+    \ > 0\n AND COUNT(*) FILTER (WHERE t.transaction_financials->>'$.escrow_used_stat' = 'No') = 0)\n"
+  source_model: main.transactions
+  from_sql: main.vendors v JOIN main.transactions t ON t."VendorLink" = v."SellerKey"
+  grain: one vendor (GROUP BY v."SellerKey")
+  domains:
+  - vendors
+- name: buyer_risk_dollar_ratio
+  description: 'Buyer Risk Dollar Ratio (BRDR), risk per dollar spent: risk_score / total_spending_usd
+    = buyer_risk_profile.risk_metric_scr / SUM of transaction_financials.value_amt_usd (numeric text,
+    cast directly) over the buyer''s transactions. Group by b."AcqCode". The stored risk_dollar_ratio
+    text is precomputed and differs from this formula.
+
+    '
+  sql_expression: 'MAX(CAST(b.buyer_risk_profile->>''$.risk_metric_scr'' AS DOUBLE)) / NULLIF(SUM(CAST(t.transaction_financials->>''$.value_amt_usd''
+    AS DOUBLE)), 0)
+
+    '
+  source_model: main.buyers
+  from_sql: main.buyers b JOIN main.transactions t ON t."AcqLink" = b."AcqCode"
+  grain: one buyer (GROUP BY b."AcqCode")
+  domains:
+  - buyers
+- name: is_suspicious_buyer
+  description: 'Suspicious Buyer: behavioural consistency score is low AND risk per dollar metric is notably
+    high. INTERPRETATION (no numeric thresholds are documented): behavior_consistency_scr < 50 (scale
+    0–100; NULL for 394 buyers = not available, so not flagged) AND the stored risk_dollar_ratio (text
+    ''0.0644 RiskScore/USD'', parsed; range 0.0104–0.1995) > 0.1. If a question states its own thresholds,
+    use those.
+
+    '
+  sql_expression: "COALESCE(CAST(b.buyer_risk_profile->>'$.behavior_consistency_scr' AS DOUBLE) < 50\n\
+    \ AND CAST(split_part(b.buyer_risk_profile->>'$.risk_dollar_ratio', ' ', 1) AS DOUBLE) > 0.1, FALSE)\n"
+  source_model: main.buyers
+  from_sql: main.buyers b
+  grain: one buyer
+  domains:
+  - buyers
+- name: is_cross_border_transaction
+  description: 'Cross-Border Transaction: the shipment passes from one country to another, triggering
+    customs or import controls. CrossBorder is stored as BIGINT 1 = Yes, 0 = No.
+
+    '
+  sql_expression: t."CrossBorder" = 1
+  source_model: main.transactions
+  from_sql: main.transactions t
+  grain: one transaction
+  domains:
+  - transactions
+- name: is_fraud_flagged_transaction
+  description: 'Fraud-Flagged Transaction: ML fraud probability exceeding 70 percent. FraudProb is on
+    a 0–100 scale; strictly greater than 70.
+
+    '
+  sql_expression: r."FraudProb" > 70
+  source_model: main.risk_analytics
+  from_sql: main.risk_analytics r
+  grain: one transaction
+  domains:
+  - risk
+- name: wallet_turnover_rate
+  description: 'Wallet Turnover Rate (WTR): value_moved / wallet_age_in_days = wallet_risk_assessment.wallet_value_usd
+    / wallet_age_days (age ≥ 4, never 0). Not the stored turnover_rate_val.
+
+    '
+  sql_expression: 'CAST(r.wallet_risk_assessment->>''$.wallet_value_usd'' AS DOUBLE) / NULLIF(CAST(r.wallet_risk_assessment->>''$.wallet_age_days''
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.risk_analytics
+  from_sql: main.risk_analytics r
+  grain: one transaction
+  domains:
+  - risk
+- name: anonymity_cost_index
+  description: 'Anonymity Cost Index (ACI): traceability score per anonymity level = traceability_cost
+    / anonymity_score = TraceScore / AnonLevel. AnonLevel is stored as numeric text 1.0–10.0 (cast to
+    DOUBLE). The stored anonymity_cost text column is a separate precomputed value.
+
+    '
+  sql_expression: c."TraceScore" / NULLIF(TRY_CAST(c."AnonLevel" AS DOUBLE), 0)
+  source_model: main.connection_security
+  from_sql: main.connection_security c
+  grain: one transaction session
+  domains:
+  - security
+- name: threat_handling_rate
+  description: 'Threat Handling Rate (THR) = threats_handled / total_hours. The data has no separate counts;
+    the rate is stored as Threat_handle_rate text like ''0.12 Threats/hour'' and parsed here (threats
+    per hour).
+
+    '
+  sql_expression: CAST(split_part(c."Threat_handle_rate", ' ', 1) AS DOUBLE)
+  source_model: main.connection_security
+  from_sql: main.connection_security c
+  grain: one transaction session
+  domains:
+  - security
+- name: has_premium_authentication
+  description: 'Premium Authentication: sessions secured by two factor or multi factor authentication
+    — auth_protocol_type IN (''2FA'', ''Multi-factor'').
+
+    '
+  sql_expression: c.connection_security_metrics->>'$.auth_protocol_type' IN ('2FA', 'Multi-factor')
+  source_model: main.connection_security
+  from_sql: main.connection_security c
+  grain: one transaction session
+  domains:
+  - security
+- name: suspicion_signal_density
+  description: 'Suspicion Signal Density (SSD): keyword hits per message volume = keyword_match_count
+    / msg_count_total.
+
+    '
+  sql_expression: 'CAST(cm.communication_details->>''$.keyword_match_count'' AS DOUBLE) / NULLIF(CAST(cm.communication_details->>''$.msg_count_total''
+    AS DOUBLE), 0)
+
+    '
+  source_model: main.communications
+  from_sql: main.communications cm
+  grain: one communication thread (transaction)
+  domains:
+  - communications
+- name: is_traceable_communication
+  description: 'Traceable Communication: threads with a high volume of flagged keywords and linguistic
+    anomalies. INTERPRETATION (no threshold documented): lang_pattern_type = ''Suspicious'' (the linguistic
+    anomaly label) AND keyword_match_count >= 10 (upper half of the observed 0–20 range). If a question
+    states its own threshold, use it.
+
+    '
+  sql_expression: "(cm.communication_details->>'$.lang_pattern_type' = 'Suspicious'\n AND CAST(cm.communication_details->>'$.keyword_match_count'\
+    \ AS BIGINT) >= 10)\n"
+  source_model: main.communications
+  from_sql: main.communications cm
+  grain: one communication thread (transaction)
+  domains:
+  - communications
+- name: is_tier3_escalation_case
+  description: 'Tier-3 Escalation Case: escalated to the highest priority tier, warranting immediate incident
+    response. Stored as escalation_tier_stat = ''Level3''.
+
+    '
+  sql_expression: COALESCE(a.alert_case_management->>'$.escalation_tier_stat' = 'Level3', FALSE)
+  source_model: main.alerts
+  from_sql: main.alerts a
+  grain: one alert case
+  domains:
+  - alerts
+tables:
+- schema: main
+  table: markets
+  columns:
+  - name: OperStatus
+    type: VARCHAR
+    description: Operational status. Active = online, accepting listings and processing transactions normally;
+      Closed = permanently shut down, no further log ins or transactions possible; Suspended = temporarily
+      offline (often policy violations or maintenance), may return; Under Investigation = law enforcement
+      or compliance review in progress, user activity restricted or frozen.
+  - name: RepScore
+    type: VARCHAR
+    description: Reputation score as text like '$65.20 ' (0–100); strip '$' and spaces to cast. NULL =
+      not assessed. Used in marketplace_risk_score.
+  - name: platform_compliance
+    type: JSON
+    description: 'JSON: vuln_inst_count, sec_event_count, protection_meas_count (numbers), sec_audit_stat,
+      data_ret_policy_stat, geo_dist_scr, laund_ve_score (text with units). Access with ->>''$.field''.
+      Used by marketplace_risk_score, data_protection_efficiency, is_secure_platform.'
+- schema: main
+  table: vendors
+  columns:
+  - name: TotalTxns
+    type: VARCHAR
+    description: Total transactions as text like '$917 ' (some with commas); strip '$', ',' and spaces.
+  - name: VerTier
+    type: VARCHAR
+    description: 'Verification tier: Advanced (completed multi factor or document backed identity validation),
+      Basic, Premium. NULL = not assigned.'
+  - name: AccessLevel
+    type: VARCHAR
+    description: Full = can create listings, modify inventory, withdraw funds, communicate without restriction;
+      Partial = limited, typically view only or blocked from withdrawals until verification is complete.
+      NULL = not set.
+  - name: InvestigationFlag
+    type: VARCHAR
+    description: Active / Closed / Monitoring; NULL = not recorded. 'Active' makes the vendor High Risk
+      (is_high_risk_vendor).
+  - name: LE_Interest
+    type: VARCHAR
+    description: Law-enforcement interest High / Medium / Low; NULL = none documented. 'High' makes the
+      vendor High Risk.
+  - name: RegStandeff
+    type: VARCHAR
+    description: Precomputed CEI text ('11.61 Score/violation'); see compliance_efficiency_index.
+- schema: main
+  table: buyers
+  columns:
+  - name: AuthLevel
+    type: VARCHAR
+    description: Advanced = multi factor or hardware-backed credentials, high assurance; Basic = single
+      factor such as a password, no secondary verification. NULL = not determined.
+  - name: buyer_risk_profile
+    type: JSON
+    description: 'JSON: risk_metric_scr (0–10), behavior_consistency_scr (0–100, often NULL), spend_pattern
+      (High = frequent high value purchases, heavy engagement; Low = infrequent low value, casual/opportunistic;
+      Medium = steady cadence, moderate amounts; Variable = irregular bursts, no predictable pattern),
+      purchase_freq, risk_dollar_ratio (text ''0.0644 RiskScore/USD'').'
+- schema: main
+  table: products
+  columns:
+  - name: ProdCat
+    type: VARCHAR
+    description: Data = digital information assets (credential dumps, personal records, proprietary databases);
+      Digital = intangible goods (software licenses, media subscriptions, downloadable files); Physical
+      = tangible merchandise shipped to the buyer (hardware devices, printed documents); Service = intangible
+      labor or expertise (penetration testing, content creation, laundering assistance).
+- schema: main
+  table: transactions
+  columns:
+  - name: CrossBorder
+    type: BIGINT
+    description: 1 = shipment passes from one country to another, triggering customs or import controls
+      (Cross-Border Transaction); 0 = no.
+  - name: RouteComplex
+    type: VARCHAR
+    description: 'Shipping route complexity: Simple, Medium, Complex.'
+  - name: transaction_financials
+    type: JSON
+    description: 'JSON: value_amt_usd (numeric text, cast directly), fee_amt_usd (text ''$637.83 ''),
+      escrow_used_stat (Yes = funds held in escrow pending delivery confirmation or dispute resolution,
+      reducing counterparty risk; No = released directly without escrow protection, increasing the chance
+      of fraud; NULL = unavailable), completion_state_stat, pmt_method_type, etc.'
+- schema: main
+  table: risk_analytics
+  columns:
+  - name: FraudProb
+    type: FLOAT
+    description: Fraud probability on a 0–100 scale. > 70 = Fraud-Flagged Transaction.
+  - name: ML_Risk
+    type: VARCHAR
+    description: Documented as High/Low/Medium but stored as numeric text 0–10.
+- schema: main
+  table: connection_security
+  columns:
+  - name: AnonLevel
+    type: VARCHAR
+    description: Session anonymity level; documented values High, Medium, Low, but stored as numeric text
+      1.0–10.0 (higher = more anonymous). Denominator of anonymity_cost_index.
+  - name: TraceScore
+    type: FLOAT
+    description: Traceability score; numerator of anonymity_cost_index.
+  - name: connection_security_metrics
+    type: JSON
+    description: JSON incl. auth_protocol_type ('2FA', 'Multi-factor' = Premium Authentication; 'Basic'),
+      vpn_detect_status, tor_node_count, etc.
+- schema: main
+  table: communications
+  columns:
+  - name: communication_details
+    type: JSON
+    description: 'JSON: keyword_match_count, msg_count_total, lang_pattern_type (Consistent = uniform
+      grammar, vocabulary and tone, single genuine author; Suspicious = irregular phrasing, sudden language
+      switches, machine translated text, possible deception; Variable = mixed styles from multiple senders
+      or intentionally altered to hinder profiling), sentiment_val, suspic_index_scr, etc.'
+- schema: main
+  table: alerts
+  columns:
+  - name: alert_case_management
+    type: JSON
+    description: 'JSON: severity_level_stat (Critical, High, Medium, Low — Critical highest), escalation_tier_stat
+      (Level1/Level2/Level3; Level3 = Tier-3, highest priority, immediate incident response; NULL = not
+      assigned), case_state_stat, action_taken_stat, etc.'
+relationships:
+- from: main.transactions.PlatformKey
+  to: main.markets.PlatCode
+  type: many_to_one
+- from: main.transactions.VendorLink
+  to: main.vendors.SellerKey
+  type: many_to_one
+- from: main.transactions.AcqLink
+  to: main.buyers.AcqCode
+  type: many_to_one
+- from: main.products.SellerPointer
+  to: main.vendors.SellerKey
+  type: many_to_one
+- from: main.risk_analytics.TxnLink
+  to: main.transactions.EventCode
+  type: one_to_one
+- from: main.communications.EventLink
+  to: main.transactions.EventCode
+  type: one_to_one
+- from: main.connection_security.TxnPointer
+  to: main.transactions.EventCode
+  type: one_to_one
+- from: main.alerts.EventTag
+  to: main.transactions.EventCode
+  type: one_to_one
+- from: main.transaction_products.EventLink
+  to: main.transactions.EventCode
+  type: many_to_one

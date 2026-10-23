@@ -1,0 +1,215 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: robot_fault_prediction, author: claudeopus5.5
+version: '1.0'
+name: robot-fault-prediction
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Industrial robot fleet telemetry for fault prediction: robot registry (robot_record,
+      robot_details), operations, actuation/TCP/motor data, joint kinematics and joint health (JSON),
+      mechanical component status (JSON), system controller load, maintenance/fault predictions and performance/safety
+      counters.'
+    preferred: true
+    tables:
+    - robot_record
+    - robot_details
+    - operation
+    - actuation_data
+    - joint_performance
+    - joint_condition
+    - mechanical_status
+    - system_controller
+    - maintenance_and_fault
+    - performance_and_safety
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: robot_assets
+    summary: Robot identity, age, payload class, firmware lifecycle, architectures
+    description: 'JOIN KEYS. robot_record.botcode is the robot id (e.g. RB2073); robot_details.botdetreg
+      = robot_record.botcode; operation.operrecref, actuation_data.actrecref = botcode; performance_and_safety.effectivenessrobot,
+      joint_condition.jcdetref, joint_performance.jperfdetref, mechanical_status.mechdetref = robot_details.botdetreg.
+      Operations: operation.operreg is referenced by actuation_data.actoperref, joint_*.j*operref, mechanical_status.mechoperref,
+      system_controller.systemoverseeroperation, maintenance_and_fault.upkeepoperation. Actuation records
+      (actuation_data.actreg) are referenced by system_controller.systemoverseeractuation, maintenance_and_fault.upkeepactuation,
+      performance_and_safety.effectivenessactuation and mechanical_status.mechactref. Checked: actuation_data.actrecref
+      always equals the operation''s operrecref. Data: 1000 operations over 951 robots, so a robot may
+      have more than one operation/actuation row.
+
+      ROBOT AGE = CURRENT_DATE - installation date (robot_details.instdateval), in days (metric robot_age_days;
+      DuckDB date minus date gives integer days). Install dates in the data run 2022-05-27 .. 2024-11-11.
+      Underutilized Asset: Robot Age > 365 days AND cumulative operating hours (operation.totopshrval)
+      < 2000. Workhorse Robot: Robot Age > 1825 days (5 years) AND cumulative operating hours > 40000.
+      Legacy Robot: Robot Age > 3650 days (10 years).
+
+      PAYLOAD CAPACITY CLASS on robot_details.payloadcapkg: ''Light-Duty'' (< 20 kg), ''Medium-Duty''
+      (20-150 kg, i.e. >= 20 and < 150), ''Heavy-Duty'' (>= 150 kg). Payload Utilization Ratio (PUR) =
+      actual payload weight (actuation_data.payloadwval) / payload capacity kg; Payload Overload Condition
+      when PUR > 1.0.
+
+      FIRMWARE LIFECYCLE STAGE: ''Current'' (latest stable release), ''Supported'' (previous but supported),
+      ''End-of-Life'' (unsupported and a potential risk). All firmware versions starting with ''3.'' are
+      End-of-Life. The documentation gives no rule separating Current from Supported for other versions,
+      so only End-of-Life is computable.
+
+      ROBOT ARCHITECTURES (primary kinematic families): ''Articulated'', ''SCARA'', ''Delta'', ''Cartesian''.
+      robot_details.bottypeval additionally holds ''Collaborative'', which is not one of the listed core
+      architectures.
+
+      TOP-TIER USAGE MODEL: a robot model (robot_details.modelseriesval) whose total program cycle count
+      (SUM of operation.progcyclecount) is in the 75th percentile or higher of all models (top 25% of
+      the fleet).
+
+      '
+    tables:
+    - main.robot_record
+    - main.robot_details
+    - main.operation
+  - name: operations
+    summary: Throughput, application groups, workload
+    description: 'Throughput Rate = 60 / cycle_time_seconds (cycles per minute); Throughput Rate (Cycles
+      per Hour) = 3600 / cycle_time_seconds, using operation.cycletimesecval (NULL in 518 of 1000 rows
+      = no cycle time data; NULL throughput results).
+
+      COMMON APPLICATION GROUPS: ''Material Handling'' (e.g. Picking, Packing, Palletizing), ''Processing''
+      (e.g. Grinding, Polishing), ''Assembly'', ''Welding'', ''Standby''. HIGH-WEAR APPLICATIONS: ''Welding'',
+      ''Grinding'', ''Deburring'', ''Palletizing'', ''Machine Tending''. PRECISION-CRITICAL APPLICATIONS:
+      ''Assembly'', ''Electronics-Handling'', ''Inspection'', ''Dispensing'', ''Laser Cutting''. operation.apptypeval
+      actually holds only Assembly, Material Handling, Painting, Palletizing, Welding (NULL = no application
+      type specified, 519 rows). So Palletizing belongs to the Material Handling group; Painting is in
+      none of the listed groups.
+
+      INTENSIVE WORKLOAD: PUR > 0.8 AND Throughput Rate in the top 20th percentile (quintile 1, NTILE(5)
+      ordered by throughput descending) within its application type.
+
+      '
+    tables:
+    - main.operation
+    - main.actuation_data
+  - name: joint_health
+    summary: Joint temperature, vibration, backlash; thermal and mechanical alerts
+    description: 'joint_condition.joint_health is JSON: keys J1..J6, each with temperature_C (Celsius),
+      vibration_mmps (mm/s) and backlash_deg. Extract with (jc.joint_health->''J1''->>''temperature_C'')::DOUBLE.
+      Checked: all 1000 rows have all six joints with all three values (no NULLs). joint_performance.joint_metrics
+      is JSON J1..J6 with angle_deg, speed_dps, torque_nm.
+
+      Average Joint Temperature = (J1_temp + ... + J6_temp) / 6. Joint Temperature Differential = GREATEST(J1..J6
+      temp) - LEAST(J1..J6 temp). Average Joint Vibration = mean of vibration_mmps over the joints. Average
+      Backlash = mean backlash (degrees) over the joints. Thermal Anomaly: Average Joint Temperature >
+      75°C OR Joint Temperature Differential > 15°C. Backlash Severity (applies to the average backlash
+      across all joints): ''Low'' < 0.01 degrees, ''Medium'' 0.01-0.05 (early wear), ''High'' > 0.05 (significant
+      wear). Mechanical Wear Score = 0.6 * Average Joint Vibration + 0.4 * Average Backlash; tiers ''Low''
+      < 0.5, ''Medium'' 0.5-0.8, ''High'' > 0.8. Mechanical Degradation Alert: Average Backlash is ''High''
+      Backlash Severity (> 0.05) OR Average Joint Vibration > 3.0 mm/s. Critical Condition Robot: Thermal
+      Anomaly AND Mechanical Degradation Alert.
+
+      '
+    tables:
+    - main.joint_condition
+    - main.joint_performance
+  - name: mechanical_condition
+    summary: Brake/encoder/gearbox status JSON and brake status meanings
+    description: 'mechanical_status.component_status is JSON with brakes.J1..J6 and encoders.J1..J6 (text
+      ''Error'',''Normal'',''Warning'', or JSON null = no data) and gearboxes.J1..J6 {temperature_C, vibration_mmps}.
+      BRAKE STATUS INTERPRETATION (documentation): ''Released'' (disengaged for movement), ''Applied''
+      (engaged to hold position), ''Replaced'' (newly installed component), ''Slipping'' (fault condition).
+      These four labels do not occur in the data, which stores only Error/Normal/Warning; there is no
+      documented mapping between them.
+
+      '
+    tables:
+    - main.mechanical_status
+  - name: controller
+    summary: Controller stress, CPU load levels, cabinet humidity
+    description: 'Controller Stress Score = (overseer_load_value + memory_usage_value) / 2 = (system_controller.overseerloadvalue
+      + memuseval) / 2 (both 0-100). CPU LOAD LEVELS on overseerloadvalue (percent): ''Normal'' < 70%,
+      ''High'' 70%-90%, ''Critical'' > 90% (risks performance degradation). CABINET HUMIDITY RISK on cabhumiditylevel
+      (text like ''47%''): ''Safe'' < 60%, ''Warning'' 60%-80% (corrosion risk), ''Danger'' > 80% (risk
+      of electrical faults). Checked: cabhumiditylevel and overseerthermallevel are NULL in every row,
+      so humidity risk returns NULL on this data. ANOMALOUS CONTROLLER STRESS: current Controller Stress
+      Score more than 20% higher than the average stress score for its model series (robot_details.modelseriesval,
+      via actuation_data.actrecref).
+
+      '
+    tables:
+    - main.system_controller
+  - name: maintenance
+    summary: RUL, fault prediction tiers, urgency, maintenance triggers, cost
+    description: 'Remaining Useful Life in Days = rulhours / 24. Predictive Maintenance Urgency (PMU)
+      = (1000 / (rulhours + 1)) + (faultpredscore * 10); Predictive Maintenance Trigger when PMU > 50.
+      rulhours is BIGINT, so write 1000.0 and 24.0 to avoid integer division. FAULT PREDICTION SCORE TIERS:
+      ''Low'' < 0.3 (normal operation), ''Medium'' 0.3-0.7 (monitoring required), ''High'' > 0.7 (high
+      probability of impending fault). faultpredscore is NULL in 272 of 513 rows. URGENT MAINTENANCE REQUIRED:
+      RUL in Days < 7 OR UpkeepDueDays <= 0 (overdue). IMMINENT FAILURE WARNING: ''High'' fault score
+      tier AND Urgent Maintenance Required. Maintenance Cost Per Hour = upkeep cost estimate / total operational
+      hours. upkeepcostest is text like ''$7,299.59'' (strip ''$'' and '',''); it is NULL in every row
+      of this data.
+
+      '
+    tables:
+    - main.maintenance_and_fault
+  - name: safety_performance
+    summary: Safety states, calibration, safety incident rate, reliability, condition index
+    description: 'SAFETY STATE MEANINGS (performance_and_safety.safetystateval): ''✓ Normal'' = normal
+      operation; ''Warning'' = Protective Stop; ''✗ Emergency'' = critical stop (database value ''✗ Emergency'').
+      Use the exact strings including the symbols. CALIBRATION STATE MEANINGS (calibstateval): ''Y'' =
+      Success, ''0'' = Failed, ''N'' = Pending. Safety Incident Rate = (collision_count + zone_violations
+      + speed_violations) * 1000 / total_operational_hours (operation.totopshrval). High Safety-Risk Unit
+      / High Safety-Risk (same definition): Safety Incident Rate > 2.0 OR cumulative collision count >
+      5. MTBS = total_operational_hours / emergency_stop_count; High Reliability Risk when MTBS < 500
+      hours. Overload Frequency = overload_count / (total_operational_hours / 1000.0). CONDITION INDEX
+      TIERS (conditionindexval): ''Excellent'' > 0.9, ''Good'' 0.7-0.9, ''Fair'' 0.5-0.7, ''Poor'' < 0.5
+      (significant wear or risk). Health Degradation Rate = (1.0 - condition_index) / robot age in days;
+      Degrading Robot when HDR > 0. AIR PRESSURE STATUS (airpressval, bar): ''Normal'' 5.5-7.0, ''Low''
+      < 5.5, ''High'' > 7.0. Relative Positional Error = poserrmmval / reachmmval; Precision Performance
+      Degradation when > 0.0001. Text fields energyusekwhval (''70.54 kWh''), pwrfactorval (''PF=0.82''),
+      toolwearpct are NULL in every row.
+
+      '
+    tables:
+    - main.performance_and_safety
+    - main.actuation_data
+  - name: out_of_scope_definitions
+    summary: Documentation entries about disaster response, not this database
+    description: 'These documented definitions refer to a humanitarian/disaster-response dataset; none
+      of their inputs exist in this robot database, so they cannot be computed here. Answer that the data
+      is unavailable rather than approximating. Supply Sufficiency (Days) = LEAST((food_tons * 1000) /
+      (affected_population * 2), water_liters / (affected_population * 3)) (2 kg food, 3 L water per person
+      per day). Imminent Supply Depletion Alert: Supply Sufficiency < 2 days (within 48 hours). Budget
+      Runway (Days) = (allocated_budget - total_operational_costs) / Financial Burn Rate. Response Effectiveness
+      Score (RES) = 0.4 * success_rate + 0.3 * bene_feedbackscore * 10 + 0.3 * distequityidx * 100. Financial
+      Health Score = 0.5 * (100 - funds_util_pct) + 0.5 * ((budgetallotusd - COALESCE(resource_gaps_usd,
+      0)) / NULLIF(budgetallotusd, 0)) * 100. Public Health Emergency: PHRS > 70. Highly Effective Operation:
+      RES > 85 AND CQI > 85. Overwhelmed Logistical Hub: HSI > 1,000,000. Failing Operation: LTV < 1.0
+      OR RES < 40. High Cost, Low Impact Operation: CPPA above average AND RES below average. Catastrophic
+      Disaster: DSI > 15,000. Medical Staff Ratio = (medical_staff_count / affected_population) * 1000.
+      High Burn Rate Alert: total costs > 20% of total allocated budget.
+
+      '
+    tables: []
+  rules:
+  - name: use_declared_metrics
+    description: 'Ratios, scores, tiers and alerts must use the metric SQL in semantic.yml (thresholds
+      and boundaries exactly as documented), not ad-hoc formulas.
+
+      '
+    enforcement: warn
+  - name: guard_division
+    description: 'Divide with NULLIF(denominator, 0) and float literals (1000.0, 24.0, 6.0); the engine
+      divides integers as PostgreSQL does (truncates).
+
+      '
+    enforcement: warn

@@ -2,13 +2,13 @@
 % Which Part of the Context Layer Does the Work?
 %
 % TARGET: PVLDB "Experiment, Analysis & Benchmark" track; arXiv preprint
-% (primary cs.DB).
+% 2609.22259 (primary cs.CL).
 %
 % This is the EXTENDED build (arXiv): stock `article` + `twocolumn`, so it
 % compiles with a plain TeX Live install, appendix included. The PVLDB
-% submission is `pvldb.tex`: acmart sigconf, same section files, no
-% appendix (PVLDB counts appendices toward its 12 content pages), with
-% appendix references pointing at this version.
+% submission is `pvldb.tex`: the official PVLDB template, same section
+% files, no appendix (PVLDB counts appendices toward its 12 content pages),
+% with appendix references pointing at this version.
 
 \newif\ifextended
 \extendedtrue
@@ -24,6 +24,10 @@
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 \usepackage{xcolor}
 \PassOptionsToPackage{hyphens}{url}
 \usepackage[hidelinks]{hyperref}
@@ -35,7 +39,7 @@
 \input{preamble}
 
 \title{\vspace{-2em}\bfseries Which Part of the Context Layer Does the Work?\\
-\large Separating Semantic Content from Retrieval Scaffolding in Text-to-SQL Agents}
+\large Separating Knowledge from Delivery in Text-to-SQL Agents, on Two Benchmarks}
 
 \author{
   Qing Ye\\
@@ -56,11 +60,12 @@
 \input{sections/02-background}
 \input{sections/03-system}
 \input{sections/04-design}
-\input{sections/05-results}
-\input{sections/06-why}
-\input{sections/07-governance}
-\input{sections/08-threats}
-\input{sections/09-conclusion}
+\input{sections/05-knowledge}
+\input{sections/06-delivery}
+\input{sections/07-authoring}
+\input{sections/08-buys}
+\input{sections/09-threats}
+\input{sections/10-conclusion}
 
 % Content ends here; `make check` reads this label's page from the .aux
 % to count content pages against the PVLDB limit.
@@ -79,6 +84,9 @@
 \input{sections/F-interaction}
 \input{sections/G-leaderboard}
 \input{sections/H-escalations}
+\input{sections/I-predictions}
+\input{sections/J-single-runs}
+\input{sections/K-cross-family}
 \fi
 
 \end{document}

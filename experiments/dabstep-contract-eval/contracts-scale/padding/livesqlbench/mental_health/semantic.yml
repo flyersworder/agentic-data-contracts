@@ -1,0 +1,2237 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: mental_health, author: claudeopus5.5
+metrics:
+- name: apsf_average_phq9_by_facility
+  description: 'Average PHQ-9 Score by Facility (APSF): sum of PHQ-9 scores / total number of assessments,
+    for a given facility. Assessments are attributed to the facility of their encounter (encounters.ab_ref
+    -> assessmentsymptomsandrisk.asr_key, encounters.fac_id). `fs` is the shared facility summary: one
+    row per facility with columns frai, apsf, agsf, srp (percent), pfis, sse_avg, tes, crisis_total, tar
+    (fraction), alliance_avg, fimpv_avg, miss_total, n_patients, cif, mar, plus fac_key, r_source, com_res.
+    NULL where the facility has no linked records.
+
+    '
+  sql_expression: fs.apsf
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: agsf_average_gad7_by_facility
+  description: 'Average GAD-7 Score by Facility (AGSF): sum of GAD-7 scores / total number of assessments
+    for a given facility (assessments via encounters.fac_id).
+
+    '
+  sql_expression: fs.agsf
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: tar_treatment_adherence_rate
+  description: 'Treatment Adherence Rate (TAR): number of treatment outcomes with Treatment Adherence
+    (txprogmet->>''Tx_Adh'') of ''High'', ''Medium'' or ''Compliant'' / total number of treatment outcomes,
+    for a given facility. A fraction 0-1 (not a percentage). Outcomes reach the facility via treatmentbasics.enc_ref
+    -> encounters.fac_id. Tx_Adh values in data: High, Medium, Low, Non-compliant.
+
+    '
+  sql_expression: fs.tar
+  source_model: main.treatmentoutcomes
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: srp_suicide_risk_prevalence
+  description: 'Suicide Risk Prevalence (SRP): number of assessments with a ''High'' suicide risk / total
+    number of assessments x 100, for a given facility (a percentage). The formula counts only ''High'';
+    the data also contains suic_risk ''Severe'', which is not counted.
+
+    '
+  sql_expression: fs.srp
+  source_model: main.assessmentsymptomsandrisk
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: therapy_engagement_score
+  description: 'Therapy Engagement Score (TES): the average of engagement scores across therapy sessions
+    (treatmentbasics rows), score 3 for ''High'' engagement, 2 for ''Medium'', 1 for ''Low''. th_eng ''Non-compliant''
+    has no score and is excluded from the average. Group by whatever population is analysed; the facility-level
+    TES is metric facility_therapy_engagement_score.
+
+    '
+  sql_expression: AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END)
+  source_model: main.treatmentbasics
+  domains:
+  - facility_metrics
+  - value_scales
+  from_sql: main.treatmentbasics t
+  grain: one row per treatment record (aggregate over the group analysed)
+- name: facility_therapy_engagement_score
+  description: TES computed per facility (treatments via encounters.fac_id).
+  sql_expression: fs.tes
+  source_model: main.treatmentbasics
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: frai_facility_resource_adequacy_index
+  description: 'Facility Resource Adequacy Index (FRAI): the average of resource scores, 3 for ''Comprehensive''
+    or ''Extensive'' community resources (facilities.com_res), 2 for ''Adequate'', 1 for ''Limited''.
+    Per facility it is the facility''s own score (fs.frai); NULL com_res (171 facilities) is unscored.
+    Over a set of facilities take AVG(fs.frai).
+
+    '
+  sql_expression: fs.frai
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  - value_scales
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: patient_functional_impairment_score
+  description: 'Patient Functional Impairment Score (PFIS): average of functional impairment scores across
+    patients, 3 for ''Severe'', 2 for ''Moderate'', 1 for ''Mild''. func_imp is mixed case (SEVERE/severe/...),
+    so compared with lower(); NULL excluded. The facility-level PFIS is metric facility_pfis.
+
+    '
+  sql_expression: AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN
+    1 END)
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment (aggregate over the group)
+  domains:
+  - facility_metrics
+  - value_scales
+- name: facility_pfis
+  description: PFIS per facility (assessments via encounters.fac_id).
+  sql_expression: fs.pfis
+  source_model: main.assessmentsocialanddiagnosis
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: cif_crisis_intervention_frequency
+  description: 'Crisis Intervention Frequency (CIF): total crisis interventions (SUM treatmentbasics.crisis_int,
+    treatments via encounters) at a facility / total number of unique patients (distinct encounters.pat_ref)
+    at that facility.
+
+    '
+  sql_expression: fs.cif
+  source_model: main.treatmentbasics
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: social_support_effectiveness
+  description: 'Social Support Effectiveness (SSE) for one assessment: social support score (funcassess->>''Soc_Sup'':
+    Strong=3, Adequate=2, Limited=1, Weak=0) + relationship quality score (funcassess->>''Rel_Qual'':
+    Good=3, Fair=2, Poor=1, Conflicted=0). SSE as a KPI is the average of this sum (wrap in AVG). DATA
+    NOTE: Soc_Sup in the data holds Strong, Moderate, Limited or NULL; ''Moderate'' and NULL are not in
+    the documented scoring, so SSE is NULL for those rows. A patient''s "personal" SSE is this value on
+    their assessment.
+
+    '
+  sql_expression: "((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good' THEN\
+    \ 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END))"
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment
+  domains:
+  - patient_classification
+  - value_scales
+- name: facility_average_sse
+  description: Average Social Support Effectiveness of a facility's assessments (via encounters.fac_id).
+  sql_expression: fs.sse_avg
+  source_model: main.assessmentsocialanddiagnosis
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: mar_missed_appointment_rate
+  description: 'Missed Appointment Rate (MAR): sum of missed appointments (encounters.miss_appt) / total
+    number of unique patients (distinct pat_ref) for a given facility. Computed on encounters alone (no
+    treatment join, which would duplicate rows).
+
+    '
+  sql_expression: fs.mar
+  source_model: main.encounters
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: ssi_symptom_severity_index
+  description: Symptom Severity Index (SSI) = (Average PHQ-9 Score + Average GAD-7 Score) / 2 per facility.
+  sql_expression: (fs.apsf + fs.agsf) / 2
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: eas_engagement_adherence_score
+  description: Engagement-Adherence Score (EAS) = (TES + TAR x 3) / 2 per facility (TAR as fraction).
+  sql_expression: (fs.tes + fs.tar * 3) / 2
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: frpi_facility_risk_profile_index
+  description: Facility Risk Profile Index (FRPI) = (SRP / 100 x 5) + PFIS.
+  sql_expression: (fs.srp / 100 * 5) + fs.pfis
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: psm_patient_stability_metric
+  description: Patient Stability Metric (PSM) = 1 / (1 + CIF + MAR); inversely related to crisis frequency
+    and missed appointments.
+  sql_expression: 1.0 / (1 + fs.cif + fs.mar)
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: rdd_resource_demand_differential
+  description: Resource-Demand Differential (RDD) = PFIS - FRAI.
+  sql_expression: fs.pfis - fs.frai
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: sesi_socio_environmental_support_index
+  description: Socio-Environmental Support Index (SESI) = (Average SSE + FRAI) / 2.
+  sql_expression: (fs.sse_avg + fs.frai) / 2
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: aer_adherence_effectiveness_ratio
+  description: Adherence Effectiveness Ratio (AER) = TAR / PFIS, division by zero handled (NULL when PFIS
+    = 0).
+  sql_expression: fs.tar / NULLIF(fs.pfis, 0)
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: edi_engagement_deficit_index
+  description: Engagement Deficit Index (EDI) = (3 - TES) x (1 + MAR).
+  sql_expression: (3 - fs.tes) * (1 + fs.mar)
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: cfrs_comprehensive_facility_risk_score
+  description: Comprehensive Facility Risk Score (CFRS) = APSF/27 + SRP/100 + PFIS/3.
+  sql_expression: fs.apsf / 27 + fs.srp / 100 + fs.pfis / 3
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: sspi_support_system_pressure_index
+  description: Support System Pressure Index (SSPI) = CIF / (Average SSE + 1).
+  sql_expression: fs.cif / (fs.sse_avg + 1)
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: cipi_clinical_improvement_potential_index
+  description: Clinical Improvement Potential Index (CIPI) = EAS / (SSI + 1).
+  sql_expression: ((fs.tes + fs.tar * 3) / 2) / ((fs.apsf + fs.agsf) / 2 + 1)
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: fei_facility_efficiency_index
+  description: Facility Efficiency Index (FEI) = PSM x FRAI.
+  sql_expression: (1.0 / (1 + fs.cif + fs.mar)) * fs.frai
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: taes_therapeutic_alliance_engagement_score
+  description: 'Therapeutic Alliance & Engagement Score (TAES) = (Average Therapeutic Alliance Score +
+    TES) / 2 per facility; alliance score Strong=3, Moderate=2, Weak=1, Poor=0 from txprogmet->>''Ther_Alliance''
+    (mixed case, matched with lower()).
+
+    '
+  sql_expression: (fs.alliance_avg + fs.tes) / 2
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: rti_recovery_trajectory_index
+  description: 'Recovery Trajectory Index (RTI) = Average Functional Improvement Score x TAR; improvement
+    score Significant=3, Moderate=2, Minimal=1 from txprogmet->>''Func_Impv'' (mixed case, lower()).
+
+    '
+  sql_expression: fs.fimpv_avg * fs.tar
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: car_crisis_adherence_ratio
+  description: Crisis Adherence Ratio (CAR) = CIF / (TAR + 0.01).
+  sql_expression: fs.cif / (fs.tar + 0.01)
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: craa_resource_adherence_correlation
+  description: 'Correlation Between Resource Adequacy and Adherence (CRAA) = CORRELATION(facility resource
+    score FRAI, facility TAR) across facilities (Pearson corr; facilities with either value NULL are ignored).
+
+    '
+  sql_expression: corr(fs.frai, fs.tar)
+  source_model: main.facilities
+  grain: aggregate over facilities (one row of fs per facility)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: fpq_facility_performance_quadrant
+  description: 'Facility Performance Quadrant (FPQ): each facility is placed in a quadrant by whether
+    its TAR and its PSM are above or below the median over all facilities (medians over non-NULL values).
+    INTERPRETATION: a value equal to the median counts as High; facilities lacking TAR or PSM get NULL.
+    Labels are ''High TAR / High PSM'', ''High TAR / Low PSM'', ''Low TAR / High PSM'', ''Low TAR / Low
+    PSM''.
+
+    '
+  sql_expression: "CASE WHEN fs.tar IS NULL OR (1.0 / (1 + fs.cif + fs.mar)) IS NULL THEN NULL\n  ELSE\
+    \ (CASE WHEN fs.tar >= median(fs.tar) OVER () THEN 'High TAR' ELSE 'Low TAR' END)\n    || ' / ' ||\n\
+    \    (CASE WHEN (1.0 / (1 + fs.cif + fs.mar)) >= median(1.0 / (1 + fs.cif + fs.mar)) OVER () THEN\
+    \ 'High PSM' ELSE 'Low PSM' END)\nEND"
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: resource_supported_facility
+  description: 'Resource-Supported Facility: community resources (com_res) rated ''Adequate'', ''Comprehensive''
+    or ''Extensive''.'
+  sql_expression: f.com_res IN ('Adequate', 'Comprehensive', 'Extensive')
+  source_model: main.facilities
+  from_sql: main.facilities f
+  grain: one row per facility
+  domains:
+  - facility_metrics
+- name: high_need_under_resourced_facility
+  description: 'High-Need, Under-Resourced Facility: FRPI > 4.5 AND FRAI < 1.5.'
+  sql_expression: ((fs.srp / 100 * 5) + fs.pfis) > 4.5 AND fs.frai < 1.5
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: engaged_high_impairment_facility
+  description: 'Facility with Engaged but High-Impairment Population: EAS > 2.0 AND PFIS > 2.0.'
+  sql_expression: ((fs.tes + fs.tar * 3) / 2) > 2.0 AND fs.pfis > 2.0
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: facility_attrition_risk_indicator
+  description: 'Facility Attrition Risk Indicator: EAS < 1.5 AND MAR > 2.5.'
+  sql_expression: ((fs.tes + fs.tar * 3) / 2) < 1.5 AND fs.mar > 2.5
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: well_resourced_high_support_environment
+  description: 'Well-Resourced High-Support Environment: FRAI >= 2.0 AND average SSE of its patients >=
+    4.5.'
+  sql_expression: fs.frai >= 2.0 AND fs.sse_avg >= 4.5
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: facility_potential_treatment_inertia
+  description: 'Facility with Potential Treatment Inertia: TES > 2.2 but TAR < 0.6.'
+  sql_expression: fs.tes > 2.2 AND fs.tar < 0.6
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: facility_strong_patient_retention
+  description: 'Facility Demonstrating Strong Patient Retention: TAR > 0.75 AND MAR < 1.0.'
+  sql_expression: fs.tar > 0.75 AND fs.mar < 1.0
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: facility_high_clinical_leverage
+  description: 'Facility with High Clinical Leverage Potential: EAS > 2.5 AND SSI > 15.'
+  sql_expression: ((fs.tes + fs.tar * 3) / 2) > 2.5 AND ((fs.apsf + fs.agsf) / 2) > 15
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: facility_engagement_outcome_disconnect
+  description: 'Facility with Potential Engagement-Outcome Disconnect: TES > 2.0 but RTI < 0.8.'
+  sql_expression: fs.tes > 2.0 AND (fs.fimpv_avg * fs.tar) < 0.8
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: systemically_stressed_facility
+  description: 'Systemically Stressed Facility Environment: RDD > 1.0 AND meets Facility Attrition Risk
+    Indicator (EAS < 1.5 AND MAR > 2.5).'
+  sql_expression: (fs.pfis - fs.frai) > 1.0 AND ((fs.tes + fs.tar * 3) / 2) < 1.5 AND fs.mar > 2.5
+  source_model: main.facilities
+  grain: one row per facility (fs.fac_key)
+  domains:
+  - facility_metrics
+  from_sql: "(SELECT f.fac_key, f.r_source, f.com_res,\n  CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN\
+    \ 'Extensive' THEN 3 WHEN 'Adequate' THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n  sr.apsf, sr.agsf,\
+    \ sr.srp, sd.pfis, sd.sse_avg, tb.tes, COALESCE(tb.crisis_total, 0) AS crisis_total,\n  tx.tar, tx.alliance_avg,\
+    \ tx.fimpv_avg, en.miss_total, en.n_patients,\n  COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n  en.miss_total / NULLIF(en.n_patients, 0) AS mar\nFROM main.facilities f LEFT JOIN\
+    \ (SELECT e.fac_id, AVG(s.phq9_scr) AS apsf, AVG(s.gad7_scr) AS agsf,\n    100.0 * COUNT(*) FILTER\
+    \ (WHERE s.suic_risk = 'High') / NULLIF(COUNT(*), 0) AS srp\n  FROM main.encounters e JOIN main.assessmentsymptomsandrisk\
+    \ s ON s.asr_key = e.ab_ref\n  GROUP BY e.fac_id) sr ON sr.fac_id = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n\
+    \    AVG(CASE lower(d.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN 1 END)\
+    \ AS pfis,\n    AVG((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n      + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good'\
+    \ THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) AS sse_avg\n  FROM main.encounters\
+    \ e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref\n  GROUP BY e.fac_id) sd ON sd.fac_id\
+    \ = f.fac_key\nLEFT JOIN (SELECT e.fac_id,\n    AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium'\
+    \ THEN 2 WHEN 'Low' THEN 1 END) AS tes,\n    SUM(t.crisis_int) AS crisis_total\n  FROM main.encounters\
+    \ e JOIN main.treatmentbasics t ON t.enc_ref = e.enc_key\n  GROUP BY e.fac_id) tb ON tb.fac_id = f.fac_key\n\
+    LEFT JOIN (SELECT e.fac_id,\n    COUNT(*) FILTER (WHERE (o.txprogmet->>'Tx_Adh') IN ('High', 'Medium',\
+    \ 'Compliant')) * 1.0 / NULLIF(COUNT(*), 0) AS tar,\n    AVG(CASE lower(o.txprogmet->>'Ther_Alliance')\
+    \ WHEN 'strong' THEN 3 WHEN 'moderate' THEN 2 WHEN 'weak' THEN 1 WHEN 'poor' THEN 0 END) AS alliance_avg,\n\
+    \    AVG(CASE lower(o.txprogmet->>'Func_Impv') WHEN 'significant' THEN 3 WHEN 'moderate' THEN 2 WHEN\
+    \ 'minimal' THEN 1 END) AS fimpv_avg\n  FROM main.encounters e JOIN main.treatmentbasics t ON t.enc_ref\
+    \ = e.enc_key\n    JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key\n  GROUP BY e.fac_id) tx ON\
+    \ tx.fac_id = f.fac_key\nLEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref)\
+    \ AS n_patients\n  FROM main.encounters GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs"
+- name: high_risk_patient
+  description: 'High-Risk Patient: assessed suicide risk ''High'', OR PHQ-9 over 15 (> 15), OR GAD-7 over
+    15 (> 15). Patient = assessmentbasics.pat_owner_ref of the assessment (join a.ab_key = s.asr_key).
+
+    '
+  sql_expression: s.suic_risk = 'High' OR s.phq9_scr > 15 OR s.gad7_scr > 15
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: main.assessmentsymptomsandrisk s JOIN main.assessmentbasics a ON a.ab_key = s.asr_key
+  grain: one row per symptom/risk assessment
+  domains:
+  - patient_classification
+- name: treatment_resistant_patient
+  description: 'Treatment-Resistant Patient: outcome treatment response (Tx_Resp) ''Poor'' despite treatment
+    adherence (Tx_Adh) ''Medium'' or ''High''. Patient = e.pat_ref.'
+  sql_expression: (o.txprogmet->>'Tx_Resp') = 'Poor' AND (o.txprogmet->>'Tx_Adh') IN ('Medium', 'High')
+  source_model: main.treatmentoutcomes
+  from_sql: main.treatmentoutcomes o JOIN main.treatmentbasics t ON t.tx_key = o.tx_ref JOIN main.encounters
+    e ON e.enc_key = t.enc_ref
+  grain: one row per treatment outcome
+  domains:
+  - patient_classification
+- name: non_compliant_patient
+  description: 'Non-Compliant Patient: outcome treatment adherence (Tx_Adh) AND medication adherence (treatmentbasics.med_adh)
+    of the same treatment both ''Non-compliant''. Patient = e.pat_ref.'
+  sql_expression: (o.txprogmet->>'Tx_Adh') = 'Non-compliant' AND t.med_adh = 'Non-compliant'
+  source_model: main.treatmentoutcomes
+  from_sql: main.treatmentoutcomes o JOIN main.treatmentbasics t ON t.tx_key = o.tx_ref JOIN main.encounters
+    e ON e.enc_key = t.enc_ref
+  grain: one row per treatment outcome
+  domains:
+  - patient_classification
+- name: stable_recovery_patient
+  description: 'Stable Recovery Patient: recovery status (rec_status) ''Stable'' AND functional improvement
+    (txprogmet->>''Func_Impv'', mixed case) ''Moderate'' or ''Significant''. The assessment and the outcome
+    are linked through the same encounter (encounters.ab_ref and treatmentbasics.enc_ref). Patient = e.pat_ref.
+
+    '
+  sql_expression: d.rec_status = 'Stable' AND lower(o.txprogmet->>'Func_Impv') IN ('moderate', 'significant')
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d JOIN main.encounters e ON e.ab_ref = d.asd_key JOIN main.treatmentbasics
+    t ON t.enc_ref = e.enc_key JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key
+  grain: one row per (assessment, treatment outcome) pair of an encounter
+  domains:
+  - patient_classification
+- name: low_engagement_risk
+  description: 'Low Engagement Risk: patient''s Therapy Engagement Score (average over their treatments,
+    High=3, Medium=2, Low=1) below 1.5 AND current therapy engagement level ''Low''. "Current" = th_eng
+    of the patient''s latest treatment record (highest tx_key; encounter timestamps are all equal). Use
+    with GROUP BY e.pat_ref.
+
+    '
+  sql_expression: AVG(CASE t.th_eng WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 END) < 1.5
+    AND arg_max(t.th_eng, t.tx_key) = 'Low'
+  source_model: main.treatmentbasics
+  from_sql: main.treatmentbasics t JOIN main.encounters e ON e.enc_key = t.enc_ref
+  grain: one patient (GROUP BY e.pat_ref)
+  domains:
+  - patient_classification
+- name: high_social_support_patient
+  description: 'High Social Support Patient: Social Support Effectiveness score of 5 or greater (>= 5).'
+  sql_expression: "((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good' THEN\
+    \ 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) >= 5"
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment
+  domains:
+  - patient_classification
+- name: patient_strong_recovery_capital
+  description: 'Patient with Strong Recovery Capital: SSE >= 5 AND functional impairment ''Mild'' (func_imp
+    compared case-insensitively).'
+  sql_expression: "((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate' THEN 2 WHEN\
+    \ 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n + (CASE (d.funcassess->>'Rel_Qual') WHEN 'Good' THEN\
+    \ 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) >= 5\nAND lower(d.func_imp)\
+    \ = 'mild'"
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment
+  domains:
+  - patient_classification
+- name: complex_care_needs
+  description: 'Complex Care Needs: a patient at a facility where SRP is over 20% (> 20), the average
+    PFIS is over 2.5, and the patient''s substance use (sub_use) is ''Opioids'' or ''Multiple''. Patient
+    and facility come from the encounter of the symptom assessment (e.pat_ref, e.fac_id).
+
+    '
+  sql_expression: fs.srp > 20 AND fs.pfis > 2.5 AND s.sub_use IN ('Opioids', 'Multiple')
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: "main.encounters e JOIN main.assessmentsymptomsandrisk s ON s.asr_key = e.ab_ref JOIN (SELECT\
+    \ f.fac_key,\n    CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate'\
+    \ THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n    sr.srp, sd.pfis,\n    COALESCE(tb.crisis_total, 0)\
+    \ / NULLIF(en.n_patients, 0) AS cif,\n    en.miss_total / NULLIF(en.n_patients, 0) AS mar\n  FROM\
+    \ main.facilities f\n  LEFT JOIN (SELECT e2.fac_id, 100.0 * COUNT(*) FILTER (WHERE s2.suic_risk =\
+    \ 'High') / NULLIF(COUNT(*), 0) AS srp\n    FROM main.encounters e2 JOIN main.assessmentsymptomsandrisk\
+    \ s2 ON s2.asr_key = e2.ab_ref GROUP BY e2.fac_id) sr ON sr.fac_id = f.fac_key\n  LEFT JOIN (SELECT\
+    \ e2.fac_id, AVG(CASE lower(d2.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN\
+    \ 1 END) AS pfis\n    FROM main.encounters e2 JOIN main.assessmentsocialanddiagnosis d2 ON d2.asd_key\
+    \ = e2.ab_ref GROUP BY e2.fac_id) sd ON sd.fac_id = f.fac_key\n  LEFT JOIN (SELECT e2.fac_id, SUM(t2.crisis_int)\
+    \ AS crisis_total\n    FROM main.encounters e2 JOIN main.treatmentbasics t2 ON t2.enc_ref = e2.enc_key\
+    \ GROUP BY e2.fac_id) tb ON tb.fac_id = f.fac_key\n  LEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total,\
+    \ COUNT(DISTINCT pat_ref) AS n_patients\n    FROM main.encounters GROUP BY fac_id) en ON en.fac_id\
+    \ = f.fac_key) fs ON fs.fac_key = e.fac_id"
+  grain: one row per encounter-linked symptom assessment
+  domains:
+  - patient_classification
+- name: resource_intensive_high_risk_cohort
+  description: 'Resource-Intensive High-Risk Patient Cohort: meets both Complex Care Needs AND Frequent
+    Crisis Patient (facility CIF > 2).'
+  sql_expression: fs.srp > 20 AND fs.pfis > 2.5 AND s.sub_use IN ('Opioids', 'Multiple') AND fs.cif >
+    2
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: "main.encounters e JOIN main.assessmentsymptomsandrisk s ON s.asr_key = e.ab_ref JOIN (SELECT\
+    \ f.fac_key,\n    CASE f.com_res WHEN 'Comprehensive' THEN 3 WHEN 'Extensive' THEN 3 WHEN 'Adequate'\
+    \ THEN 2 WHEN 'Limited' THEN 1 END AS frai,\n    sr.srp, sd.pfis,\n    COALESCE(tb.crisis_total, 0)\
+    \ / NULLIF(en.n_patients, 0) AS cif,\n    en.miss_total / NULLIF(en.n_patients, 0) AS mar\n  FROM\
+    \ main.facilities f\n  LEFT JOIN (SELECT e2.fac_id, 100.0 * COUNT(*) FILTER (WHERE s2.suic_risk =\
+    \ 'High') / NULLIF(COUNT(*), 0) AS srp\n    FROM main.encounters e2 JOIN main.assessmentsymptomsandrisk\
+    \ s2 ON s2.asr_key = e2.ab_ref GROUP BY e2.fac_id) sr ON sr.fac_id = f.fac_key\n  LEFT JOIN (SELECT\
+    \ e2.fac_id, AVG(CASE lower(d2.func_imp) WHEN 'severe' THEN 3 WHEN 'moderate' THEN 2 WHEN 'mild' THEN\
+    \ 1 END) AS pfis\n    FROM main.encounters e2 JOIN main.assessmentsocialanddiagnosis d2 ON d2.asd_key\
+    \ = e2.ab_ref GROUP BY e2.fac_id) sd ON sd.fac_id = f.fac_key\n  LEFT JOIN (SELECT e2.fac_id, SUM(t2.crisis_int)\
+    \ AS crisis_total\n    FROM main.encounters e2 JOIN main.treatmentbasics t2 ON t2.enc_ref = e2.enc_key\
+    \ GROUP BY e2.fac_id) tb ON tb.fac_id = f.fac_key\n  LEFT JOIN (SELECT fac_id, SUM(miss_appt) AS miss_total,\
+    \ COUNT(DISTINCT pat_ref) AS n_patients\n    FROM main.encounters GROUP BY fac_id) en ON en.fac_id\
+    \ = f.fac_key) fs ON fs.fac_key = e.fac_id"
+  grain: one row per encounter-linked symptom assessment
+  domains:
+  - patient_classification
+- name: frequent_crisis_patient
+  description: 'Frequent Crisis Patient: a patient (e.pat_ref) at a facility (e.fac_id) whose Crisis Intervention
+    Frequency is greater than 2.'
+  sql_expression: fs.cif > 2
+  source_model: main.encounters
+  from_sql: "main.encounters e JOIN (SELECT f.fac_key,\n    COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n    en.miss_total / NULLIF(en.n_patients, 0) AS mar\n  FROM main.facilities f\n  LEFT\
+    \ JOIN (SELECT e2.fac_id, SUM(t2.crisis_int) AS crisis_total\n    FROM main.encounters e2 JOIN main.treatmentbasics\
+    \ t2 ON t2.enc_ref = e2.enc_key GROUP BY e2.fac_id) tb ON tb.fac_id = f.fac_key\n  LEFT JOIN (SELECT\
+    \ fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref) AS n_patients\n    FROM main.encounters\
+    \ GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs ON fs.fac_key = e.fac_id"
+  grain: one row per encounter
+  domains:
+  - patient_classification
+- name: high_appointment_adherence
+  description: 'High Appointment Adherence: a patient (e.pat_ref) at a facility whose Missed Appointment
+    Rate is less than 1.'
+  sql_expression: fs.mar < 1
+  source_model: main.encounters
+  from_sql: "main.encounters e JOIN (SELECT f.fac_key,\n    COALESCE(tb.crisis_total, 0) / NULLIF(en.n_patients,\
+    \ 0) AS cif,\n    en.miss_total / NULLIF(en.n_patients, 0) AS mar\n  FROM main.facilities f\n  LEFT\
+    \ JOIN (SELECT e2.fac_id, SUM(t2.crisis_int) AS crisis_total\n    FROM main.encounters e2 JOIN main.treatmentbasics\
+    \ t2 ON t2.enc_ref = e2.enc_key GROUP BY e2.fac_id) tb ON tb.fac_id = f.fac_key\n  LEFT JOIN (SELECT\
+    \ fac_id, SUM(miss_appt) AS miss_total, COUNT(DISTINCT pat_ref) AS n_patients\n    FROM main.encounters\
+    \ GROUP BY fac_id) en ON en.fac_id = f.fac_key) fs ON fs.fac_key = e.fac_id"
+  grain: one row per encounter
+  domains:
+  - patient_classification
+- name: severe_comorbid_distress_profile
+  description: 'Patient with Severe Comorbid Distress Profile: PHQ-9 >= 15 AND GAD-7 >= 15 AND functional
+    impairment ''Severe'' (case-insensitive).'
+  sql_expression: s.phq9_scr >= 15 AND s.gad7_scr >= 15 AND lower(d.func_imp) = 'severe'
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: main.assessmentsymptomsandrisk s JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = s.asr_key
+  grain: one row per assessment having both symptom and social records
+  domains:
+  - patient_classification
+- name: high_severity_high_risk_group
+  description: 'High Severity, High Risk Patient Group: (PHQ-9 over 19 OR GAD-7 over 14) AND suicide risk
+    ''High''.'
+  sql_expression: (s.phq9_scr > 19 OR s.gad7_scr > 14) AND s.suic_risk = 'High'
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: main.assessmentsymptomsandrisk s
+  grain: one row per symptom/risk assessment
+  domains:
+  - patient_classification
+- name: high_crisis_low_support_profile
+  description: 'Patient with High Crisis & Low Support Profile: the patient''s total crisis intervention
+    count (SUM crisis_int over all their treatments, via encounters.pat_ref) greater than 2 AND personal
+    SSE less than 3 (SSE from the social assessment linked to the patient''s encounter).
+
+    '
+  sql_expression: "pc.total_crisis > 2 AND ((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN\
+    \ 'Adequate' THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n + (CASE (d.funcassess->>'Rel_Qual')\
+    \ WHEN 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) < 3"
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: "main.encounters e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref JOIN (SELECT\
+    \ e2.pat_ref, SUM(t2.crisis_int) AS total_crisis\n  FROM main.encounters e2 JOIN main.treatmentbasics\
+    \ t2 ON t2.enc_ref = e2.enc_key\n  GROUP BY e2.pat_ref) pc ON pc.pat_ref = e.pat_ref"
+  grain: one row per encounter-linked social assessment
+  domains:
+  - patient_classification
+- name: vulnerable_patient_watchlist
+  description: 'Vulnerable Patient Watchlist Generation: select patients meeting high-risk criteria (here
+    the High Crisis & Low Support Profile), display contextual, actionable data -- e.pat_ref, pc.total_crisis,
+    d.last_hosp_dt (last hospitalization, ''yyyy/mm/dd''), e.nx_appt_dt (next appointment, ''dd/mm/yyyy'')
+    -- and sort to prioritize intervention (e.g. total_crisis DESC, then SSE ASC). The variant that "creates
+    a dedicated table and populates it" cannot be executed (CREATE/INSERT forbidden): return the SELECT
+    that would populate it.
+
+    '
+  sql_expression: "pc.total_crisis > 2 AND ((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN\
+    \ 'Adequate' THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n + (CASE (d.funcassess->>'Rel_Qual')\
+    \ WHEN 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) < 3"
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: "main.encounters e JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = e.ab_ref JOIN (SELECT\
+    \ e2.pat_ref, SUM(t2.crisis_int) AS total_crisis\n  FROM main.encounters e2 JOIN main.treatmentbasics\
+    \ t2 ON t2.enc_ref = e2.enc_key\n  GROUP BY e2.pat_ref) pc ON pc.pat_ref = e.pat_ref"
+  grain: one row per encounter-linked social assessment
+  domains:
+  - protocols
+  - patient_classification
+- name: patient_fragile_stability
+  description: 'Patient Exhibiting Fragile Stability: meets Stable Recovery Patient criteria BUT has an
+    average of more than 2 missed appointments (AVG miss_appt over the patient''s encounters > 2) OR personal
+    SSE less than 3.
+
+    '
+  sql_expression: "d.rec_status = 'Stable' AND lower(o.txprogmet->>'Func_Impv') IN ('moderate', 'significant')\
+    \ AND (pm.avg_miss > 2 OR\n  ((CASE (d.funcassess->>'Soc_Sup') WHEN 'Strong' THEN 3 WHEN 'Adequate'\
+    \ THEN 2 WHEN 'Limited' THEN 1 WHEN 'Weak' THEN 0 END)\n   + (CASE (d.funcassess->>'Rel_Qual') WHEN\
+    \ 'Good' THEN 3 WHEN 'Fair' THEN 2 WHEN 'Poor' THEN 1 WHEN 'Conflicted' THEN 0 END)) < 3)"
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d JOIN main.encounters e ON e.ab_ref = d.asd_key JOIN main.treatmentbasics
+    t ON t.enc_ref = e.enc_key JOIN main.treatmentoutcomes o ON o.tx_ref = t.tx_key JOIN (SELECT pat_ref,
+    AVG(miss_appt) AS avg_miss FROM main.encounters GROUP BY pat_ref) pm ON pm.pat_ref = e.pat_ref
+  grain: one row per (assessment, treatment outcome) pair of an encounter
+  domains:
+  - patient_classification
+- name: peer_mentor_candidate
+  description: 'Peer Mentor Candidate Profile: recovery status ''Stable'', diagnosed for over 72 months
+    (dx_dur_m > 72), resilience score funcassess->>''Res_Scr'' >= 8 (integer in JSON).'
+  sql_expression: d.rec_status = 'Stable' AND d.dx_dur_m > 72 AND CAST((d.funcassess->>'Res_Scr') AS INTEGER)
+    >= 8
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment
+  domains:
+  - patient_classification
+- name: chronic_high_acuity_bipolar
+  description: 'Chronic High-Acuity Bipolar Cohort: primary diagnosis ''Bipolar'', diagnosed 120 months
+    or more, more than 3 previous hospitalizations.'
+  sql_expression: d.prim_dx = 'Bipolar' AND d.dx_dur_m >= 120 AND d.prev_hosp > 3
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment
+  domains:
+  - patient_classification
+- name: phq9_severity_band
+  description: 'PHQ-9 depression severity from score (0-27): 0-4 minimal, 5-9 mild, 10-14 moderate, 15-19
+    moderately severe, 20-27 severe.'
+  sql_expression: "CASE WHEN s.phq9_scr IS NULL THEN NULL WHEN s.phq9_scr <= 4 THEN 'Minimal' WHEN s.phq9_scr\
+    \ <= 9 THEN 'Mild'\n  WHEN s.phq9_scr <= 14 THEN 'Moderate' WHEN s.phq9_scr <= 19 THEN 'Moderately\
+    \ Severe' ELSE 'Severe' END"
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: main.assessmentsymptomsandrisk s
+  grain: one row per symptom/risk assessment
+  domains:
+  - value_scales
+- name: gad7_severity_band
+  description: 'GAD-7 anxiety severity from score (0-21): 0-4 minimal, 5-9 mild, 10-14 moderate, 15-21
+    severe.'
+  sql_expression: "CASE WHEN s.gad7_scr IS NULL THEN NULL WHEN s.gad7_scr <= 4 THEN 'Minimal' WHEN s.gad7_scr\
+    \ <= 9 THEN 'Mild'\n  WHEN s.gad7_scr <= 14 THEN 'Moderate' ELSE 'Severe' END"
+  source_model: main.assessmentsymptomsandrisk
+  from_sql: main.assessmentsymptomsandrisk s
+  grain: one row per symptom/risk assessment
+  domains:
+  - value_scales
+- name: stale_treatment_outcome_records
+  description: 'Stale Treatment Outcome Records: outcomes whose linked clinical encounter timestamp (encounters.time_mark)
+    is older than a defined interval (example 60 days; PARAMETER: change INTERVAL 60 DAY as asked). Note:
+    all time_mark values are 2025-02-19 08:30:58, so relative to the current date every outcome is stale
+    for a 60-day interval.
+
+    '
+  sql_expression: e.time_mark < CAST(now() AS TIMESTAMP) - INTERVAL 60 DAY
+  source_model: main.treatmentoutcomes
+  from_sql: main.treatmentoutcomes o JOIN main.treatmentbasics t ON t.tx_key = o.tx_ref JOIN main.encounters
+    e ON e.enc_key = t.enc_ref
+  grain: one row per treatment outcome
+  domains:
+  - protocols
+- name: post_hospitalization_response_time
+  description: 'Post-Hospitalization Response Time (PHRT): average time difference (days) between a patient''s
+    next scheduled appointment (encounters.nx_appt_dt, ''dd/mm/yyyy'') and their last hospitalization
+    date (last_hosp_dt, ''yyyy/mm/dd'') for the High-Risk Patient cohort (suic_risk ''High'' OR PHQ-9
+    > 15 OR GAD-7 > 15). Both dates parse for every row.
+
+    '
+  sql_expression: AVG(CAST(strptime(e.nx_appt_dt, '%d/%m/%Y') AS DATE) - CAST(strptime(d.last_hosp_dt,
+    '%Y/%m/%d') AS DATE)) FILTER (WHERE s.suic_risk = 'High' OR s.phq9_scr > 15 OR s.gad7_scr > 15)
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d JOIN main.encounters e ON e.ab_ref = d.asd_key JOIN main.assessmentsymptomsandrisk
+    s ON s.asr_key = d.asd_key
+  grain: one row per encounter-linked assessment with symptom and social records
+  domains:
+  - protocols
+  - patient_classification
+- name: annualized_hospitalization_risk
+  description: 'Annualized Hospitalization Risk (AHR) = total previous hospitalizations (prev_hosp) /
+    (diagnosis duration in months dx_dur_m / 12). NULL when dx_dur_m = 0 (one row).
+
+    '
+  sql_expression: d.prev_hosp / NULLIF(d.dx_dur_m / 12.0, 0)
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d
+  grain: one row per social/diagnosis assessment
+  domains:
+  - derived_rates
+- name: intensive_care_coordination_flag
+  description: 'Intensive Care Coordination Flag: AHR > 1.5 AND total monthly therapy hours (therapy_exp_intensity
+    numeric) < 8.'
+  sql_expression: d.prev_hosp / NULLIF(d.dx_dur_m / 12.0, 0) > 1.5 AND CAST(split_part(a.therapy_exp_intensity,
+    ' ', 1) AS DOUBLE) < 8
+  source_model: main.assessmentsocialanddiagnosis
+  from_sql: main.assessmentsocialanddiagnosis d JOIN main.assessmentbasics a ON a.ab_key = d.asd_key
+  grain: one row per social/diagnosis assessment
+  domains:
+  - derived_rates
+- name: annual_treatment_benefit
+  description: 'Annual Treatment Benefit: projected total reduction in depression score over 12 months
+    = numeric depr_improve_rate (points/month) x 12.'
+  sql_expression: CAST(split_part(a.depr_improve_rate, ' ', 1) AS DOUBLE) * 12
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: annual_treatment_burden
+  description: 'Annual Treatment Burden: projected side effects over 12 months = numeric med_side_eff_density
+    x number of medications x 12, assuming a standard number of medications. PARAMETER: the literal 1
+    is the number of medications -- replace it with the standard number given in the question.
+
+    '
+  sql_expression: CAST(split_part(a.med_side_eff_density, ' ', 1) AS DOUBLE) * 1 * 12
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: annualized_side_effect_score
+  description: 'Annualized Side Effect Score: projected total side effect burden over 12 months = numeric
+    med_side_eff_density x number of medications x 12 (same formula as Annual Treatment Burden). PARAMETER:
+    the literal 1 is the number of medications; replace it with the stated standard number.
+
+    '
+  sql_expression: CAST(split_part(a.med_side_eff_density, ' ', 1) AS DOUBLE) * 1 * 12
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: high_burden_prevalence_rate
+  description: 'High-Burden Prevalence Rate: percentage of patients (distinct pat_owner_ref) within a
+    cohort whose Annualized Side Effect Score is greater than a defined threshold. PARAMETERS: the literal
+    1 (number of medications) and 1.0 (score threshold) must be replaced with the question''s values;
+    restrict the cohort with WHERE.
+
+    '
+  sql_expression: 100.0 * COUNT(DISTINCT a.pat_owner_ref) FILTER (WHERE CAST(split_part(a.med_side_eff_density,
+    ' ', 1) AS DOUBLE) * 1 * 12 > 1.0) / NULLIF(COUNT(DISTINCT a.pat_owner_ref), 0)
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: aggregate over a cohort of assessments
+  domains:
+  - derived_rates
+- name: high_responder_profile
+  description: 'High Responder Profile: Annual Treatment Benefit at least five times the Annual Treatment
+    Burden (benefit >= 5 x burden) AND in therapy for at least 6 months (treatmentbasics.th_dur_m >= 6,
+    treatment linked through the assessment''s encounter). PARAMETER: the literal 1 is the number of medications
+    in the burden; replace with the stated standard number.
+
+    '
+  sql_expression: "CAST(split_part(a.depr_improve_rate, ' ', 1) AS DOUBLE) * 12\n  >= 5 * (CAST(split_part(a.med_side_eff_density,\
+    \ ' ', 1) AS DOUBLE) * 1 * 12)\nAND t.th_dur_m >= 6"
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a JOIN main.encounters e ON e.ab_ref = a.ab_key JOIN main.treatmentbasics
+    t ON t.enc_ref = e.enc_key
+  grain: one row per (assessment, treatment) pair
+  domains:
+  - derived_rates
+- name: projected_annual_qol_gain
+  description: 'Projected Annual QoL Gain = numeric treatment_cost_eff (QoL-points/$) x annual budget.
+    PARAMETER: the literal 1000 is an example annual budget in dollars; replace it with the budget given.
+
+    '
+  sql_expression: CAST(split_part(a.treatment_cost_eff, ' ', 1) AS DOUBLE) * 1000
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: high_qol_gain_candidate
+  description: 'High QoL Gain Candidate: Projected Annual QoL Gain greater than 100. PARAMETER: the literal
+    1000 is the example annual budget; replace it with the budget given (the 100 threshold is fixed).'
+  sql_expression: CAST(split_part(a.treatment_cost_eff, ' ', 1) AS DOUBLE) * 1000 > 100
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: projected_qol_gain_max_out_of_pocket
+  description: 'Projected QoL Gain from Max Out-of-Pocket = numeric treatment_cost_eff x the insurance
+    plan''s annual maximum out-of-pocket budget. PARAMETER: the literal 1000 is an example max out-of-pocket
+    amount; replace with the plan''s value.
+
+    '
+  sql_expression: CAST(split_part(a.treatment_cost_eff, ' ', 1) AS DOUBLE) * 1000
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: insurance_adjusted_qol_projection
+  description: 'Insurance-Adjusted QoL Projection = cost-effectiveness rate x budget(plan), budget 6000
+    if insurance type ''Private'', 3500 if ''Medicare'', 2500 if ''Medicaid'', 0 otherwise (incl. NULL
+    insur_type). Patient = a.pat_owner_ref.
+
+    '
+  sql_expression: CAST(split_part(a.treatment_cost_eff, ' ', 1) AS DOUBLE) * CASE p.insur_type WHEN 'Private'
+    THEN 6000 WHEN 'Medicare' THEN 3500 WHEN 'Medicaid' THEN 2500 ELSE 0 END
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a JOIN main.patients p ON p.pat_key = a.pat_owner_ref
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: break_even_therapy_hours
+  description: 'Break-Even Therapy Hours = ((Quality of Life Threshold / cost-effectiveness rate) / exchange
+    rate) / hourly rate. PARAMETERS: the literals 100.0 (QoL threshold), 1.0 (exchange rate) and 100.0
+    (hourly rate) are examples; replace them with the question''s values. NULL when cost-effectiveness
+    is 0.
+
+    '
+  sql_expression: ((100.0 / NULLIF(CAST(split_part(a.treatment_cost_eff, ' ', 1) AS DOUBLE), 0)) / 1.0)
+    / 100.0
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: annual_goal_achievement
+  description: Annual Goal Achievement = numeric recovery_goal_vel (goals/month) x 12.
+  sql_expression: CAST(split_part(a.recovery_goal_vel, ' ', 1) AS DOUBLE) * 12
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: inter_group_goal_achievement_gap
+  description: 'Inter-Group Goal Achievement Gap = |avg Annual Goal Achievement of group1 - avg of group2|,
+    groups being diagnostic cohorts (prim_dx). PARAMETERS: ''Bipolar'' and ''Depression'' are example
+    cohorts; replace with the two groups asked for.
+
+    '
+  sql_expression: "ABS(AVG(CAST(split_part(a.recovery_goal_vel, ' ', 1) AS DOUBLE) * 12) FILTER (WHERE\
+    \ d.prim_dx = 'Bipolar')\n  - AVG(CAST(split_part(a.recovery_goal_vel, ' ', 1) AS DOUBLE) * 12) FILTER\
+    \ (WHERE d.prim_dx = 'Depression'))"
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = a.ab_key
+  grain: aggregate over assessments with a diagnosis record
+  domains:
+  - derived_rates
+- name: intensive_therapy_standard_compliance
+  description: 'Intensive Therapy Standard Compliance: numeric therapy_exp_intensity (hours/month) >=
+    threshold. PARAMETER: the literal 8 is an example threshold; replace with the given one.'
+  sql_expression: CAST(split_part(a.therapy_exp_intensity, ' ', 1) AS DOUBLE) >= 8
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: therapeutic_roi
+  description: Therapeutic Return on Investment (T-ROI) = numeric depr_improve_rate / numeric therapy_exp_intensity
+    (hours/month); NULL when intensity is 0.
+  sql_expression: CAST(split_part(a.depr_improve_rate, ' ', 1) AS DOUBLE) / NULLIF(CAST(split_part(a.therapy_exp_intensity,
+    ' ', 1) AS DOUBLE), 0)
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a
+  grain: one row per assessment
+  domains:
+  - derived_rates
+- name: top_clinicians_by_goal_velocity
+  description: 'Top Clinicians by Goal Velocity: average recovery goal velocity (goals/month) of each
+    clinician''s assigned patients (patients.clin_lead_ref), GROUP BY p.clin_lead_ref, ranked descending.
+
+    '
+  sql_expression: AVG(CAST(split_part(a.recovery_goal_vel, ' ', 1) AS DOUBLE))
+  source_model: main.assessmentbasics
+  from_sql: main.patients p JOIN main.assessmentbasics a ON a.pat_owner_ref = p.pat_key
+  grain: one clinician (GROUP BY p.clin_lead_ref)
+  domains:
+  - derived_rates
+- name: caseload_complexity_score
+  description: 'Caseload Complexity Score: average hospitalization risk density (numeric hosp_risk_density,
+    risk-score/year) across all patients assigned to a clinician (patients.clin_lead_ref); GROUP BY p.clin_lead_ref.'
+  sql_expression: AVG(CAST(split_part(a.hosp_risk_density, ' ', 1) AS DOUBLE))
+  source_model: main.assessmentbasics
+  from_sql: main.patients p JOIN main.assessmentbasics a ON a.pat_owner_ref = p.pat_key
+  grain: one clinician (GROUP BY p.clin_lead_ref)
+  domains:
+  - derived_rates
+- name: cost_effectiveness_by_referral_source
+  description: 'Cost-Effectiveness by Referral Source: average numeric treatment_cost_eff (QoL-points/$)
+    grouped by facilities.r_source, the facility being that of the assessment''s encounter. GROUP BY f.r_source.
+
+    '
+  sql_expression: AVG(CAST(split_part(a.treatment_cost_eff, ' ', 1) AS DOUBLE))
+  source_model: main.assessmentbasics
+  from_sql: main.assessmentbasics a JOIN main.encounters e ON e.ab_ref = a.ab_key JOIN main.facilities
+    f ON f.fac_key = e.fac_id
+  grain: one referral source (GROUP BY f.r_source)
+  domains:
+  - derived_rates
+- name: risk_factor_profile
+  description: 'Risk Factor Profile: for each patient, primary diagnosis, substance use status and housing
+    stability drawn from the latest assessment (la; see data_model for "latest") and the patients row.
+    prim_dx/sub_use are NULL when the latest assessment has no diagnosis/symptom record.
+
+    '
+  sql_expression: struct_pack(prim_dx := d.prim_dx, sub_use := s.sub_use, house_stable := p.house_stable)
+  source_model: main.patients
+  from_sql: "main.patients p JOIN (SELECT a.ab_key, a.pat_owner_ref, a.hosp_risk_density, a.support_util_rate\n\
+    \  FROM main.assessmentbasics a LEFT JOIN main.encounters e ON e.ab_ref = a.ab_key\n  QUALIFY row_number()\
+    \ OVER (PARTITION BY a.pat_owner_ref ORDER BY e.time_mark DESC NULLS LAST, a.ab_key DESC) = 1) la\n\
+    \  ON la.pat_owner_ref = p.pat_key\nLEFT JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = la.ab_key\
+    \ LEFT JOIN main.assessmentsymptomsandrisk s ON s.asr_key = la.ab_key"
+  grain: one row per patient with at least one assessment
+  domains:
+  - protocols
+  - patient_classification
+- name: mandatory_case_review_flag
+  description: 'Mandatory Case Review Protocol: flag a patient for case review if their latest hosp_risk_density
+    (numeric) is greater than 1.5. Read-only: list flagged patients.'
+  sql_expression: CAST(split_part(la.hosp_risk_density, ' ', 1) AS DOUBLE) > 1.5
+  source_model: main.patients
+  from_sql: "main.patients p JOIN (SELECT a.ab_key, a.pat_owner_ref, a.hosp_risk_density, a.support_util_rate\n\
+    \  FROM main.assessmentbasics a LEFT JOIN main.encounters e ON e.ab_ref = a.ab_key\n  QUALIFY row_number()\
+    \ OVER (PARTITION BY a.pat_owner_ref ORDER BY e.time_mark DESC NULLS LAST, a.ab_key DESC) = 1) la\n\
+    \  ON la.pat_owner_ref = p.pat_key\nLEFT JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = la.ab_key\
+    \ LEFT JOIN main.assessmentsymptomsandrisk s ON s.asr_key = la.ab_key"
+  grain: one row per patient with at least one assessment
+  domains:
+  - protocols
+- name: at_risk_independent_living
+  description: 'At-Risk Independent Living Cohort: living_arr ''Alone'' AND recent (latest assessment)
+    support_util_rate numeric > 2.5.'
+  sql_expression: p.living_arr = 'Alone' AND CAST(split_part(la.support_util_rate, ' ', 1) AS DOUBLE)
+    > 2.5
+  source_model: main.patients
+  from_sql: "main.patients p JOIN (SELECT a.ab_key, a.pat_owner_ref, a.hosp_risk_density, a.support_util_rate\n\
+    \  FROM main.assessmentbasics a LEFT JOIN main.encounters e ON e.ab_ref = a.ab_key\n  QUALIFY row_number()\
+    \ OVER (PARTITION BY a.pat_owner_ref ORDER BY e.time_mark DESC NULLS LAST, a.ab_key DESC) = 1) la\n\
+    \  ON la.pat_owner_ref = p.pat_key\nLEFT JOIN main.assessmentsocialanddiagnosis d ON d.asd_key = la.ab_key\
+    \ LEFT JOIN main.assessmentsymptomsandrisk s ON s.asr_key = la.ab_key"
+  grain: one row per patient with at least one assessment
+  domains:
+  - patient_classification
+- name: unaddressed_case_review
+  description: 'Unaddressed Case Review Report: patients flagged for mandatory case review (latest hosp_risk_density
+    > 1.5) whose most recent encounter record (le) has no next appointment scheduled (nx_appt_dt NULL
+    or blank). Patients with no encounter at all are not included (they have no encounter record). DATA
+    NOTE: nx_appt_dt is never NULL/blank in the data, so the report is currently empty.
+
+    '
+  sql_expression: CAST(split_part(la.hosp_risk_density, ' ', 1) AS DOUBLE) > 1.5 AND (le.nx_appt_dt IS
+    NULL OR trim(le.nx_appt_dt) = '')
+  source_model: main.patients
+  from_sql: "main.patients p JOIN (SELECT a.ab_key, a.pat_owner_ref, a.hosp_risk_density\n  FROM main.assessmentbasics\
+    \ a LEFT JOIN main.encounters e ON e.ab_ref = a.ab_key\n  QUALIFY row_number() OVER (PARTITION BY\
+    \ a.pat_owner_ref ORDER BY e.time_mark DESC NULLS LAST, a.ab_key DESC) = 1) la\n  ON la.pat_owner_ref\
+    \ = p.pat_key\nJOIN (SELECT pat_ref, enc_key, nx_appt_dt FROM main.encounters\n  QUALIFY row_number()\
+    \ OVER (PARTITION BY pat_ref ORDER BY time_mark DESC, enc_key DESC) = 1) le\n  ON le.pat_ref = p.pat_key"
+  grain: one row per patient with an assessment and an encounter
+  domains:
+  - protocols
+- name: high_risk_escalation_candidates
+  description: 'High-Risk Escalation Protocol (read-only form): clinicians (c.clin_key) who are lead clinician
+    (patients.clin_lead_ref) for a patient whose most recent symptom/risk assessment (latest among the
+    patient''s assessments that have an assessmentsymptomsandrisk record) has suic_risk ''High''. These
+    are the clinicians whose care_coord would be set to ''Intensive''; UPDATE is forbidden, so list them
+    (with current c.care_coord) instead.
+
+    '
+  sql_expression: ls.suic_risk = 'High'
+  source_model: main.clinicians
+  from_sql: "main.patients p JOIN (SELECT a.pat_owner_ref, s.suic_risk\n  FROM main.assessmentbasics a\
+    \ JOIN main.assessmentsymptomsandrisk s ON s.asr_key = a.ab_key\n  LEFT JOIN main.encounters e ON\
+    \ e.ab_ref = a.ab_key\n  QUALIFY row_number() OVER (PARTITION BY a.pat_owner_ref ORDER BY e.time_mark\
+    \ DESC NULLS LAST, a.ab_key DESC) = 1) ls\n  ON ls.pat_owner_ref = p.pat_key\nJOIN main.clinicians\
+    \ c ON c.clin_key = p.clin_lead_ref"
+  grain: one row per patient with a symptom assessment
+  domains:
+  - protocols
+- name: intensive_caseload_summary
+  description: 'Intensive Caseload Summary: for clinicians with care_coord ''Intensive'' (WHERE c.care_coord
+    = ''Intensive''), their ID, the count of their patients (patients.clin_lead_ref) with a ''High'' suicide
+    risk on any assessment, and their facility''s resource level (facilities.com_res via c.fac_connect).
+    GROUP BY c.clin_key, f.com_res.
+
+    '
+  sql_expression: COUNT(DISTINCT p.pat_key) FILTER (WHERE s.suic_risk = 'High')
+  source_model: main.clinicians
+  from_sql: main.clinicians c LEFT JOIN main.patients p ON p.clin_lead_ref = c.clin_key LEFT JOIN main.assessmentbasics
+    a ON a.pat_owner_ref = p.pat_key LEFT JOIN main.assessmentsymptomsandrisk s ON s.asr_key = a.ab_key
+    LEFT JOIN main.facilities f ON f.fac_key = c.fac_connect
+  grain: one clinician (GROUP BY c.clin_key, f.com_res)
+  domains:
+  - protocols
+tables:
+- schema: main
+  table: facilities
+  columns:
+  - name: fac_key
+    type: TEXT
+    description: Facility primary key; encounters.fac_id and clinicians.fac_connect point here.
+  - name: r_source
+    type: TEXT
+    description: 'Referral source: ''Self'', ''Physician'', ''Court'', ''Emergency'', ''Family''. Used
+      by Cost-Effectiveness by Referral Source.'
+  - name: env_stress
+    type: TEXT
+    description: Environmental stressors in the service area; NULL when not assessed.
+  - name: life_impact
+    type: TEXT
+    description: 'Major life events impact: ''Mild'', ''Moderate'', ''Severe''; NULL when not collected.'
+  - name: season_pat
+    type: TEXT
+    description: Seasonal pattern observations; NULL when not tracked.
+  - name: legl_issue
+    type: TEXT
+    description: 'Legal issues: ''Resolved'', ''Pending'', ''Ongoing'' with mixed-case noise; compare
+      with lower(). NULL when not tracked.'
+  - name: spt_svc
+    type: TEXT
+    description: Support services, e.g. 'Case Management', 'Limited', 'Comprehensive', 'Adequate', 'Legal';
+      NULL when undocumented.
+  - name: com_res
+    type: TEXT
+    description: 'Community resources: ''Comprehensive'', ''Limited'', ''Adequate'', ''Extensive'' (Extensive
+      not present in data); NULL (171 rows) when mapping incomplete. Limited = few, Adequate = sufficient,
+      Comprehensive/Extensive = robust resources. FRAI scores 3/3/2/1.'
+  - name: emer_contact
+    type: TEXT
+    description: Emergency contact protocols; typically a numeric count stored as text.
+  - name: s_plan_stat
+    type: TEXT
+    description: 'Safety plan status: ''Not Needed'', ''Active'', ''Needs Update''; NULL when not tracked.'
+  - name: c_plan_stat
+    type: TEXT
+    description: 'Crisis plan readiness: ''Not Needed'', ''Active'', ''Needs Update''; NULL when not documented.'
+  - name: s_system_chg
+    type: TEXT
+    description: 'Support system changes: ''Improved'', ''Declined'', ''Variable''; NULL when not tracked.'
+- schema: main
+  table: clinicians
+  columns:
+  - name: clin_key
+    type: TEXT
+    description: Clinician primary key.
+  - name: clin_conf
+    type: TEXT
+    description: 'Clinician confidence: ''Medium'', ''Low'', ''High''.'
+  - name: assess_lim
+    type: TEXT
+    description: 'Assessment limitations: ''Cognitive'', ''Cultural'', ''Language'', ''Engagement'', ''Time'';
+      NULL when not completed.'
+  - name: docu_stat
+    type: TEXT
+    description: 'Documentation status: ''Complete'', ''Incomplete'', ''Pending''.'
+  - name: bill_code
+    type: TEXT
+    description: Billing CPT code, e.g. 'CPT90511'.
+  - name: nxt_rev_dt
+    type: DATE
+    description: Next credential review date.
+  - name: care_coord
+    type: TEXT
+    description: 'Care coordination level: ''Intensive'', ''Regular'', ''Limited''; NULL when undefined.
+      High-Risk Escalation sets it to ''Intensive'' (read-only here).'
+  - name: ref_need
+    type: TEXT
+    description: 'Referral needs: ''Services'', ''Testing'', ''Specialty''; NULL when not tracked.'
+  - name: f_up_type
+    type: TEXT
+    description: 'Follow-up type: ''Therapy'', ''Routine'', ''Crisis'', ''Assessment''.'
+  - name: f_up_freq
+    type: TEXT
+    description: 'Follow-up frequency: ''Weekly'', ''Biweekly'', ''Monthly'', ''Quarterly''.'
+  - name: fac_connect
+    type: TEXT
+    description: 'FK to facilities.fac_key: the clinician''s primary practice facility.'
+- schema: main
+  table: patients
+  columns:
+  - name: pat_key
+    type: TEXT
+    description: Patient primary key.
+  - name: pat_age
+    type: BIGINT
+    description: Age in years.
+  - name: pat_gender
+    type: TEXT
+    description: '''M'', ''F'', ''Other''.'
+  - name: pat_eth
+    type: TEXT
+    description: '''Other'', ''Hispanic'', ''White'', ''Black'', ''Asian''.'
+  - name: edu_level
+    type: TEXT
+    description: '''High School'', ''College'', ''Graduate'', ''Less than High School''.'
+  - name: emp_stat
+    type: TEXT
+    description: '''Retired'', ''Employed'', ''Unemployed'', ''Student'', ''Disabled''.'
+  - name: mari_stat
+    type: TEXT
+    description: '''Widowed'', ''Married'', ''Single'', ''Divorced'', ''Separated''.'
+  - name: living_arr
+    type: TEXT
+    description: 'Living arrangement: ''Alone'', ''Partner'', ''Family'', ''Group Home'' (data also has
+      ''Homeless''). ''Alone'' drives the At-Risk Independent Living Cohort.'
+  - name: insur_type
+    type: TEXT
+    description: '''Medicaid'', ''Medicare'', ''Private'' in data (documented also ''None'', ''Military'');
+      NULL when unavailable. Budget plan: Private 6000, Medicare 3500, Medicaid 2500, otherwise 0.'
+  - name: insur_stat
+    type: TEXT
+    description: '''Pending'', ''Approved'', ''Denied'', ''Active''.'
+  - name: disab_stat
+    type: TEXT
+    description: Disability status pending/permanent/temporary in mixed case; compare with lower(). NULL
+      when not assessed.
+  - name: house_stable
+    type: TEXT
+    description: 'Housing stability: ''Stable'', ''Homeless'', ''At Risk'', ''Temporary''.'
+  - name: cult_factor
+    type: TEXT
+    description: Cultural factors language/beliefs/family/multiple in mixed case; lower(). NULL when not
+      conducted.
+  - name: stigma_imp
+    type: TEXT
+    description: Stigma impact mild/moderate/severe in mixed case; lower(). NULL when not evaluated.
+  - name: fin_stress
+    type: TEXT
+    description: '''Severe'', ''Moderate'', ''Mild''; NULL when not performed.'
+  - name: clin_lead_ref
+    type: TEXT
+    description: 'FK to clinicians.clin_key: the patient''s primary (lead) clinician; defines ''patients
+      assigned to a clinician''.'
+- schema: main
+  table: assessmentbasics
+  columns:
+  - name: ab_key
+    type: TEXT
+    description: Assessment primary key; shared by assessmentsymptomsandrisk.asr_key and assessmentsocialanddiagnosis.asd_key;
+      encounters.ab_ref points here.
+  - name: a_type
+    type: TEXT
+    description: '''Initial'', ''Emergency'', ''Routine'', ''Follow-up''.'
+  - name: a_method
+    type: TEXT
+    description: '''Phone'', ''Self-report'', ''In-person'', ''Telehealth''.'
+  - name: a_dur_min
+    type: BIGINT
+    description: Assessment duration in minutes.
+  - name: a_lang
+    type: TEXT
+    description: '''Chinese'', ''French'', ''English'', ''Spanish''.'
+  - name: a_valid
+    type: TEXT
+    description: '''Questionable'', ''Invalid'', ''Valid''.'
+  - name: resp_consist
+    type: TEXT
+    description: '''Medium'', ''High'', ''Low''; NULL when not evaluated.'
+  - name: sympt_valid
+    type: TEXT
+    description: '''Questionable'', ''Valid'', ''Invalid''.'
+  - name: pat_owner_ref
+    type: TEXT
+    description: 'FK to patients.pat_key: the assessed patient.'
+  - name: depr_improve_rate
+    type: TEXT
+    description: 'TEXT ''<n> points/month'': PHQ-9 reduction per month of therapy. Numeric: CAST(split_part(x,''
+      '',1) AS DOUBLE).'
+  - name: therapy_exp_intensity
+    type: TEXT
+    description: 'TEXT ''<n> hours/month'': total therapy hours per month. Numeric via split_part.'
+  - name: med_side_eff_density
+    type: TEXT
+    description: 'TEXT ''<n> side-effects/med/month'': side-effect severity per medication per month.'
+  - name: crisis_event_rate
+    type: TEXT
+    description: 'TEXT ''<n> events/month'': crisis interventions plus emergency contacts per month.'
+  - name: func_recovery_eff
+    type: TEXT
+    description: 'TEXT ''<n> QoL-points/month'': total QoL score per month of therapy.'
+  - name: adherence_index
+    type: TEXT
+    description: TEXT '<n> adherence-score/appointment'.
+  - name: sympt_fluct_index
+    type: TEXT
+    description: 'TEXT ''<n> fluctuation-points/assessment'': average fluctuation of PHQ-9, GAD-7, mood
+      scores.'
+  - name: hosp_risk_density
+    type: TEXT
+    description: 'TEXT ''<n> risk-score/year'': hospitalizations per year from previous hospitalizations
+      and diagnosis duration (0-4 in data). Latest value > 1.5 triggers Mandatory Case Review.'
+  - name: med_change_freq
+    type: TEXT
+    description: 'TEXT ''<n> changes/month'': medication type/dose changes per month.'
+  - name: support_util_rate
+    type: TEXT
+    description: 'TEXT ''<n> support-level/contact'': social support used per emergency contact.'
+  - name: treatment_cost_eff
+    type: TEXT
+    description: 'TEXT ''<n> QoL-points/$'': QoL score per dollar of treatment.'
+  - name: recovery_goal_vel
+    type: TEXT
+    description: 'TEXT ''<n> goals/month'': recovery goals achieved per month of therapy.'
+- schema: main
+  table: encounters
+  columns:
+  - name: enc_key
+    type: TEXT
+    description: Encounter primary key; treatmentbasics.enc_ref points here.
+  - name: time_mark
+    type: TIMESTAMP
+    description: Encounter timestamp. All rows share 2025-02-19 08:30:58.912609, so 'latest' needs a tie-break.
+  - name: ab_ref
+    type: TEXT
+    description: 'FK to assessmentbasics.ab_key: the encounter''s assessment (the only route from an assessment
+      to a facility).'
+  - name: pat_ref
+    type: TEXT
+    description: FK to patients.pat_key; unique patients per facility = COUNT(DISTINCT pat_ref).
+  - name: clin_id
+    type: TEXT
+    description: Clinician of the encounter (local reference, not FK; all values exist in clinicians).
+  - name: fac_id
+    type: TEXT
+    description: Facility of the encounter (local reference, not FK; all values exist in facilities).
+      Defines 'at a facility'.
+  - name: miss_appt
+    type: REAL
+    description: Missed appointments (0-5). 0 = perfect attendance, higher (e.g. 5) = frequent absences.
+  - name: tx_barrier
+    type: TEXT
+    description: Barriers multiple/time/financial/transportation in mixed case; lower(). NULL when not
+      assessed.
+  - name: nx_appt_dt
+    type: TEXT
+    description: Next appointment date as text 'dd/mm/yyyy'; strptime(x,'%d/%m/%Y'). Never NULL in data.
+  - name: dq_score
+    type: BIGINT
+    description: Data quality score of the record.
+  - name: assess_complete
+    type: TEXT
+    description: Assessment completeness, a decimal fraction stored as text (e.g. '0.852').
+- schema: main
+  table: assessmentsymptomsandrisk
+  columns:
+  - name: asr_key
+    type: TEXT
+    description: PK = assessmentbasics.ab_key.
+  - name: phq9_scr
+    type: BIGINT
+    description: 'PHQ-9 total 0-27: 0-4 minimal, 5-9 mild, 10-14 moderate, 15-19 moderately severe, 20-27
+      severe.'
+  - name: phq9_sev
+    type: TEXT
+    description: 'Stored PHQ-9 severity label: ''Moderately Severe'', ''Mild'', ''Moderate'', ''Severe'';
+      NULL when not administered.'
+  - name: gad7_scr
+    type: BIGINT
+    description: 'GAD-7 total 0-21: 0-4 minimal, 5-9 mild, 10-14 moderate, 15-21 severe.'
+  - name: gad7_sev
+    type: TEXT
+    description: Stored GAD-7 label 'Mild', 'Moderate', 'Severe'; NULL when not administered.
+  - name: suic_ideation
+    type: TEXT
+    description: '''Intent'', ''Active'', ''Plan'', ''Passive'', ''None''; NULL when not completed.'
+  - name: suic_risk
+    type: TEXT
+    description: 'Suicide risk: ''Low'' (minimal risk), ''Medium'' (some concern), ''High'' (immediate
+      concern, need for intervention). Data also contains ''Severe''; definitions count only ''High''.'
+  - name: self_harm
+    type: TEXT
+    description: '''Recent'', ''Remote'', ''Current'', ''None'' (data also ''Past''); NULL when not conducted.'
+  - name: viol_risk
+    type: TEXT
+    description: '''Medium'', ''Low'', ''High''.'
+  - name: sub_use
+    type: TEXT
+    description: 'Substance use: ''Cannabis'', ''Opioids'', ''Alcohol'', ''Multiple'' (NULL when not assessed).
+      ''Opioids''/''Multiple'' used by Complex Care Needs.'
+  - name: sub_use_freq
+    type: TEXT
+    description: '''Daily'', ''Occasional'', ''Weekly'', ''Never''.'
+  - name: sub_use_sev
+    type: TEXT
+    description: '''Moderate'', ''Mild'', ''Severe''; NULL when not evaluated.'
+  - name: sympscores
+    type: JSON
+    description: JSON with integer keys Mood_Scr, Anx_Scr, Slp_Scr, App_Scr, En_Scr, Con_Scr, Int_Scr,
+      Hope_Scr (each ~1-10). Read with (sympscores->>'Mood_Scr') and cast.
+- schema: main
+  table: assessmentsocialanddiagnosis
+  columns:
+  - name: asd_key
+    type: TEXT
+    description: PK = assessmentbasics.ab_key.
+  - name: rec_status
+    type: TEXT
+    description: 'Recovery status: ''Relapse'', ''Stable'', ''Advanced'', ''Early''.'
+  - name: prim_dx
+    type: TEXT
+    description: 'Primary diagnosis: ''Anxiety'', ''PTSD'', ''Bipolar'', ''Schizophrenia'', ''Depression''.'
+  - name: sec_dx
+    type: TEXT
+    description: 'Secondary diagnosis: ''OCD'', ''Personality Disorder'', ''Substance Use'', ''Eating
+      Disorder''; NULL when not applicable.'
+  - name: dx_dur_m
+    type: BIGINT
+    description: Diagnosis duration in months (0-240; one row is 0).
+  - name: prev_hosp
+    type: BIGINT
+    description: Number of previous psychiatric hospitalizations.
+  - name: last_hosp_dt
+    type: TEXT
+    description: Last hospitalization date as text 'yyyy/mm/dd'; strptime(x,'%Y/%m/%d'). Never NULL in
+      data.
+  - name: qol_scr
+    type: BIGINT
+    description: Quality of Life score, ~1-100.
+  - name: func_imp
+    type: TEXT
+    description: Functional impairment mild/moderate/severe in mixed case (lower()); NULL (244) when not
+      assessed. Mild = minimal impact, Moderate = noticeable, Severe = significant disruption. PFIS scores
+      1/2/3.
+  - name: funcassess
+    type: JSON
+    description: 'JSON: Work_Func, Soc_Func, ADL_Func, Strs_Lvl (int), Cop_Skill, Res_Scr (int resilience
+      1-10), In_Level, Motiv_Level, Soc_Sup, Fam_Inv, Rel_Qual. Soc_Sup holds Strong/Moderate/Limited/NULL
+      in data (documented Strong/Adequate/Limited/Weak). Rel_Qual Poor/Conflicted/Good/Fair. Read with
+      (funcassess->>''key'').'
+- schema: main
+  table: treatmentbasics
+  columns:
+  - name: tx_key
+    type: BIGINT
+    description: Treatment primary key; treatmentoutcomes.tx_ref points here.
+  - name: enc_ref
+    type: TEXT
+    description: FK to encounters.enc_key.
+  - name: cur_med
+    type: TEXT
+    description: Comma-separated current medications, e.g. 'Antidepressant,Antipsychotic'; NULL when undocumented.
+  - name: med_adh
+    type: TEXT
+    description: 'Medication adherence: ''High'', ''Medium'', ''Low'', ''Non-compliant''.'
+  - name: med_side
+    type: TEXT
+    description: Side effects 'Mild', 'Moderate', 'Severe'; NULL when not monitored.
+  - name: med_chg
+    type: TEXT
+    description: '''Dose Adjustment'', ''Augmentation'', ''Switch''; NULL when not tracked.'
+  - name: th_type
+    type: TEXT
+    description: Therapy type, e.g. 'CBT', 'Group', 'Individual', 'Family', 'Psychodynamic'; NULL when
+      unspecified.
+  - name: th_freq
+    type: TEXT
+    description: '''Biweekly'', ''Monthly'', ''Weekly'', ''Quarterly''; NULL when undocumented.'
+  - name: th_dur_m
+    type: BIGINT
+    description: Therapy duration in months (High Responder requires >= 6).
+  - name: th_eng
+    type: TEXT
+    description: 'Therapy engagement: ''High'' (active), ''Medium'' (regular), ''Low'' (minimal participation);
+      data also ''Non-compliant'' (unscored). TES scores 3/2/1.'
+  - name: th_chg
+    type: TEXT
+    description: '''Frequency Change'', ''Modality Change'', ''No Change'', ''Therapist Change''; NULL
+      when not tracked.'
+  - name: crisis_int
+    type: REAL
+    description: Crisis interventions during treatment (0-5). 0 = none, higher (e.g. 3) = frequent.
+- schema: main
+  table: treatmentoutcomes
+  columns:
+  - name: tx_out_key
+    type: BIGINT
+    description: Outcome primary key.
+  - name: tx_ref
+    type: BIGINT
+    description: FK to treatmentbasics.tx_key (one outcome per treatment).
+  - name: tx_goal_stat
+    type: TEXT
+    description: 'Treatment goals status: ''Not Started'', ''In Progress'', ''Achieved'', ''Partially
+      Met'' (data also ''Modified'').'
+  - name: rec_goal_stat
+    type: TEXT
+    description: 'Recovery goals status: ''Not Started'', ''In Progress'', ''Achieved'', ''Partially Met''.'
+  - name: txprogmet
+    type: JSON
+    description: 'JSON: Th_Prog, Tx_Adh (High/Medium/Low/Non-compliant in data, clean case; Non-compliant
+      = no adherence, Low occasional, Medium regular, High/Compliant consistent), Tx_Resp (Poor/Partial/Good/Excellent,
+      NULL), Side_Burd, Symp_Imp, Func_Impv (minimal/moderate/significant mixed case), Work_Stat_Chg,
+      Sat_Scr (int), Ther_Alliance (strong/moderate/weak/poor mixed case), Tx_Eng, Tx_Sat. Read with (txprogmet->>''key'')
+      in parentheses, lower() for noisy keys.'

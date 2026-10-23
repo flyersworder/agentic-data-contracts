@@ -1,0 +1,182 @@
+\section{What Looked Like Delivery Was Knowledge}
+\label{sec:delivery}
+
+On the hard tasks the contract beats the manual by 20 to 23 points on the
+repeated panels (Section~\ref{sec:decomposition}). Both carry the same
+domain, so the obvious reading is delivery: the
+contract's rule is one lookup away when the query is written, while the
+manual's is buried in a long prompt. The experiments in this section
+replaced one difference between the arms at a time with a controlled one,
+in the order the transcripts suggested it, on \mSol{}, \mLuna{} and
+\mQwen{}. Their arms are named in Table~\ref{tab:arms}.
+
+\subsection{One fact the manual leaves out}
+\label{sec:one-fact}
+\label{sec:interpretation}
+
+The manual says a null fee field ``applies to all possible values''. The
+fee data never uses null for its three list-typed fields; it stores ``all''
+as an empty list, on 720 of 1{,}000 rules for \texttt{account\_type}. The
+contract's author took that from the data and built it into the matching
+predicate. \armMw{} is \armM{} plus that one fact, stated once in words
+and without SQL; its plan and the reading
+of each outcome were committed before its first run. On \mSol{} it
+recovers 77\% of the gap between manual and contract over all tasks
+(\armM{} 65.1\%, \armMw{} 77.3\%, \armC{} 81.0\%; 90 tasks to 28 over
+\armM{}), on \mQwen{} 41\%, and on \mLuna{} 38\%, as predicted for \mQwen{}
+and contrary to the prediction for \mLuna{}; over question shapes the
+three shares' intervals overlap widely (\mLuna{} 0.16 to 0.60), so the
+ordering across models is not established. The fact acts where it should:
+on the three families that need only the right set of fee rules, \armMw{}
+reaches the contract on \mSol{} (180 of 180 task-runs against 42 for
+\armM{}). On the three total-fee families it does nothing, and the
+contract still wins there by 32 tasks to 0.
+
+\subsection{A second fact, found in the transcripts}
+\label{sec:second-fact}
+
+On \mLuna{}'s 199 rule-matching tasks, those that match each payment
+against the table of fee rules, \armMw{} still trailed the contract by 29
+points. We read the transcripts of the 34 tasks the contract's text solved
+and \armMw{} missed in both of the first two repeats. All 34 add up the
+fees of many transactions, and about 30 turn on what happens when several
+fee rules match one transaction, which the manual never says. The
+contract's total-fee definition sums over every matched pair, the gold
+convention, which the data cannot settle, without marking it as an
+interpretation
+(Section~\ref{sec:authoring-paths}). The prose arm saw the overlap, invented a one-rule policy; twice it computed the gold and rejected it as double counting.
+
+\armMws{} adds that convention to \armMw{} as a second note. On
+\mQwen{}, none of whose transcripts was read, it lifts the prose on the
+rule-matching tasks by 42.7 points (112 tasks to 4), as registered in
+(28Q). On \mLuna{} the registered lift (28) is 28.5 points (95 tasks to
+4), but that comparison reuses the runs that picked the 34 inspected
+tasks. On the third repeat alone, which played no part in picking them, it
+is 28.6 points, so the selection does not inflate it overall. On the 165
+held-out tasks, whose transcripts nobody inspected, the lift is 19.2 points
+on \mLuna{} (64 tasks to 4) and 33.9 on \mQwen{} (78 to 4); having dropped
+tasks the manual failed twice, the held-out set if anything understates
+it. Over question shapes both lifts stay far from zero (\mLuna{} $+14$ to
+$+43$). \textbf{Most of what looked like delivery was these two
+facts.} With both stated, the prose matches the contract's text on
+\mLuna{}: the contract's text is $+0.8$ points ahead in the registered tie
+test (29), which paired a separately run arm by task and repeat, and the
+prose 3.7 points ahead when the two ran together (Table~\ref{tab:ladder}); over shapes the tie's interval,
+$-4.5$ to $+5.8$, just exceeds the 5-point bound.
+
+\subsection{The facts stated alike}
+\label{sec:alike}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+\tabhead{Arm} & \tabhead{Knows, and how} & \mLuna{} & \mQwen{} \\
+\midrule
+\armMw{} & one fact, prose & 53.9$^\dagger$ & 43.4$^\dagger$ \\
+\armMws{} & both facts, prose & 84.1 & 84.1 \\
+\armT{} & contract files, prompt & 80.4 & 70.7 \\
+\armTws{} & files + notes, prompt & \textbf{87.8} & \textbf{89.6} \\
+\armC{} & contract, governed tools & 82.6$^\dagger$ & 79.6$^\dagger$ \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy (\%) on the 199 rule-matching DABStep tasks, $k{=}3$.
+\mQwen{}: end-to-end view. The middle three arms ran together in each
+repeat of the facts-alike run, so only their comparisons are paired.
+$^\dagger$From earlier runs, text or tools (\mLuna{}) and second fact
+(\mQwen{}), not rerun. The two rerun arms, \armMws{} and \armT{}, stayed
+within 3 points of their earlier runs on every subset.}
+\label{tab:ladder}
+\end{table}
+
+On \mQwen{}, the prose with both notes led the contract's text by 16.6
+points in the second-fact run (end-to-end; 13.4 when they ran together,
+Table~\ref{tab:ladder}), which no prediction foresaw. The two did not state
+the facts alike. The
+prose states each fact as a note of its own. The contract states the
+summing convention less plainly: it speaks of each transaction ``joined to
+\emph{the} fee rule'' before saying to sum. And its empty-list clause
+comes 28{,}000 characters after a matching rule that mentions null only.
+\mQwen{} often took ``the fee rule'' at its word: an approximate keyword
+count finds single-rule reasoning in 103 of its 199 rule-matching runs on
+the contract's text, against 37 on \mLuna{}.
+
+\armTws{} is \armT{} plus the same two notes, word for word, and ran
+together with \armMws{} and \armT{} (Table~\ref{tab:ladder}). The run
+registered a tie, (30) and (30Q), and fixed in advance how a failure with
+the contract's text ahead would read: with the facts alike, the
+contract's form adds to them. That is what happened. On the rule-matching
+tasks the contract's text leads the prose by 3.7 points on \mLuna{} (32
+tasks to 13; 95\% interval over question shapes $+0.6$ to $+7.9$, 11
+shapes to 2) and 5.5 on \mQwen{} (35 to 10; $-0.4$ to $+10.4$ over shapes,
+$+1.3$ to $+9.3$ over families). \textbf{With the facts equal, the contract's representation adds about
+4 to 6 points on the rule-matching tasks,} with four qualifications. It
+is a package: the contract states the facts in its own structure and with
+SQL definitions, not only in another layout. Elsewhere the models part: on the other 202 tasks
+\mLuna{}'s noted text leads the prose by 9.5 points (51 tasks to 14),
+mostly in the fee-average families, and \mQwen{}'s trails it by 5.3 (37 to
+47, not significant; \emph{expl.}). \armTws{} states each
+fact twice, once in the contract and once in the note, so part of it may
+be repetition. And it is about the size of the drift between two runs of
+one arm: across eight such reruns the drift ranged from $-2.8$ to $+1.7$
+points, none of it distinguishable from zero over shapes (\emph{expl.}). On the held-out tasks the lead is 4.6 points on
+\mQwen{} and 2.2 on \mLuna{} (\emph{expl.}), not detectably different from
+the inspected ones'.
+
+\subsection{What the governed tools add}
+\label{sec:tools-add}
+
+\armT{} and \armC{} hold the same contract and differ in delivery: the
+files in the prompt over plain tools, or the governed lookups, which also
+bring the validator, the tool interface and the instruction to look
+things up.
+\textbf{Looking a rule up as the query is written helps on some fee
+tasks, and which ones depends on the model.} On \mLuna{}'s
+rule-matching tasks the two tie ($-0.7$ points, 15 tasks to 18). On its
+other 202 tasks the governed arm leads by 5 points (38 tasks to 15,
+$p{=}0.002$, \emph{expl.}), but 33 of the 38 come from three families that
+average fees over the rule table, and over question shapes the interval,
+$-1.8$ to $+11.1$, includes zero. In those families, 50 runs
+went right for the governed arm and wrong for the text arm on the same
+task and repeat. In every one, the text arm's answer equals, to six
+decimals, what one gets by dropping the wildcard rules. The text arm had
+the rule three times in its 60{,}000-character prompt. The governed arm
+got it from a call made just before its first fee query: the matching
+metric's lookup in 34 runs, \texttt{lookup\_domain} or the governed
+\texttt{describe\_table} in 16. The validator played no part; none of the
+50 had a rejection. On \mQwen{} the tools add 10.1 points on the
+rule-matching tasks, as registered in (27) (64 tasks to 16; over shapes
+$+3$ to $+17$), and trail the text on the rest by 6.9 (30 to 49, not
+distinguishable from zero over shapes). Retrieval next to the point of use is the mechanism DocPrompting
+exploits for code~\cite{docprompting}; here its effect depends on the
+model and the family.
+
+\subsection{Complete prose carries even a procedure}
+\label{sec:procedures}
+
+Two blind model raters scored the procedural load of the knowledge each
+question needs, on both benchmarks shuffled together. On DABStep the
+contract's gain sits on the high-load tasks (119 tasks to 20, none on the
+rest), where nearly every task is the fee procedure. That confounds ``a
+rule-matching procedure'' with ``this procedure'', so the constructed
+questions build new ones (Section~\ref{sec:benchmarks}): a rule-matching procedure
+and a composite of dependent formulas for each of three databases, each
+stated completely, once plainly and once in the style of a business manual
+at twice the length. Every knowledge arm, prose or contract, in either
+style, scores between 95.6\% and 100\% on each kind of piece pooled over
+the three databases (90\% at the lowest single database), on \mLuna{},
+\mSol{}, and \mQwen{} (added after that ceiling was seen).
+\textbf{For these procedures, neither the type of knowledge nor the style
+of the prose decided it}; on LiveSQLBench's own determined tasks the high-load ones gain
+nothing from the contract either (8 tasks to 5, $p{=}0.58$).
+
+\paragraph{Summary.} The contract's lead over the manual was mostly two
+facts the manual did not state. With the facts worded alike, the
+contract's representation adds about 4 to 6 points on the rule-matching tasks, more
+or less elsewhere depending on the model, and its lookups help on some fee
+families. How
+long a prompt the knowledge sits in is a separate question;
+Section~\ref{sec:scale} finds no loss up to four times the contract's size,
+in an easy regime.

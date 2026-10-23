@@ -1,19 +1,34 @@
-% Submission driver: acmart sigconf, no appendix. Shares every section file
-% with main.tex; only the class, the top matter and the appendix switch
-% differ. Build with `make pvldb.pdf`.
+% Submission driver: the official PVLDB Vol. 20 template, no appendix.
+% acmart.cls (v2.19), pvldb.sty and ACM-Reference-Format.bst are vendored
+% unmodified from github.com/vldbproceedings/VLDB-Template at 39c95f5; the
+% guidelines make deviating from them grounds for desk rejection. Shares
+% every section file with main.tex; only the class, the top matter and the
+% appendix switch differ. Build with `make pvldb.pdf`.
 \PassOptionsToPackage{hyphens}{url}
 \documentclass[sigconf,nonacm]{acmart}
-\settopmatter{printacmref=false}
+
+%%% VLDB block start %%%
+\usepackage{pvldb}
+%%% VLDB block end %%%
+
+\renewcommand\vldbdoi{XX.XX/XXX.XX}
+\renewcommand\vldbpages{XXX-XXX}
+\renewcommand\vldbavailabilityurl{https://github.com/flyersworder/agentic-data-contracts}
 
 \usepackage{array}
 \usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 
 \newif\ifextended
 \extendedfalse
 \input{preamble}
 
-\title{Which Part of the Context Layer Does the Work?}
-\subtitle{Separating Semantic Content from Retrieval Scaffolding in Text-to-SQL Agents}
+% The category tag is required at review and dropped at camera-ready.
+\title[Which Part of the Context Layer Does the Work?]{Which Part of the Context Layer Does the Work? [Experiment, Analysis \& Benchmark]}
+\subtitle{Separating Knowledge from Delivery in Text-to-SQL Agents, on Two Benchmarks}
 \author{Qing Ye}
 \affiliation{\institution{Independent Researcher}\country{}}
 \email{qing.leafnode@gmail.com}
@@ -27,15 +42,20 @@
 
 \maketitle
 
+%%% VLDB block start %%%
+\vldbtopmatter
+%%% VLDB block end %%%
+
 \input{sections/01-intro}
 \input{sections/02-background}
 \input{sections/03-system}
 \input{sections/04-design}
-\input{sections/05-results}
-\input{sections/06-why}
-\input{sections/07-governance}
-\input{sections/08-threats}
-\input{sections/09-conclusion}
+\input{sections/05-knowledge}
+\input{sections/06-delivery}
+\input{sections/07-authoring}
+\input{sections/08-buys}
+\input{sections/09-threats}
+\input{sections/10-conclusion}
 
 \label{end:content}
 

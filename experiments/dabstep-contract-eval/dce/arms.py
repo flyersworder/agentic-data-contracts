@@ -10,6 +10,7 @@ from dce.benchmarks.dabstep import (  # noqa: F401
     DATA_NOTE,
     EXTRA_ARMS,
     GOVERNED_ARMS,
+    SUM_NOTE,
     build_arm,
 )
 from dce.tools import (  # noqa: F401

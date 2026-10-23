@@ -1,0 +1,66 @@
+{
+  "g1": [
+    {
+      "sentinel": "*",
+      "why": "Conventional glob-style wildcard; no record maker, technology, alert, warranty status, capacity band, or volume tier has this value."
+    },
+    {
+      "sentinel": "ANY",
+      "why": "Conventional rule-engine unrestricted-criterion marker, absent from all six corresponding record-field domains."
+    },
+    {
+      "sentinel": "ALL",
+      "why": "Common all-values marker, absent from all six record-field domains."
+    },
+    {
+      "sentinel": "<ANY>",
+      "why": "Explicit rules-engine token, absent from all six record-field domains."
+    }
+  ],
+  "g2": [
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.energy_yield.availability_pct",
+      "stored": "v / 100",
+      "recover": "v * 100",
+      "kind": "percentage-to-fraction scale",
+      "named_by_author_prompt": true,
+      "silent_because": "Values 0.95–0.9999 still parse as numbers and yield finite, plausible potential-yield and loss ratios, but greatly inflate calculated losses.",
+      "data_shows": "[56] explicitly says availability_pct is a percentage on a 0-to-100 scale; [8] says 99% is typical availability. Existing values span 95.00–99.99, hence changed values span 0.9500–0.9999, including PV937101: 97.73 -> 0.9773; PV945724: 96.91 -> 0.9691. These values are fractional availability, so multiply by exactly 100 to obtain the documented percent."
+    },
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.energy_yield.availability_pct",
+      "stored": "100 - v",
+      "recover": "100 - v",
+      "kind": "complementary uptime-to-downtime reversed scale",
+      "named_by_author_prompt": false,
+      "silent_because": "Changed values 0.01–5.00 are valid percent numerals; plugging these into C gives finite positive energy yields, albeit hugely exaggerated.",
+      "data_shows": "[8] defines System Availability as 1 minus System Unavailability, and [4] names System Unavailability; [56] demands availability_pct on a 0-to-100 percent scale. The original 95.00–99.99 availability produces stored 0.01–5.00, for example PV937101 2.27 and PV945724 3.09: these are the complementary downtime percentages, inverted exactly with 100 - v."
+    },
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.efficiency.soil_loss_pct",
+      "stored": "100 - v",
+      "recover": "100 - v",
+      "kind": "complementary soil-loss-to-clean-power reversed scale",
+      "named_by_author_prompt": false,
+      "silent_because": "Changed 85.01–99.98 values are valid 0–100 percentages and C still returns finite positive numbers (despite overstated recoverable losses).",
+      "data_shows": "[2] defines soil loss as percent by which power falls relative to perfectly clean panels, and [56] uses (1 - L_soil/100). Original values 0.02–14.99 become 99.98–85.01 respectively (PV937101 13.41 -> 86.59; PV945724 11.27 -> 88.73), giving the complementary retained-clean-power percent. The exact inverse is 100 - v."
+    },
+    {
+      "table": "electrical_performance",
+      "column": "elec_perf_snapshot",
+      "json_path": "$.efficiency.soil_loss_pct",
+      "stored": "v / 100",
+      "recover": "v * 100",
+      "kind": "percentage-to-fraction scale",
+      "named_by_author_prompt": true,
+      "silent_because": "The stored 0.0002–0.1499 is valid 0–100 numeric percentage data, so C computes plausible but understated recoverable loss.",
+      "data_shows": "[56] explicitly requires the soil_loss_pct to be a percentage on a 0-to-100 scale; the changed values 0.0002–0.1499 are fractions corresponding to original 0.02–14.99 percent (PV937101 13.41 -> 0.1341; PV945724 11.27 -> 0.1127), with the exact fractional-percent conversion being multiplication by 100."
+    }
+  ]
+}

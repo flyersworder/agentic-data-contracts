@@ -1,0 +1,243 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: sports_events, author: claudeopus5.5
+version: '1.0'
+name: sports_events
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Championship motor-racing (Formula-1 style) data: circuits, drivers, constructors (teams),
+      races, constructor race results, driver/constructor championship standings after each race, lap
+      times, pit stops, qualifying and sprint results. Several tables are SPARSE SAMPLES (e.g. lap_times
+      holds at most 3 laps per driver per race; driver_standings covers 877 races with 2000 rows), and
+      there is NO main-race result table (no per-driver race finishing position, grid, race time or race
+      points).'
+    preferred: true
+    tables:
+    - circuits
+    - drivers
+    - races
+    - constructor_results
+    - constructors
+    - constructor_standings
+    - driver_standings
+    - lap_times
+    - pit_stops
+    - qualifying
+    - sprint_results
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: race_weekend
+    summary: Race weekend structure, qualifying format, sprint sessions and schedule NULLs
+    description: 'RACE WEEKEND STRUCTURE: a typical race weekend consists of several sessions: up to three
+      Free Practice sessions (fp1, fp2, fp3) for teams to tune their cars, a Qualifying session to determine
+      the starting order for the main race, and the Grand Prix Race itself. Some weekends also include
+      a Sprint session.
+
+      QUALIFYING FORMAT: qualifying is a multi-stage knockout divided into three parts: Q1, Q2 and Q3
+      (qualifying.q1_r, q2_r, q3_r). In Q1 all drivers compete and the slowest are eliminated. The remaining
+      drivers proceed to Q2, where more are eliminated. The final top drivers advance to Q3 to compete
+      for Pole Position. NULL q2_r / q3_r therefore means the driver did not set a result in that stage
+      (e.g. eliminated earlier).
+
+      SPRINT SESSION: a Sprint is a shorter race held on some race weekends. It has its own abbreviated
+      qualifying and awards fewer championship points than the main Grand Prix. Its result determines
+      the starting grid for the main race. The inclusion of a Sprint session modifies the standard Race
+      Weekend Structure. Sprint results are in sprint_results (sprint_performance JSON).
+
+      INDETERMINATE EVENT TIMINGS: when the date or time for any session (practice, qualifying, sprint,
+      or race) is not provided (JSON null in races.event_schedule), it signifies that the schedule for
+      that session is To Be Determined (TBD), not applicable for the event, or not yet published. It is
+      never a real date/time; exclude it rather than defaulting it.
+
+      DATA FORMAT (checked): races.event_schedule->>''date_set'' is text ''YYYY/MM/DD'' (6 races have
+      it NULL); parse with strptime(event_schedule->>''date_set'', ''%Y/%m/%d''). Session dates use the
+      same ''YYYY/MM/DD'' format, times ''HH:MM:SS''. races.yr is the season.
+
+      '
+    tables:
+    - main.races
+    - main.qualifying
+    - main.sprint_results
+  - name: data_availability
+    summary: What missing (NULL) values mean for circuits, drivers and constructors
+    description: 'CIRCUIT LOCATION: when a circuit''s city, latitude, or longitude are not provided, this
+      information was not supplied or is unknown in the source data feed. CIRCUIT ELEVATION: when a circuit''s
+      elevation in meters is not provided, this specific data point was not recorded for the circuit (most
+      circuits have NULL elevation_m). DRIVER IDENTIFICATION: when a driver''s permanent racing number
+      or three-letter identifier code is unavailable, one has not been officially assigned or it is not
+      present in the dataset (835 of 861 drivers have NULL racing_number; numbers are stored as text like
+      ''14.0''). CONSTRUCTOR NATIONALITY: when a constructor''s nationality (constructors.naty) is not
+      specified, the team''s country of origin is not recorded in the dataset. In all cases a NULL is
+      "unknown", never zero or an empty value; do not count it as a value.
+
+      '
+    tables:
+    - main.circuits
+    - main.drivers
+    - main.constructors
+  - name: championship_points
+    summary: Race and sprint points systems, points finish, constructor race points
+    description: 'RACE POINTS SYSTEM: points are awarded to the top 10 finishers of the main race: 1st
+      25, 2nd 18, 3rd 15, 4th 12, 5th 10, 6th 8, 7th 6, 8th 4, 9th 2, 10th 1. SPRINT POINTS SYSTEM: points
+      are awarded to the top 8 finishers of a Sprint: 1st 8, 2nd 7, 3rd 6, 4th 5, 5th 4, 6th 3, 7th 2,
+      8th 1 (metric sprint_championship_points). POINTS FINISH: a race classification within the top positions
+      that are awarded points per the race points system, i.e. finishing position 1-10 in the main race.
+      CONSTRUCTOR''S TOTAL RACE POINTS: the points a constructor scores in one race from all of its drivers
+      who had a Points Finish; stored directly as constructor_results.scoreval. DATA NOTES (checked):
+      there is no main-race per-driver result table, so a driver''s race Points Finish cannot be determined
+      from this database. The stored sprint points (sprint_performance->>''points'') follow 8-7-6-5-4-3-2-1
+      for most sprints but 3 sprint events (2021) store 3-2-1 for the top three; the documented system
+      is the 8..1 scale. driver_standings.acc_pt and constructor_standings.scr_tot are CUMULATIVE season
+      totals after the referenced race — never SUM them across races; take the value at the latest race
+      (MAX within a season).
+
+      '
+    tables:
+    - main.constructor_results
+    - main.sprint_results
+    - main.driver_standings
+    - main.constructor_standings
+  - name: race_results
+    summary: Race-result definitions (winner, podium, hat trick, etc.) and which are not computable
+    description: 'DEFINITIONS (verbatim meaning): RACE WINNER: the driver classified in 1st place at the
+      conclusion of the main Grand Prix race. PODIUM FINISH: a driver''s final rank is 1st, 2nd or 3rd
+      (a race or season result). FASTEST LAP AWARD: given to the driver who achieves the single quickest
+      lap time during a race, under the condition that they must also secure a Points Finish (top 10).
+      HAT TRICK: in the same event the driver secures Pole Position, is the Race Winner, and receives
+      the Fastest Lap Award. GRAND CHELEM: a Hat Trick plus leading every lap of the race from start to
+      finish. CONSTRUCTOR''S DOUBLE PODIUM: both drivers from the same team achieve a Podium Finish in
+      the same race. POSITION GAIN / LOSS: G_pos = P_start - P_finish (starting grid position minus final
+      race position); positive = gain. RACE TIME DELTA TO WINNER: T_driver - T_winner, total race times
+      in seconds. RACE PERFORMANCE INDEX (RPI): (21 - P_finish) + G_pos. ADJUSTED RACE TIME DELTA: Race
+      Time Delta to Winner - sum of the driver''s Pit Stop Durations in seconds. TEAM''S COMBINED RACE
+      RESULT (TCRR): finishing position of driver 1 + finishing position of driver 2; lower is better,
+      minimum (1+2=3) when a team achieves a Double Podium with a Race Winner. CLUTCH PERFORMER: Position
+      Gain / Loss greater than 5 AND a Podium Finish in the same race. DOMINANT VICTORY: the Race Winner''s
+      Race Time Delta over the second-place driver is greater than 5 seconds. STRATEGIC MASTERCLASS: a
+      Race Winner who also achieves one or more Efficient Pit Stops (< 2.5 s) in that race. HIGH-ALTITUDE
+      ACE: RPI at a High-Altitude Circuit (elevation > 800 m) at least 20% higher than the driver''s seasonal
+      average RPI (RPI_high >= 1.2 * avg RPI). UNDERDOG WIN: a Race Winner whose Driver''s Points Per
+      Race (PPR) prior to the event is less than 5. FLAWLESS TEAM WEEKEND: the driver secures Pole Position
+      and is the Race Winner, and every pit stop for their car is an Efficient Pit Stop.
+
+      NOT COMPUTABLE HERE: this database has no main-race result table — no per-driver race finishing
+      position, starting grid, race total time, status or race points. Lap data (lap_times) is a sample
+      of at most 3 laps per driver per race, so "fastest lap of the race" and "led every lap" cannot be
+      established either. Therefore Race Winner, Fastest Lap Award, Hat Trick, Grand Chelem, Double Podium,
+      Position Gain/Loss, Race Time Delta, RPI, Adjusted Delta, TCRR, Clutch Performer, Dominant Victory,
+      Strategic Masterclass, High-Altitude Ace, Underdog Win and Flawless Team Weekend have no metric;
+      answer that the data does not support them rather than substituting championship standings (driver_standings.px
+      is the CHAMPIONSHIP rank after a race, not the race finishing position). Also no pit stop in the
+      data is under 2.5 s (see pit_stops), so any definition requiring an Efficient Pit Stop is empty.
+      Podium Finish IS computable as a season/standings rank (metric podium_finish) and for sprints (sprint
+      final_position <= 3); Sprint Winner is computable (metric sprint_winner).
+
+      '
+    tables:
+    - main.driver_standings
+    - main.sprint_results
+    - main.lap_times
+    - main.qualifying
+  - name: laps_and_pits
+    summary: Lap times, pit stops, consistency, strategy clusters
+    description: 'Lap time in seconds = msec_val / 1000; pit stop duration in seconds = ms_count / 1000
+      (use 1000.0 to avoid integer division). Efficient Pit Stop: total stationary time less than 2.5
+      seconds. Average Stops Per Car (per race) = total pit stops / number of unique cars that made a
+      pit stop. Pit Strategy Cluster on that average: ''Single-Stop Race'' (< 1.5), ''Standard Two-Stop''
+      (1.5 to < 2.5), ''High-Strategy Event'' (>= 2.5). Lap Time Consistency is the POPULATION standard
+      deviation (divide by n) of a driver''s lap times in a race. Tyre Management Index = 1 / (LTC * (1
+      + number of pit stops)), higher better. DATA (checked): pit_stops.ms_count ranges 13,206 to 3,037,323
+      ms (it is the recorded pit duration, typically ~22 s, which includes pit-lane time); no row is below
+      2,500 ms. lap_times has no NULL msec_val; at most 3 laps per driver-race are present, so averages
+      and deviations are over the recorded laps only.
+
+      '
+    tables:
+    - main.lap_times
+    - main.pit_stops
+  - name: qualifying_performance
+    summary: Pole position, deficit to pole, qualifying clusters and pole-based probabilities
+    description: 'Pole Position: setting the fastest lap time in the final stage (Q3) of qualifying; the
+      pole sitter is the qualifying row with px_pos = 1. Qualifying Time Deficit to Pole = driver''s best
+      qualifying lap (seconds, best of Q1/Q2/Q3) minus the pole sitter''s time. Qualifying Specialist:
+      deficit < 0.2 s. Qualifying Performance Cluster on a driver''s AVERAGE deficit: ''Pole Threat''
+      (< 0.15 s), ''Mid Gap'' (0.15 s to < 0.4 s), ''Backmarker'' (>= 0.4 s). Pole-based probabilities
+      (assumptions to apply as stated): race win 35% if started from Pole Position, 5% otherwise; fastest
+      lap 25% from pole, 8% otherwise. DATA (checked): q1_r/q2_r/q3_r are text ''M:SS.mmm'' (all non-NULL
+      values match this) and must be parsed to seconds; only 86 of 486 qualifying races include the px_pos
+      = 1 row, so deficits exist only for those races.
+
+      '
+    tables:
+    - main.qualifying
+  - name: constructors_performance
+    summary: Reliability, CPS, significant participation, reliable-and-performing teams
+    description: 'Constructor Reliability Rate = finishes / starts * 100, where each constructor_results
+      row is one start (one row per constructor per race, checked) and a start is ''finished'' if the
+      status mark st_mark is not specially marked, i.e. st_mark IS NULL (only one row has st_mark = ''D'').
+      Constructors with Significant Participation: started more than 10 races (> 10, not >= 10); use it
+      as the filter for reliability-rate comparisons. Constructor''s Performance Score (CPS) = season
+      total points (sum of constructor_results.scoreval over the season''s races) * reliability rate /
+      100. Reliable and Performing Constructor: reliability rate above 95% (> 95) AND CPS in the top three
+      for the season.
+
+      '
+    tables:
+    - main.constructor_results
+    - main.constructors
+    - main.races
+  - name: drivers_performance
+    summary: Driver age, PPR, Driver Performance Value, veteran's podium, high-altitude factor
+    description: 'Driver Age = floor((current date - birth date) / 365.25) — age as of today, not at the
+      race. Driver''s Points Per Race = cumulative points / races participated. Driver Performance Value
+      = PPR / Driver Age. Veteran''s Podium: Driver Age >= 35 and a Podium Finish. High-Altitude Circuit:
+      elevation greater than 800 m (only Kyalami 1460 m and Autodromo Hermanos Rodriguez 2227 m qualify;
+      NULL elevation is unknown, not low). High-Altitude Performance Factor = driver''s average lap time
+      at High-Altitude Circuits / driver''s season average lap time. DATA (checked): birth_date is ''YYYY-MM-DD''
+      text or NULL (260 drivers NULL -> age unknown). JSON access: driver_identity->''name''->>''surname'',
+      circuits location_metadata->''coordinates'' ->>''elevation_m'' (cast to DOUBLE).
+
+      '
+    tables:
+    - main.drivers
+    - main.driver_standings
+    - main.circuits
+    - main.lap_times
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: Compute every documented definition with the metric of the same name; keep thresholds
+      exact (efficient pit stop < 2.5 s, high altitude > 800 m, significant participation > 10 races,
+      reliability > 95%, qualifying specialist < 0.2 s, veteran age >= 35, cluster boundaries).
+    enforcement: warn
+  - name: null_is_unknown
+    description: NULL / JSON null values mean unknown, not recorded, TBD or not assigned; never treat
+      them as 0 or as a valid value, and exclude them from counts of known values.
+    enforcement: warn
+  - name: no_race_result_substitution
+    description: There is no main-race result table. Do not answer race-winner / race-position questions
+      from championship standings (driver_standings.px) or sampled lap positions; state that the data
+      does not record main-race classification.
+    enforcement: warn
+  - name: cumulative_standings
+    description: driver_standings.acc_pt, topmark and constructor_standings.scr_tot, trophy_w are cumulative
+      within a season; do not sum them across races.
+    enforcement: warn

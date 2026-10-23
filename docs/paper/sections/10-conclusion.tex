@@ -1,0 +1,44 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+Context layers work; the open question was which part of one does the
+work. On two benchmarks and seven models the answer is the knowledge:
+emptying a contract removes most of its gain, and what looked like an
+advantage of delivery was mostly two facts the manual left out. A contract
+pays where it states something true that the documentation leaves out;
+its author can supply what the documentation or the data determines, and
+a convention only when the gold shares the author's default.
+
+Delivery still matters, for other reasons. On the GPT models, looking a
+contract up is cheaper from twice a database's size, and it runs where the
+prompt no longer fits; its log traces a wrong answer to the entry behind
+it. No run whose prompt stated the forbidden operations, in the tools or
+as text, corrupted its database copy, against 50 runs without them,
+nearly all on one model.
+
+\ifextended
+\paragraph{Future work.} The knowledge ladder run together on two models,
+with a retrieval arm over the original documentation; human raters on a
+sample of the determinacy labels; a second benchmark whose documentation
+states rules once for many tasks; a scale test with paraphrased questions
+and padding from one warehouse; and a validator that can state ``a filter
+on this list column must accept the empty-list wildcard''.
+
+\section*{Artifact Availability}
+
+The library, the harness, every contract and compiler, the analysis
+scripts, the blind ratings, the run commits and the raw result rows are
+tracked at \url{https://github.com/flyersworder/agentic-data-contracts}.
+Every row records its commit, contract digest, gold-set hash, scorer,
+model, endpoint, token counts, cost and a post-run integrity check of its
+database copy. The transcripts of every DABStep and constructed-question
+run are attached to the releases tagged \texttt{dabstep-eval-2026-09}
+and \texttt{dabstep-eval-2026-10}, with SHA-256 digests. LiveSQLBench's
+private gold, test cases and task mapping are not redistributed, nor are
+its transcripts, since one graded correct is a solution the benchmark
+keeps private; its rows carry a hash of the gold result, and the analyses
+that use the gold print aggregates only.
+\else
+% The template's PVLDB Artifact Availability block carries the link;
+% future work is in the extended version only.
+\fi

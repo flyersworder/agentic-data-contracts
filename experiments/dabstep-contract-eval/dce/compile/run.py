@@ -20,9 +20,8 @@ from pathlib import Path
 from dce.compile.db import CompileDB
 from dce.compile.emit import build, write
 from dce.compile.entries import compile_order
-from dce.compile.inputs import CompileInputs
+from dce.compile.inputs import COMPILER_MODEL, CompileInputs
 from dce.compile.session import (
-    COMPILER_MODEL,
     MAX_ATTEMPTS,
     DriverResult,
     EntryRecord,
@@ -53,14 +52,30 @@ def _sha256(path: Path) -> str:
 def _header(inputs: CompileInputs) -> dict:
     from dce.agent import _commit_sha
 
-    return {
+    header = {
         "type": "header",
         "benchmark": inputs.benchmark,
         "db": inputs.db_name,
-        "model": COMPILER_MODEL,
+        "model": inputs.model,
         "commit_sha": _commit_sha(),
         "inputs": {p.name: _sha256(p) for p in inputs.sources},
     }
+    if inputs.joins:  # absent otherwise, so the frozen logs stay as they are
+        header["joins"] = True
+    return header
+
+
+def _same_compiler(old: dict, inputs: CompileInputs) -> None:
+    if old.get("model", COMPILER_MODEL) != inputs.model:
+        raise SystemExit(
+            f"{inputs.db_name}: compiled with {old.get('model')}, now "
+            f"{inputs.model}; use another --out"
+        )
+    if old.get("joins", False) != inputs.joins:
+        raise SystemExit(
+            f"{inputs.db_name}: compiled with joins={old.get('joins', False)}, "
+            f"now joins={inputs.joins}; use another --out"
+        )
 
 
 def _log_lines(path: Path) -> tuple[list[dict], bool]:
@@ -131,6 +146,8 @@ def compile_database(
     header = _header(inputs)
     if final.exists() and not log.exists():
         done = next((d for d in _gz_records(final) if d.get("type") == "header"), None)
+        if done is not None:
+            _same_compiler(done, inputs)
         if done is None or done["inputs"] != header["inputs"]:
             raise SystemExit(
                 f"{final}: inputs changed since this database was compiled; "
@@ -141,6 +158,8 @@ def compile_database(
     records: list[EntryRecord] = []
     if log.exists():
         old, records, torn = read_log(log)
+        if old is not None:
+            _same_compiler(old, inputs)
         if old is None or old["inputs"] != header["inputs"]:
             raise SystemExit(
                 f"{log}: inputs changed since this compile started; delete the "
@@ -236,7 +255,15 @@ def reopen(out_dir: Path, inputs: CompileInputs, entry_ids) -> list[int]:
     return sorted(ids)
 
 
-def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResult:
+def claude_driver(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    tools,
+    model: str = COMPILER_MODEL,
+    request_limit: int = COMPILE_REQUEST_LIMIT,
+    timeout: float = 300,
+) -> DriverResult:
     """The compiler model's loop, through the harness's own agent factory
     (route, reasoning effort and caching as for every agent run). Spends
     money; tests replace it."""
@@ -251,12 +278,16 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
 
     from dce import agent as agent_module
     from dce.pricing import cost
+    from dce.trace import drop_provider_urls
 
     agent = agent_module._default_agent_factory(
-        model=COMPILER_MODEL,
+        model=model,
         system_prompt=system_prompt,
         tools=[Tool(t) for t in tools],
         retries=MAX_ATTEMPTS + 2,
+        # Only `dce.author` asks for another timeout; the compile's call is
+        # the one the frozen compiler made.
+        **({} if timeout == 300 else {"timeout": timeout}),
     )
     # Filled in place even when the run raises, as `dce.agent.run_task` relies
     # on: an entry that loops to the request cap is the most expensive kind,
@@ -272,7 +303,7 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
                 try:
                     agent.run_sync(
                         user_prompt,
-                        usage_limits=UsageLimits(request_limit=COMPILE_REQUEST_LIMIT),
+                        usage_limits=UsageLimits(request_limit=request_limit),
                         usage=usage,
                     )
                     break
@@ -293,13 +324,15 @@ def claude_driver(*, system_prompt: str, user_prompt: str, tools) -> DriverResul
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": cached,
-        "usd": cost(COMPILER_MODEL, in_tok, out_tok, cached),
+        "usd": cost(model, in_tok, out_tok, cached),
     }
     if error is not None:
         out["error"] = error
     if fatal:
         out["fatal"] = True
     return DriverResult(
-        messages=ModelMessagesTypeAdapter.dump_python(messages, mode="json"),
+        messages=drop_provider_urls(
+            ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+        ),
         usage=out,
     )

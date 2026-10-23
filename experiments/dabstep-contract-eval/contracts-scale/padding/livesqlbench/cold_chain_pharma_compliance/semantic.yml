@@ -1,0 +1,692 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: cold_chain_pharma_compliance, author: claudeopus5.5
+metrics:
+- name: temperature_excursion_duration
+  description: 'TED, minutes: total time a shipment spends outside its required temperature range during
+    transit, the sum of the durations of each excursion event. Stored already summed as env_metrics.temperature.excursion_duration_min
+    (JSON number, 0-120).
+
+    '
+  sql_expression: CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min') AS DOUBLE)
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+- name: tesi
+  description: 'Temperature Excursion Severity Index = TED x (|T_max - T_allowed| + |T_min - T_allowed|)
+    / 2. T_max/T_min are env_metrics.temperature.max_c/min_c. INTERPRETATION: T_allowed (allowed range
+    midpoint) needs the product''s range, but shipments cannot be joined to batches; all telemetry fits
+    the 2-8°C class, so T_allowed = 5°C. If a question gives another range, substitute its midpoint.
+
+    '
+  sql_expression: "CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min') AS\
+    \ DOUBLE) * (ABS(CAST(json_extract_string(e.env_metrics, '$.temperature.max_c') AS DOUBLE) - 5)\n\
+    \   + ABS(CAST(json_extract_string(e.env_metrics, '$.temperature.min_c') AS DOUBLE) - 5)) / 2"
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+- name: critical_temperature_exposure
+  description: 'True when the product temperature deviates more than 5°C from its specified range for
+    more than 60 consecutive minutes. INTERPRETATION: range taken as 2-8°C (see tesi), so max_c > 13 or
+    min_c < -3; consecutive duration is not stored, so total TED > 60 is used. Data: no shipment exceeds
+    12°C or goes below -2°C, so this is false everywhere.
+
+    '
+  sql_expression: "(CAST(json_extract_string(e.env_metrics, '$.temperature.max_c') AS DOUBLE) > 13\n OR\
+    \ CAST(json_extract_string(e.env_metrics, '$.temperature.min_c') AS DOUBLE) < -3)\nAND CAST(json_extract_string(e.env_metrics,\
+    \ '$.temperature.excursion_duration_min') AS DOUBLE) > 60"
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+- name: cold_chain_compliance_rate
+  description: 'CCCR (%) = shipments with zero temperature excursions (excursion_count = 0) / total shipments
+    x 100. Every shipment has a monitoring row (821); 73 have zero excursions.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_count')
+    AS INTEGER) = 0) / NULLIF(COUNT(*), 0)
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+- name: tirp
+  description: 'Time In Range Percentage = (T_total - TED) / T_total x 100, T_total the total transit
+    time = shipment_overview.timing_performance.actual_duration_hrs x 60 minutes (TED is in minutes).
+    NULL when actual hours are not recorded (120 shipments) or shipment_overview is NULL (22).
+
+    '
+  sql_expression: "100.0 * (CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) * 60\n         - CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min')\
+    \ AS DOUBLE))\n/ NULLIF(CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) * 60, 0)"
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment
+  domains:
+  - temperature_control
+- name: quality_risk_zone
+  description: '''Green Zone'' (TIRP > 98% and no excursions > 30 min), ''Yellow Zone'' (95% <= TIRP <=
+    98% or any excursion 30-60 min), ''Red Zone'' (TIRP < 95% or any excursion > 60 min). INTERPRETATION:
+    individual excursion durations are not stored, so total TED stands in for "any excursion"; zones are
+    tested Red, then Yellow, then Green, so an overlap (e.g. TED exactly 30) goes to the worse zone. NULL
+    when TIRP is NULL.
+
+    '
+  sql_expression: "CASE\n  WHEN CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) IS NULL THEN NULL\n  WHEN 100.0 * (CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) * 60\n                - CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min')\
+    \ AS DOUBLE))\n       / NULLIF(CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) * 60, 0) < 95\n    OR CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min')\
+    \ AS DOUBLE) > 60 THEN 'Red Zone'\n  WHEN 100.0 * (CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) * 60\n                - CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min')\
+    \ AS DOUBLE))\n       / NULLIF(CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) * 60, 0) <= 98\n    OR CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min')\
+    \ AS DOUBLE) >= 30 THEN 'Yellow Zone'\n  ELSE 'Green Zone'\nEND"
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment
+  domains:
+  - temperature_control
+- name: excursion_impact_assessment
+  description: 'EIA = sum over excursions of |T_i - T_limit| x t_i (t_i in hours, T_limit the nearest
+    limit). INTERPRETATION / APPROXIMATION: per-excursion temperatures are not stored; uses limits 2/8°C,
+    the recorded extremes as T_i (deviation above 8°C plus deviation below 2°C, each only if positive)
+    and total TED/60 as duration.
+
+    '
+  sql_expression: "(GREATEST(CAST(json_extract_string(e.env_metrics, '$.temperature.max_c') AS DOUBLE)\
+    \ - 8, 0)\n + GREATEST(2 - CAST(json_extract_string(e.env_metrics, '$.temperature.min_c') AS DOUBLE),\
+    \ 0))\n* CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min') AS DOUBLE)\
+    \ / 60.0"
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+- name: taif
+  description: 'Temperature Accuracy Impact Factor = |T_max - T_upper|/A + |T_min - T_lower|/A, T_max/T_min
+    recorded max_c/min_c, A the device accuracy monitoringdevices.devacc (TEXT, cast to DOUBLE; all values
+    parse). INTERPRETATION: T_upper = 8, T_lower = 2 (2-8°C, see tesi).
+
+    '
+  sql_expression: "(ABS(CAST(json_extract_string(e.env_metrics, '$.temperature.max_c') AS DOUBLE) - 8)\n\
+    \ + ABS(CAST(json_extract_string(e.env_metrics, '$.temperature.min_c') AS DOUBLE) - 2))\n/ NULLIF(TRY_CAST(d.devacc\
+    \ AS DOUBLE), 0)"
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e LEFT JOIN main.monitoringdevices d ON d.mondevref = e.devlink
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+  - monitoring
+- name: within_acceptable_deviation_limits
+  description: 'Refrigerated (2-8°C) acceptable-deviation test: brief excursions (< 30 min) to 0-12°C
+    may be acceptable. True when TED < 30 min and recorded min_c >= 0 and max_c <= 12. Other classes (frozen:
+    brief to -15°C; ultra-frozen: brief to -60°C; CRT 15-25°C: brief to 10-30°C) would replace the bounds;
+    shipments are treated as 2-8°C (see tesi).
+
+    '
+  sql_expression: CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_duration_min') AS DOUBLE)
+    < 30 AND CAST(json_extract_string(e.env_metrics, '$.temperature.min_c') AS DOUBLE) >= 0 AND CAST(json_extract_string(e.env_metrics,
+    '$.temperature.max_c') AS DOUBLE) <= 12
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e
+  grain: one row per shipment monitoring record
+  domains:
+  - temperature_control
+- name: stability_budget_hours
+  description: 'INTERPRETATION of the Pharmaceutical Stability Budget: no budget column exists, so the
+    sensitivity tier''s tolerance is used: Low = 24 h, Medium = 8 h, High = 2 h of minor deviation; NULL
+    tempsense = budget not determined. SBCR = TED_minutes / (this x 60) x 100 when a shipment''s product
+    is known (no shipment-batch link).
+
+    '
+  sql_expression: CASE b.tempsense WHEN 'Low' THEN 24 WHEN 'Medium' THEN 8 WHEN 'High' THEN 2 END
+  source_model: main.productbatches
+  from_sql: main.productbatches b
+  grain: one row per product batch
+  domains:
+  - temperature_control
+  - products_storage
+- name: temperature_monitoring_gap
+  description: 'True when there can be a period over 15 minutes with no temperature data points. INTERPRETATION:
+    readings are not stored individually; the linked device''s recording interval (recintmin, minutes)
+    > 15 implies such gaps. NULL recintmin (interval not configured) yields NULL. "Should have continuous
+    monitoring" cannot be checked per shipment (no vehicle link).
+
+    '
+  sql_expression: d.recintmin > 15
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e LEFT JOIN main.monitoringdevices d ON d.mondevref = e.devlink
+  grain: one row per shipment monitoring record
+  domains:
+  - monitoring
+- name: temp_readings_received_pct
+  description: 'Temp% for CCMCS: percentage of expected temperature readings received. INTERPRETATION:
+    expected = actual_duration_hrs x 60 / recintmin; received = the device''s temppts; capped at 100.
+    NULL if interval or actual hours missing.
+
+    '
+  sql_expression: "LEAST(100.0, 100.0 * d.temppts\n  / NULLIF(CAST(json_extract_string(s.shipment_overview,\
+    \ '$.timing_performance.actual_duration_hrs') AS DOUBLE) * 60.0 / d.recintmin, 0))"
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey LEFT JOIN
+    main.monitoringdevices d ON d.mondevref = e.devlink
+  grain: one row per shipment
+  domains:
+  - monitoring
+- name: ccmcs
+  description: 'Cold Chain Monitoring Compliance Score = 0.4 x GPS% + 0.4 x Temp% + 0.2 x (100 - ER).
+    GPS% = env_metrics.tracking.gps_completeness_pct (stored as a JSON STRING, all parse to 90-100). Temp%
+    = temp_readings_received_pct. INTERPRETATION: no reading-error rate is recorded, so ER = 0 here; if
+    a question supplies ER, replace the last term with 0.2 * (100 - ER).
+
+    '
+  sql_expression: "0.4 * CAST(json_extract_string(e.env_metrics, '$.tracking.gps_completeness_pct') AS\
+    \ DOUBLE) + 0.4 * LEAST(100.0, 100.0 * d.temppts\n    / NULLIF(CAST(json_extract_string(s.shipment_overview,\
+    \ '$.timing_performance.actual_duration_hrs') AS DOUBLE) * 60.0 / d.recintmin, 0))\n+ 0.2 * (100 -\
+    \ 0)"
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey LEFT JOIN
+    main.monitoringdevices d ON d.mondevref = e.devlink
+  grain: one row per shipment
+  domains:
+  - monitoring
+- name: critical_monitoring_failure
+  description: 'True when GPS completeness < 80% OR temperature monitoring gaps exceed 30 minutes. Gap
+    interpreted as the device recording interval recintmin > 30. Data: GPS is 90-100 and the max interval
+    is 30, so no shipment currently qualifies.
+
+    '
+  sql_expression: CAST(json_extract_string(e.env_metrics, '$.tracking.gps_completeness_pct') AS DOUBLE)
+    < 80 OR d.recintmin > 30
+  source_model: main.environmentalmonitoring
+  from_sql: main.environmentalmonitoring e LEFT JOIN main.monitoringdevices d ON d.mondevref = e.devlink
+  grain: one row per shipment monitoring record
+  domains:
+  - monitoring
+- name: device_calibration_status
+  description: '''Current'' when the device was calibrated within 12 months before the shipment''s planned
+    departure (timing_performance.go_time_ts, ISO string), ''Expired'' otherwise, NULL when calibts or
+    departure is unknown. ''Exempt'' (single-use, factory calibration) cannot be identified from the data.
+
+    '
+  sql_expression: "CASE\n  WHEN d.calibts IS NULL OR json_extract_string(s.shipment_overview, '$.timing_performance.go_time_ts')\
+    \ IS NULL THEN NULL\n  WHEN d.calibts >= CAST(json_extract_string(s.shipment_overview, '$.timing_performance.go_time_ts')\
+    \ AS TIMESTAMP) - INTERVAL 12 MONTH THEN 'Current'\n  ELSE 'Expired'\nEND"
+  source_model: main.shipsensorlink
+  from_sql: main.shipsensorlink l JOIN main.shipments s ON s.reckey = l.shpnode JOIN main.monitoringdevices
+    d ON d.mondevref = l.devnode
+  grain: one row per shipment-device link
+  domains:
+  - monitoring
+- name: required_monitoring_interval_min
+  description: 'Risk-based monitoring intensity: high-risk products (biologics, vaccines) require continuous
+    monitoring at 5-minute intervals; medium-risk 15 min; low-risk 30 min. Only Biologics and Vaccines
+    are assigned a risk level by the documentation, so other categories return NULL (not specified). Compare
+    with monitoringdevices.recintmin (NULL = not configured / unplanned monitoring).
+
+    '
+  sql_expression: CASE WHEN p.prodcat IN ('Biologics', 'Vaccines') THEN 5 END
+  source_model: main.products
+  from_sql: main.products p
+  grain: one row per product
+  domains:
+  - monitoring
+  - products_storage
+- name: route_excursion_events_per_10_shipments
+  description: 'Historical temperature excursion events per 10 shipments on a route: 10 x SUM(excursion_count)
+    / shipments. GROUP BY json_extract_string(s.shipment_overview, ''$.route.route_string'') and exclude
+    NULL routes.
+
+    '
+  sql_expression: 10.0 * SUM(CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_count')
+    AS INTEGER)) / NULLIF(COUNT(*), 0)
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment, aggregated per route_string
+  domains:
+  - routes_delivery
+- name: route_risk_classification
+  description: '''Low Risk'' (0-1 excursion events per 10 shipments), ''Medium Risk'' (2-4), ''High Risk''
+    (5+). Aggregate grouped by route_string (as in route_excursion_events_per_10_shipments). INTERPRETATION:
+    non-integer rates are binned < 2 Low, < 5 Medium, else High.
+
+    '
+  sql_expression: "CASE\n  WHEN 10.0 * SUM(CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_count')\
+    \ AS INTEGER)) / COUNT(*) < 2 THEN 'Low Risk'\n  WHEN 10.0 * SUM(CAST(json_extract_string(e.env_metrics,\
+    \ '$.temperature.excursion_count') AS INTEGER)) / COUNT(*) < 5 THEN 'Medium Risk'\n  ELSE 'High Risk'\n\
+    END"
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment, aggregated per route_string
+  domains:
+  - routes_delivery
+- name: lane_temperature_excursion_rate_pct
+  description: 'Percentage of a lane''s shipments with at least one temperature excursion (excursion_count
+    > 0). Group by route_string.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_count')
+    AS INTEGER) > 0) / NULLIF(COUNT(*), 0)
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment, aggregated per route_string
+  domains:
+  - routes_delivery
+- name: high_risk_lane_by_excursion_rate
+  description: 'Criterion 4 of High-Risk Origin-Destination Pairs: lane''s documented temperature excursion
+    rate above 15%. The other criteria (> 3 climate zones, > 2 carrier transfers, customs delays > 48
+    h) have no data. Group by route_string.
+
+    '
+  sql_expression: 100.0 * COUNT(*) FILTER (WHERE CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_count')
+    AS INTEGER) > 0) / NULLIF(COUNT(*), 0) > 15
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment, aggregated per route_string
+  domains:
+  - routes_delivery
+- name: lane_risk_potential
+  description: 'LRP = (TE_total + SD_total + CD_total) / N_shipments per lane (group by route_string).
+    TE = sum of excursion_count; SD (shipping delay) = shipments with actual_duration_hrs > planned_eta_hrs;
+    CD (customs delay) = shipments with qc_checklist customs_and_regulatory.custom_clearance_status =
+    ''Delayed''.
+
+    '
+  sql_expression: "(SUM(CAST(json_extract_string(e.env_metrics, '$.temperature.excursion_count') AS INTEGER))\n\
+    \ + COUNT(*) FILTER (WHERE CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE)\n                        > CAST(json_extract_string(s.shipment_overview, '$.timing_performance.planned_eta_hrs')\
+    \ AS DOUBLE))\n + COUNT(*) FILTER (WHERE json_extract_string(q.qc_checklist, '$.customs_and_regulatory.custom_clearance_status')\
+    \ = 'Delayed'))\n* 1.0 / NULLIF(COUNT(*), 0)"
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey JOIN main.qualitycompliance
+    q ON q.reckeyqc = s.reckey
+  grain: one row per shipment, aggregated per route_string
+  domains:
+  - routes_delivery
+- name: otdp
+  description: 'On-Time Delivery Performance (%) = actual_duration_hrs / planned_eta_hrs x 100; 100 =
+    on time, < 100 early, > 100 late. NULL when actual hours not recorded.
+
+    '
+  sql_expression: 100.0 * CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')
+    AS DOUBLE) / NULLIF(CAST(json_extract_string(s.shipment_overview, '$.timing_performance.planned_eta_hrs')
+    AS DOUBLE), 0)
+  source_model: main.shipments
+  from_sql: main.shipments s
+  grain: one row per shipment
+  domains:
+  - routes_delivery
+- name: delivery_performance_class
+  description: 'Variance = actual_duration_hrs - planned_eta_hrs (hours). ''Early'' (< -2), ''On-Time''
+    (-2..+2 inclusive), ''Delayed'' (> 2 up to 24), ''Severely Delayed'' (> 24). NULL when actual hours
+    are missing.
+
+    '
+  sql_expression: "CASE\n  WHEN CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE) IS NULL THEN NULL\n  WHEN CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE)\n     - CAST(json_extract_string(s.shipment_overview, '$.timing_performance.planned_eta_hrs')\
+    \ AS DOUBLE) < -2 THEN 'Early'\n  WHEN CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE)\n     - CAST(json_extract_string(s.shipment_overview, '$.timing_performance.planned_eta_hrs')\
+    \ AS DOUBLE) <= 2 THEN 'On-Time'\n  WHEN CAST(json_extract_string(s.shipment_overview, '$.timing_performance.actual_duration_hrs')\
+    \ AS DOUBLE)\n     - CAST(json_extract_string(s.shipment_overview, '$.timing_performance.planned_eta_hrs')\
+    \ AS DOUBLE) <= 24 THEN 'Delayed'\n  ELSE 'Severely Delayed'\nEND"
+  source_model: main.shipments
+  from_sql: main.shipments s
+  grain: one row per shipment
+  domains:
+  - routes_delivery
+- name: is_major_pharma_market_destination
+  description: 'Destination nation is a major pharmaceutical market: United States (''United States of
+    America''), Germany, France, Italy, Spain, United Kingdom, Japan, China, Brazil, India, Russia (''Russian
+    Federation''/''Russia'', absent from data). Nations are full names; NULL nation = not provided.
+
+    '
+  sql_expression: "json_extract_string(s.shipment_overview, '$.route.destination.nation') IN ('United\
+    \ States of America', 'Germany', 'France', 'Italy', 'Spain', 'United Kingdom',\n 'Japan', 'China',\
+    \ 'Brazil', 'India', 'Russian Federation', 'Russia')"
+  source_model: main.shipments
+  from_sql: main.shipments s
+  grain: one row per shipment
+  domains:
+  - routes_delivery
+- name: is_major_pharma_market_origin
+  description: Same market list as is_major_pharma_market_destination, applied to the origin nation.
+  sql_expression: "json_extract_string(s.shipment_overview, '$.route.origin.nation') IN ('United States\
+    \ of America', 'Germany', 'France', 'Italy', 'Spain', 'United Kingdom',\n 'Japan', 'China', 'Brazil',\
+    \ 'India', 'Russian Federation', 'Russia')"
+  source_model: main.shipments
+  from_sql: main.shipments s
+  grain: one row per shipment
+  domains:
+  - routes_delivery
+- name: batch_declared_value_usd
+  description: 'Declared batch value parsed from text valusd (''$57,421.85 '': strip ''$'', '','' and
+    trailing space). All 821 parse.'
+  sql_expression: TRY_CAST(replace(replace(trim(b.valusd), '$', ''), ',', '') AS DOUBLE)
+  source_model: main.productbatches
+  from_sql: main.productbatches b
+  grain: one row per product batch
+  domains:
+  - products_storage
+- name: is_tier1_cold_chain_batch
+  description: 'Tier 1 Cold Chain Product: ''High'' temperature sensitivity (tempsense) AND value exceeding
+    $100,000 USD (parsed valusd, strictly greater). Join products for product attributes.
+
+    '
+  sql_expression: b.tempsense = 'High' AND TRY_CAST(replace(replace(trim(b.valusd), '$', ''), ',', '')
+    AS DOUBLE) > 100000
+  source_model: main.productbatches
+  from_sql: main.productbatches b LEFT JOIN main.products p ON p.prodcode = b.prodlink
+  grain: one row per product batch
+  domains:
+  - products_storage
+- name: packaging_temperature_factor
+  description: 'PIRF temperature factor T from store_cond: 1 for 15-25°C, 1.5 for 2-8°C, 2 for -20°C,
+    2.5 for -70°C.'
+  sql_expression: CASE b.store_cond WHEN '15-25°C' THEN 1 WHEN '2-8°C' THEN 1.5 WHEN '-20°C' THEN 2 WHEN
+    '-70°C' THEN 2.5 END
+  source_model: main.productbatches
+  from_sql: main.productbatches b
+  grain: one row per product batch
+  domains:
+  - products_storage
+- name: pirf_before_packaging_factor
+  description: 'Numerator of PIRF = S x D x T / P: S = shock_event_count, D = distance_km / 1000, T =
+    1.5 (2-8°C assumption, see tesi; no shipment-batch link). Divide by the packaging robustness factor
+    P (1-10, 10 most robust), which is not recorded and must come from the question.
+
+    '
+  sql_expression: CAST(json_extract_string(e.env_metrics, '$.light_and_shock.shock_event_count') AS DOUBLE)
+    * CAST(json_extract_string(s.shipment_overview, '$.timing_performance.distance_km') AS DOUBLE) / 1000.0
+    * 1.5
+  source_model: main.shipments
+  from_sql: main.shipments s JOIN main.environmentalmonitoring e ON e.reckeylink = s.reckey
+  grain: one row per shipment
+  domains:
+  - products_storage
+  - risk_scores
+tables:
+- schema: main
+  table: shipments
+  columns:
+  - name: reckey
+    type: VARCHAR
+    description: Unique shipment record key (PK), e.g. CC381686. Joins to every per-shipment table.
+  - name: log_ts
+    type: TIMESTAMP
+    description: Log-creation timestamp. NULL means record creation time not captured.
+  - name: shiptok
+    type: VARCHAR
+    description: Human-friendly shipment token, unique, e.g. SH88875.
+  - name: shipment_overview
+    type: JSON
+    description: 'JSON (NULL for 22 shipments). route.origin/destination.{hub, address, nation} — nation
+      is a full country name despite ''ISO code'' wording; NULL = not provided. route.route_string ''Origin
+      -> Destination'' identifies the lane. route.risk_note High/Medium/Low qualitative route risk note.
+      timing_performance: go_time_ts (planned departure, ISO string), end_time_ts (actual arrival; one
+      constant value 2025-02-19T08:29:00), planned_eta_hrs (integer hours 2+), actual_duration_hrs (integer
+      hours; JSON null for 120 = not yet recorded), distance_km (integer). Use json_extract_string + CAST.
+
+      '
+- schema: main
+  table: environmentalmonitoring
+  columns:
+  - name: reckeylink
+    type: VARCHAR
+    description: Shipment key (PK, FK shipments.reckey).
+  - name: devlink
+    type: VARCHAR
+    description: Monitoring device (FK monitoringdevices.mondevref); identical to shipsensorlink.devnode.
+  - name: env_metrics
+    type: JSON
+    description: 'temperature.{avg_c, min_c, max_c (°C), excursion_count (0-10), excursion_duration_min
+      (TED, minutes), alarm_count}; humidity.{humidity_monitor No/Partial/Yes, null = not monitored; avg_pct;
+      excursion_count}; light_and_shock.{light_monitor_mode Continuous/Periodic, null = light not monitored;
+      shock_monitor Active/Passive, null = shock not monitored; shock_event_count}; tracking.{location_tracking_state
+      ''Active'' (regular updates) / ''Intermittent'' (occasional gaps) / ''Failed'' (no longer providing
+      location data) / null (tracking not implemented); gps_completeness_pct (JSON STRING, e.g. ''96.3'',
+      cast to DOUBLE); route_deviation_incidents; unscheduled_stops; stop_duration_min}.
+
+      '
+- schema: main
+  table: products
+  columns:
+  - name: prodcode
+    type: VARCHAR
+    description: Unique product code (PK).
+  - name: prodlabel
+    type: VARCHAR
+    description: Commercial product label.
+  - name: prodcat
+    type: VARCHAR
+    description: 'Temperature-sensitive product category: Vaccines, Biologics (incl. monoclonal antibodies,
+      recombinant proteins), Blood Products (incl. plasma, platelets), Insulin.'
+  - name: maker
+    type: VARCHAR
+    description: Manufacturer. NULL means not specified.
+- schema: main
+  table: productbatches
+  columns:
+  - name: batchtag
+    type: VARCHAR
+    description: Unique batch id (PK). No link to shipments exists.
+  - name: prodlink
+    type: VARCHAR
+    description: FK products.prodcode.
+  - name: mfg_ts
+    type: TIMESTAMP
+    description: Manufacturing timestamp.
+  - name: exp_ts
+    type: TIMESTAMP
+    description: Expiry timestamp.
+  - name: store_cond
+    type: VARCHAR
+    description: 'Storage classification: ''2-8°C'' refrigerated, ''-20°C'' frozen, ''-70°C'' ultra-low,
+      ''15-25°C'' controlled room temperature. Often inconsistent with tempmin/tempmax.'
+  - name: tempmin
+    type: FLOAT
+    description: Minimum allowable temperature °C.
+  - name: tempmax
+    type: FLOAT
+    description: Maximum allowable temperature °C.
+  - name: tempsense
+    type: VARCHAR
+    description: 'Temperature sensitivity tier: ''Low'' tolerates up to 24 h of minor deviations, ''Medium''
+      up to 8 h, ''High'' cannot tolerate deviations beyond 2 h.'
+  - name: pack_type
+    type: VARCHAR
+    description: 'Packaging type: Ampoule, Container, Syringe, Vial.'
+  - name: pack_cnt
+    type: BIGINT
+    description: Number of saleable packs.
+  - name: valusd
+    type: VARCHAR
+    description: Declared value USD as TEXT like '$57,421.85 '; use metric batch_declared_value_usd.
+  - name: insusd
+    type: FLOAT
+    description: Insurance coverage USD. NULL means no insurance value set.
+- schema: main
+  table: carriers
+  columns:
+  - name: carriertag
+    type: VARCHAR
+    description: Unique carrier id/name (PK).
+  - name: carriercert
+    type: VARCHAR
+    description: 'GDP certification status: ''None'' no certification, ''GDP'' Good Distribution Practice,
+      ''CEIV Pharma'' IATA CEIV certification, ''Both'' GDP and CEIV Pharma. NULL (281 carriers) = pending
+      certification status verification. No ''None'' in data.'
+- schema: main
+  table: vehicles
+  columns:
+  - name: vehref
+    type: VARCHAR
+    description: Vehicle id (PK).
+  - name: carrierbond
+    type: VARCHAR
+    description: FK carriers.carriertag.
+  - name: vehtype
+    type: VARCHAR
+    description: Aircraft, Container, Reefer Truck, Van.
+  - name: veh_qual
+    type: VARCHAR
+    description: 'Qualification: ''Validated'' fully validated through performance and temperature mapping
+      studies; ''Qualified'' basic qualification, not fully validated; ''Unqualified'' not formally qualified
+      (absent); data also has ''Under Review''.'
+  - name: temp_mon_sys
+    type: VARCHAR
+    description: 'Monitoring type: ''Continuous'' uninterrupted, ''Interval'' periodic checks at predetermined
+      times, ''None'' no active monitoring, NULL not specified; data holds Continuous/Interval/Manual.'
+- schema: main
+  table: monitoringdevices
+  columns:
+  - name: mondevref
+    type: VARCHAR
+    description: Device id (PK).
+  - name: calibts
+    type: TIMESTAMP
+    description: Last calibration; 'Current' if within 12 months (metric device_calibration_status).
+  - name: devacc
+    type: VARCHAR
+    description: Device accuracy in °C stored as TEXT (e.g. '0.31'); cast to DOUBLE. A in TAIF.
+  - name: recintmin
+    type: BIGINT
+    description: Recording interval minutes (5,10,15,30). NULL = interval not configured.
+  - name: temppts
+    type: BIGINT
+    description: Number of temperature points that can be stored.
+- schema: main
+  table: shipsensorlink
+  columns:
+  - name: shpnode
+    type: VARCHAR
+    description: Shipment key (FK shipments).
+  - name: devnode
+    type: VARCHAR
+    description: Device (FK monitoringdevices); one per shipment.
+- schema: main
+  table: qualitycompliance
+  columns:
+  - name: reckeyqc
+    type: VARCHAR
+    description: Shipment key (PK/FK).
+  - name: qc_checklist
+    type: JSON
+    description: 'security.seal_status Broken/Intact/Suspicious (null = not captured); security.security_incident
+      TEXT severity ''0'' no concerns, ''1'' minor procedural deviation, ''2'' moderate concern without
+      evidence of tampering, ''3'' clear evidence of attempted tampering, ''4'' confirmed breach with
+      product access, null = not assessed (only 0-2 occur). product_integrity.{product_intact_check Conditional/Failed/Passed,
+      pack_condition (null = not assessed), label_condition}. documentation.{documentation_complete, certification_status}.
+      customs_and_regulatory.{custom_clearance_status Cleared/Delayed/Pending, import_permit_status, regulatory_compliance_status
+      ''Compliant'' meets all requirements / ''Non-compliant'' fails one or more critical requirements
+      / ''Under Review'' being assessed / null not yet determined}. gdp_quality.{sop_compliance, gdp_compliance,
+      quality_agreement_status ''Active'' in force / ''Expired'' lapsed / ''Pending'' under review / null
+      no formal agreement, quality_review_status, responsible_person, quality_approval_ts (null = approval
+      pending)}. release.{product_release_status Released/Quarantined/Rejected (framework also defines
+      ''Released with CAPA''), release_ts, quarantine_reason (null = not quarantined)}.
+
+      '
+- schema: main
+  table: incidentandriskmanagement
+  columns:
+  - name: reckeyrisk
+    type: VARCHAR
+    description: Shipment key (PK/FK).
+  - name: incident_risk_record
+    type: JSON
+    description: stability_and_quality, batch_decision.batch_release_decision (Approved/Pending/Rejected),
+      deviation_investigation, risk.{risk_assessment_status, risk_level High/Medium/Low, null = not set},
+      reporting_notification, impact, lessons_learned. JSON null means not assessed/not started as documented
+      per field.
+- schema: main
+  table: insuranceclaims
+  columns:
+  - name: reckeyclaim
+    type: VARCHAR
+    description: Shipment key (PK/FK).
+  - name: claimneed
+    type: VARCHAR
+    description: No, Under Review, Yes.
+  - name: claimstat
+    type: VARCHAR
+    description: Approved, Filed, Rejected; NULL = claim not initiated.
+  - name: claimusd
+    type: FLOAT
+    description: Amount claimed USD.
+  - name: costimpactusd
+    type: FLOAT
+    description: Total cost impact USD.
+  - name: respparty
+    type: VARCHAR
+    description: Carrier, Receiver, Shipper, Unknown; NULL = not yet assigned.
+- schema: main
+  table: reviewsandimprovements
+  columns:
+  - name: reckeyrev
+    type: VARCHAR
+    description: Shipment key (PK/FK).
+  - name: lanequalstat
+    type: VARCHAR
+    description: 'Lane quality: Invalid, Review Required, Valid; NULL = not set.'
+  - name: carbonkg
+    type: FLOAT
+    description: Carbon footprint kg CO2-e; NULL = not calculated.
+  - name: energyscore
+    type: VARCHAR
+    description: Energy efficiency score as TEXT number; NULL = not set.
+  - name: dataintegrity
+    type: VARCHAR
+    description: 'Data integrity verification (ALCOA+ context): Compromised, Under Review, Verified.'
+  - name: audittrailcomplete
+    type: VARCHAR
+    description: Audit-trail completeness as TEXT number (e.g. '91.0').
+  - name: e_sigstat
+    type: VARCHAR
+    description: 'Electronic signature compliance: Invalid, Not Required, Valid.'
+  - name: databackupstat
+    type: VARCHAR
+    description: Current, Failed, Pending; NULL = backup not confirmed.
+  - name: closestat
+    type: VARCHAR
+    description: Closed, Open, Under Review.
+  - name: nextrevts
+    type: TIMESTAMP
+    description: Next scheduled review.
+relationships:
+- from: main.environmentalmonitoring.reckeylink
+  to: main.shipments.reckey
+  type: one_to_one
+- from: main.qualitycompliance.reckeyqc
+  to: main.shipments.reckey
+  type: one_to_one
+- from: main.incidentandriskmanagement.reckeyrisk
+  to: main.shipments.reckey
+  type: one_to_one
+- from: main.insuranceclaims.reckeyclaim
+  to: main.shipments.reckey
+  type: one_to_one
+- from: main.reviewsandimprovements.reckeyrev
+  to: main.shipments.reckey
+  type: one_to_one
+- from: main.shipsensorlink.shpnode
+  to: main.shipments.reckey
+  type: many_to_one
+- from: main.shipsensorlink.devnode
+  to: main.monitoringdevices.mondevref
+  type: many_to_one
+- from: main.environmentalmonitoring.devlink
+  to: main.monitoringdevices.mondevref
+  type: many_to_one
+- from: main.productbatches.prodlink
+  to: main.products.prodcode
+  type: many_to_one
+- from: main.vehicles.carrierbond
+  to: main.carriers.carriertag
+  type: many_to_one

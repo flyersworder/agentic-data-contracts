@@ -147,6 +147,12 @@ the p=0.058 above is the all-401 test, which the easy tasks dilute. So the
 honest summary is not "scaffolding does nothing" but **"scaffolding does
 something on three of four models, and always less than the content does."**
 
+> **Revised (2026-10-21).** The k=3 panels do not bear this out on gpt-6-sol.
+> Its hollow arm is 7.1 points *below* the bare schema (26 tasks to 70). On
+> Qwen 3.8 the two are level or the hollow arm is behind, by scoring view.
+> The scaffolding step's sign varies by model; the content step dominates
+> on every one. See *The k=3 panels: content and scaffolding*.
+
 What survives unchanged is the part the fourth arm was built for. The
 deflationary reading of arm C — that the contract helps by narrowing the
 tables in view, imposing a procedure, or making the agent slow down rather
@@ -204,6 +210,71 @@ scaffolding step being real there.
 Prompt length is deliberately not held constant (1,984 vs 2,475 chars).
 Padding with filler would swap one confound for another — text that reads as
 content but carries none. The variable under test is knowledge, not tokens.
+
+## The k=3 panels: content and scaffolding
+
+Runs A-D ran once each. The two gateway panels repeat the four arms three
+times, on 401 tasks:
+- gpt-6-sol: panel commit `0b2c79c`, Responses route;
+- qwen3.8-27b: panel commit `18e0797`.
+
+They are the main decomposition. Runs A-D supply breadth across four more
+models. `analysis/panel_decomposition.py` prints every number here. Each
+task scores 0-3 over the repeats, and the sign tests are two-sided with
+ties dropped. Official verdicts are first; the end-to-end view differs
+only on Qwen (*Knowledge or delivery, on a weaker model*).
+
+| model, view | schema_only | contract_hollow | manual_prompt | contract |
+|---|---:|---:|---:|---:|
+| gpt-6-sol, all 401 | 44.5% | 37.4% | 65.1% | 81.0% |
+| gpt-6-sol, hard 332 | 38.0% | 29.4% | 59.5% | 79.4% |
+| Qwen 3.8, official, all | 24.4% | 20.0% | 30.6% | 49.7% |
+| Qwen 3.8, end-to-end, all | 28.4% | 28.6% | 47.3% | 66.8% |
+| Qwen 3.8, end-to-end, hard | 18.4% | 18.6% | 39.2% | 62.3% |
+
+**The content step is large and certain on both models.** `contract`
+against `contract_hollow`:
+- gpt-6-sol: +43.6 points, 219 tasks to 15 (p = 1e-47);
+- Qwen: +29.7 points official and +38.2 end-to-end, 200 tasks to 17 and
+  200 to 11.
+
+**The scaffolding step is not positive on either model.**
+`contract_hollow` against `schema_only`:
+- gpt-6-sol: -7.1 points, 26 tasks to 70 (p = 8e-6), and -8.5 on the hard
+  tasks. The deficit is significant in every repeat (McNemar 11/37, 18/44,
+  13/46).
+- Qwen, official: -4.3 points, 18 tasks to 44 (p = 0.001).
+- Qwen, end-to-end: +0.2, 31 to 25 (p = 0.5).
+
+The governed tools with nothing behind them cost gpt-6-sol accuracy. So the
+k=1 summary above, "scaffolding does something on three of four models
+... none favours the bare schema", does not survive repetition on gpt-6-sol.
+gpt-5.6-sol at k=1 gained 14.2 points from it; gpt-6-sol at k=3 loses 7.1.
+These are different models, so this is no direct contradiction of run C.
+But the sign of the scaffolding step varies by model. What every run agrees
+on is that the content step dominates.
+
+The manual pasted into the prompt beats the bare schema on both models:
+- gpt-6-sol: +20.6 points, 124 tasks to 28;
+- Qwen: +6.2 official and +18.9 end-to-end.
+
+The contract beats the manual by 16.0 points on gpt-6-sol and 19.1-19.5
+on Qwen. That lead is what *Knowledge or delivery?* below takes apart.
+
+The scorer's blindness to sign (*The scorer ignores sign*, under
+Operational findings) touches Qwen's baseline arms most. Re-graded with the
+sign enforced:
+- Qwen's scaffolding step is -3.4 points official (p = 0.012);
+- end-to-end it is +1.2 (p = 0.053), and +1.4 on the hard tasks
+  (p = 0.033).
+
+So on Qwen it is small in either direction, and its sign depends on the
+scoring view. gpt-6-sol's panel has no affected rows.
+
+The repeats vary, even on Qwen at temperature 0 with seed 0. Between any
+two repeats, 12.5-14.2% of Qwen's task-arm verdicts change, against
+8.3-9.7% on gpt-6-sol and 11.7-12.0% on gpt-6-luna (experiment 5). Serving
+is not deterministic, so three repeats measure variance on every model.
 
 ## The result is entirely in the hard tasks
 
@@ -368,6 +439,24 @@ into `fee_rule_matches_transaction`. The contract's six other `INTERPRETATION`
 clauses cannot change an answer: four apply definitions the manual gives, and
 the two band tie-breaks decide boundaries that none of the 60 merchant-months
 in the data sits on.
+
+> **Correction (2026-10-14).** The contract carries a second fact the manual
+> lacks, found by experiment 5's transcripts: the manual never says what
+> happens when several fee rules match one transaction, and the contract's
+> `total_transaction_fees` sums over every matched (transaction, rule) pair,
+> the gold convention, without marking it as an `INTERPRETATION`. So
+> `manual_resolved` does not hold the contract's knowledge on the total-fee
+> families, and the "delivery" share below, and its "right time" reading,
+> are at least in large part that fact. See *The prose lacked a second
+> fact* and experiment 5b (`c39026f`).
+>
+> **Update (2026-10-19).** Measured since: the summing note lifts the prose
+> by 28.5 points on gpt-6-luna and 42.7 on Qwen 3.8 on the rule-matching
+> tasks, so most of DABStep's knowledge gain is the two facts the manual
+> leaves out. With both stated alike in prose and in the contract's text,
+> the contract's text is ahead by 3.7 points on gpt-6-luna and 5.5 on Qwen.
+> Form adds a modest gain beyond the facts. See *The second fact,
+> measured* and *The facts stated alike*.
 
 `manual_resolved` is `manual_prompt` plus `DATA_NOTE` (`dce/arms.py`): that
 fact, once, in words, no SQL. Both arms then know the same things. The plan --
@@ -827,6 +916,1124 @@ belongs to the authored contract, not to the delivery as such. This favours
 hypothesis 1 over the other two: what a definition is worth depends on whether
 someone got it right, with the data open, and wrote down the procedure the
 tasks turn on.
+
+### A stronger compiler on DABStep: predictions (7)-(9)
+
+Prediction (5) left a question: is the compiled contract's 35-point loss the
+compiler's limit, or the method's? The Sonnet 5 compiler refused the fee
+formula, the procedure the rule-set and total-fee families turn on, and
+allowing declared joins did not change that under Sonnet. With
+`claudeopus5.5` as the compiler model the formula compiles as a declared
+join (`from_sql`, library 0.62). Four arms ran together on `gpt-6-luna`,
+k=3, at the run commit `3f60a9c`: the Sonnet compile and the hand-authored
+contract as controls, and two Opus compiles of the same manual, one with
+one-table metrics only and one with declared joins. 4,853 rows, $14.77.
+Repeat 3 holds 41 gateway authentication failures (HTTP 401, zero turns,
+$0); the retry pass reran every one, and each task ends with a real verdict.
+A local start of repeat 1 that a network drop stopped (239 rows, $0.75) was
+discarded before the cluster run; it is not in these files.
+
+| arm | r1 | r2 | r3 | k=3 | rule-set (60) | total-fee (45) | rest (296) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| contract_compiled (Sonnet 5) | 183 | 194 | 192 | 47.3% | 23.9% | 7.4% | 58.1% |
+| contract_compiled_opus | 190 | 186 | 194 | 47.4% | 26.1% | 0.0% | 58.9% |
+| contract_compiled_opus_joins | 304 | 308 | 309 | 76.6% | 90.0% | 96.3% | 70.8% |
+| contract (hand-authored) | 324 | 319 | 319 | 80.0% | 98.3% | 100.0% | 73.2% |
+
+- **(7) holds.** The Opus compile with declared joins beats the Sonnet
+  compile on 172 tasks and loses on 15 (one-sided p = 3e-35). On the two fee
+  families together it is 76 points above it (92.7% against 16.8%), against
+  the 30 predicted.
+- **(8) holds in part.** Joins beat the one-table Opus compile 168 tasks to
+  18 (p = 5e-32), and the one-table Opus compile is level with Sonnet's
+  (47.4% against 47.3%; 54 tasks to 58). But the difference is not confined
+  to the fee families: on the rest the joins add 12 points (67 tasks to 18,
+  p = 4e-8). About 70% of the difference, in task-runs, is in the two
+  families.
+- **(9) holds.** The hand-authored contract still beats the best compile, 58
+  tasks to 22 (p = 4e-5). The 3.4-point gap splits about evenly: 51% of it
+  on the rest, 49% on the fee families, so "most of it on the rest" holds
+  only just.
+
+The agent uses what it is given: it looks a metric up in 57% of Sonnet-compile
+runs, 64% of one-table Opus runs, 87% with joins and 89% with the hand-written
+contract. A stronger model, writing the same KB entry by entry, closes about
+nine tenths of the gap the Sonnet compile left (29.3 of 32.7 points:
+47.3% to 76.6%, against 80.0%). The step that matters is not the
+stronger model as such -- without joins it gains nothing -- but the stronger
+model together with a contract format that can hold a multi-table procedure.
+
+### A better-made contract on LiveSQLBench: predictions (10)-(12)
+
+LiveSQLBench had no positive control: every contract run there used the
+Sonnet 5 compile, so "contracts do not help here" and "these contracts do not
+help" could not be told apart. Experiment 2 (run commit `3e0915a`) adds two
+contracts made by `claudeopus5.5` for the three databases with the most
+primary tasks (insider_trading, museum_artifact, cross_border; 55 primary
+and 5 order-only tasks): `contract_opus`, the compiler with declared joins,
+and `contract_authored`, one author session per database that read the whole
+KB, explored the data read-only and wrote the whole contract, mapping every
+KB entry to where it is held (`dce.author`; no task, question, gold or result
+was shown). Four arms on `gpt-6-luna`, k=3, paired within each repeat: 720
+rows, $2.44, no errors.
+
+| arm | r1 | r2 | r3 | k=3 (primary) | order-only |
+|---|---:|---:|---:|---:|---:|
+| manual_prompt | 14 | 15 | 11 | 24.2% | 6 / 15 |
+| contract (Sonnet compile) | 15 | 17 | 17 | 29.7% | 0 / 15 |
+| contract_opus | 19 | 18 | 15 | 31.5% | 0 / 15 |
+| contract_authored | 16 | 15 | 15 | 27.9% | 1 / 15 |
+
+- **(10) fails, narrowly.** The sign test is a tie (`contract` vs
+  `manual_prompt` 6 tasks to 2, p = 0.29), but the gap is 5.5 points against
+  the 5 allowed. On these databases the compiled contract does a little
+  better than on all 302 tasks (+0.4 points there).
+- **(11) fails.** `contract_authored` against `contract`: 3 tasks to 4,
+  one-sided p = 0.77.
+- **(12) fails.** `contract_opus` is the highest arm, not between the two;
+  5 tasks to 3 against `contract` (p = 0.73), 5 to 2 against
+  `contract_authored` (p = 0.45).
+
+| database | tasks | manual_prompt | contract | contract_opus | contract_authored |
+|---|---:|---:|---:|---:|---:|
+| cross_border | 17 | 9.8% | 15.7% | 19.6% | 19.6% |
+| insider_trading | 20 | 40.0% | 40.0% | 40.0% | 38.3% |
+| museum_artifact | 18 | 20.4% | 31.5% | 33.3% | 24.1% |
+
+The arms barely disagree: between any two contract arms only 7 or 8 of the
+55 tasks score differently over the three repeats. The agent consults all
+three contracts alike (a metric lookup in 92-93% of runs, 2.0-2.1 a run), so
+the null is not a contract left unread. Within the reach of this test, which
+is small, how the LiveSQLBench contract was made does not matter: entry by
+entry or whole, Sonnet or Opus, it is worth about what the Sonnet compile is.
+On DABStep the same change of author was worth 29 points. The difference is
+in the benchmarks: DABStep's tasks turn on one procedure (the fee formula)
+that the manual states badly and a contract can hold exactly, and nothing
+in these three LiveSQLBench KBs plays that role. The order-only tasks, where
+`manual_prompt` solves 2 of 5 every repeat and the contract arms almost
+none, are too few to read.
+
+### Knowledge reuse: not what separates the benchmarks
+
+An account that fits both benchmarks after the fact: a contract pays when one
+piece of knowledge is needed by many tasks, is easy to get wrong from the
+prose, and can be held exactly as a definition. DABStep's fee formula is all
+three. The first condition is countable without a run
+(`analysis/knowledge_reuse.py`; aggregates of the private mapping only).
+
+On DABStep the fee-matching procedure (which fee rules apply to a payment or
+merchant) answers every one of the 11 macro families, 176 of 401 tasks (44%).
+Split three ways, gpt-6-luna, k=3 (`manual_prompt` and `contract` from
+`luna-resolved`, the compiles from experiment 1):
+
+| tasks | n | manual_prompt | contract | Sonnet compile | Opus compile | Opus + joins |
+|---|---:|---:|---:|---:|---:|---:|
+| fee matching: rule-set / total-fee | 105 | 13.0% | 98.1% | 16.8% | 14.9% | 92.7% |
+| fee matching: the other five families | 71 | 60.1% | 95.3% | 70.9% | 68.1% | 92.5% |
+| no family | 225 | 55.7% | 68.7% | 54.1% | 56.0% | 64.0% |
+
+About half of the 12 points the joins added outside "the fee families" in
+(8) comes from the other five fee families (one-table Opus compile 68.1%,
+with joins 92.5%); the other half is spread over the 225 tasks with no
+family (56.0% to 64.0%).
+
+On LiveSQLBench a task's knowledge is the KB entries its gold uses, closed
+over the entries they are defined in terms of. Reuse is not low once the
+size of a database is allowed for. Of 1,369 entries, 555 serve some primary
+task; most serve one (340), 35 serve five or more, and none more than ten. But a
+database has 14 primary tasks on average, and its most reused entry serves a
+median 32% of them (18% to 62%), against DABStep's 44%. And the contract's
+gain does not rise with reuse, on either model: binned by the task's most
+reused entry, `contract` minus `manual_prompt` is within noise in every bin
+(luna, 5+ tasks: 33.0% against 30.2%, 10 tasks to 6; Qwen, 3-4 tasks: 35.4%
+against 40.0%, 4 to 12, p = 0.08).
+
+The second condition is there too. On 63 primary tasks (luna; 72 on Qwen)
+some entry serves three or more tasks and the manual is right in at most a
+fifth of their runs: knowledge that is reused and failed from the prose.
+There the compiled contract does not rescue it: schema-only 6.3%, manual
+7.9%, contract 12.2% (Qwen: 8.8%, 7.9%, 9.7%). The selection is on the
+manual's failures, which flatters every other arm, so even that small gain
+is an upper bound. As on DABStep, the knowledge the prose gets wrong is the
+knowledge the Sonnet compiler gets wrong: 23 of the 63 need an entry it
+refused (group B; 25% of all tasks, 37% of these) and 19 one the blind review
+judged materially wrong (group C; 16% of all, 30% here). Only 14 are in group
+A.
+
+The difference is the third condition. On DABStep a stronger author repairs
+the knowledge and the tasks follow (15% to 93%). On the 29 of these tasks in
+experiment 2's databases, it does not: manual 9.2%, Sonnet compile 16.1%,
+Opus compile 17.2%, Opus author 10.3%. And schema-only is as good as the
+manual on them (6.3% against 7.9%): the manual's text adds nothing on these
+tasks either. Either the Opus definitions of this knowledge are wrong as
+well (they have not been reviewed), or what fails on these tasks is not the
+knowledge. Reuse, then, is not what separates the benchmarks, and "hard
+knowledge the contract holds correctly" is so far shown only on DABStep. The
+failure audit and blind test below settle which of the two it is on
+LiveSQLBench.
+
+### Does the KB determine the gold? A failure audit and a blind test
+
+The previous section left two explanations for the hard tasks (reused
+knowledge the manual fails on): the Opus definitions are wrong too, or what
+fails is not the knowledge. Two passes over experiment 2's 55 primary tasks
+answer it. The material holds gold, so it stays outside the repository
+(`~/data/dce-held-results/failure-audit/`); only counts leave it. Scope: these
+three databases are harder than LiveSQLBench as a whole (luna's `contract`
+27% here against 36% on all 302 tasks) and hold 29 of luna's 63 hard tasks,
+so what follows describes them, not the benchmark.
+
+**The blind test.** Two model raters, each alone and blind to every run and
+contract, read each task's question, gold SQL and result and the KB entries
+the gold uses, under shuffled anonymous ids, and marked whether the question
+and the KB settle every choice that changes the gold result. The analysis
+plan -- groups, test, and agreement measure -- was written down before any
+rating was read. They agree on 84% of tasks on the four-way label and have
+kappa 0.68 on settled-or-not. A task is *determined* when both say it is
+settled, *undetermined* when both say it is not.
+
+| tasks | n | accuracy, all 12 runs | ever solved |
+|---|---:|---:|---:|
+| determined | 15 | 62% | 11 of 15 |
+| undetermined | 32 | 15% | 7 of 32 |
+| raters split | 8 | 19% | -- |
+
+Determined tasks are solved far more often (one-sided Mann-Whitney
+p = 0.0002; Fisher on ever-solved p = 0.001). The direction holds within the
+hard tasks (3 determined at 56% against 22 undetermined at 5%, p = 0.004)
+and within the other 26 (12 at 63% against 10 at 37%, p = 0.09). Only 15 of
+55 tasks are determined at all. Each rater separately calls the KB clear on
+16; ambiguous on 21 and 23; contradicted by the gold on 11 and 8; silent on
+knowledge the gold needs on 7 and 8. The most frequent open choices: how a
+NULL or an unlisted category is scored, which fields a formula averages,
+whether a percentage column is a fraction, grade-to-number mappings no entry
+gives, which of two columns holds a quantity, and per-record against
+per-entity grain. The benchmark's task-to-KB mapping misses what the gold
+uses on 10 or 11 tasks (8 by both raters).
+
+**On all 302 primary tasks.** The blind test was extended to the other 247
+primary tasks, rated the same way by two raters each, with the analysis
+plan extended before any of them was read; the outcome is the main runs
+(gpt-6-luna and qwen3.8-27b, three repeats, the three knowledge arms: 18
+runs a task). Agreement is 83% on the four-way label, kappa 0.79 on
+settled-or-not. Each rater calls the KB clear on 136 and 132 tasks,
+ambiguous on 109 each, contradicted by the gold on 43 and 45, silent on what
+the gold needs on 14 and 16.
+
+| tasks (all 302) | n | knowledge arms, 18 runs | ever solved | schema_only |
+|---|---:|---:|---:|---:|
+| determined | 138 | 60% | 105 of 138 | 39% |
+| undetermined | 132 | 14% | 43 of 132 | 6% |
+| raters split | 32 | 32% | -- | -- |
+
+Determined tasks are solved far more often (one-sided Mann-Whitney
+p = 3e-18; Fisher on ever-solved p = 4e-13), on each model alike (luna 60%
+against 13%, Qwen 60% against 15%). Determined tasks are also easier
+without any knowledge (schema_only 39% against 6%), so part of the gap is
+difficulty. The confound check separates the two: the knowledge's own gain
+over schema_only is larger where the KB settles the gold, +21 points against
++8 (one-sided p = 0.002). Delivery still does not matter there: on
+determined tasks `contract` against `manual_prompt` is 9 tasks to 12 on luna
+and 15 to 13 on Qwen. On LiveSQLBench, then, the knowledge helps where it is
+determined and helps little where it is not, and how it is delivered does
+not change that.
+
+Back on experiment 2's 55 tasks, by arm, on determined against
+undetermined tasks: `manual_prompt` 53% and
+11%, `contract` 58% and 19%, `contract_opus` 69% and 18%,
+`contract_authored` 67% and 12%. On determined tasks the Opus contracts lead
+the manual by 14-16 points, but on 3 tasks to 1 each (two-sided p = 0.62):
+exploratory, and too few tasks to read.
+
+**The failure audit.** Five model reviewers (29 hard tasks) and four more
+(the other 26), one pass each with the gold in view, read every run's graded
+SQL and result against the gold and each contract's definition of the
+needed knowledge; two of their gold-against-KB verdicts were checked by hand
+and held. Main cause of the contract arms' failures, by task: the gold
+departs from the KB or the question 14; values right but the result's shape
+differs (extra rows the gold filters out, an extra id column, a label) 12;
+a contract settled an ambiguous entry differently from the gold 10;
+interpretation 4; a definition not applied 2; SQL error 2; query logic 1;
+no failures 10. Over the 348 failed contract-arm runs: gold departs 100,
+contract definition differs from the gold 89, shape 86, interpretation 40,
+SQL error 14, definition not applied 13, query logic 6. Eighteen tasks are
+near misses a careful reader would call right. Judged against the gold, the
+contracts hold the needed knowledge faithfully on 27 (Sonnet compile), 34
+(Opus compile) and 36 (Opus author) of the 55. Where a definition "differs
+from the gold", the KB was nearly always ambiguous -- the author chose one
+reading, the gold another. These labels come from reviewers who saw the
+gold; the blind test above is the part that does not.
+
+So the hard LiveSQLBench knowledge is not hard because it is difficult to
+write down: the documentation does not settle it, and on 8 to 11 of these
+55 tasks the gold contradicts the documentation. A stronger author, with the
+data open, cannot recover a choice the KB never makes. DABStep's fee
+procedure is the opposite case: determined by the manual and the data, so
+the Opus compiler, reading the manual alone, recovered it. The account's
+third condition is therefore that the knowledge be determinable from what
+the author can see.
+
+Grading defects the audit turned up, all inherited from the official
+Soft-EX rules, which the grader reproduces exactly:
+
+- **DISTINCT stripping.** The official evaluator removes every DISTINCT
+  from the candidate *and* the gold SQL (the frozen golds were made the same
+  way, `prep/livesqlbench/gold.py`; 61 of the 600 gold queries contain
+  DISTINCT). So `a IS DISTINCT FROM b` becomes a parse error, a gold
+  counting distinct days counts readings instead, and an answer that keeps
+  `SELECT DISTINCT` semantics by other means can fail on duplicate rows. The
+  compiled contracts use `IS DISTINCT FROM`, so the defect leans against the
+  contract arms. `analysis/lsb_distinct_regrade.py` re-grades every affected
+  answer three ways: protecting `IS [NOT] DISTINCT FROM` (A); also keeping
+  DISTINCT in aggregates on the candidate side only (B, lopsided against
+  the stripped gold); stripping neither side, with the gold recomputed in
+  DuckDB (C, golds frozen as-is only). Under C luna's arms move 0.2-0.7
+  points (`contract` 35.9% to 36.5%, `manual_prompt` 35.5% to 36.0%),
+  Qwen's -0.2 to +0.7, experiment 2's 0.6-1.9. No prediction's outcome changes, and
+  every prediction stays scored with the official rules.
+- **Order on an unordered gold.** A task's order flag comes from the
+  benchmark's conditions, and at least one primary task is graded in order
+  although its gold SQL has no ORDER BY; one run returned exactly the gold's
+  rows and failed on their incidental order.
+- **Gold on mock rows.** One gold runs on hard-coded inline rows, not the
+  database, with a threshold that contradicts its question.
+
+### Completing the knowledge: predictions (13)-(15)
+
+If agents fail where the KB does not settle the gold, supplying what it
+leaves open should help. Experiment 3 (run commit `482da68`) does that, as
+a positive control with oracle knowledge, on experiment 2's three
+databases. Before any correction was written, each database's primary tasks
+were split in half (`results/livesqlbench/exp3-split.json`, `5b6acdc`).
+From the gold of the 27 training tasks only, 35 corrections were written:
+general facts about KB entries -- a scale, a weight, a threshold, how a
+missing value counts, which column holds a quantity, the grain, a join
+path -- never output form or one question's filter (25 clarify an entry, 4
+contradict it, 6 add one; two borderline ones are named in the run
+commit). Each was applied twice with the same content: appended to the
+entries' text (`manual_corrected`) and implemented in the Opus-compiled
+contract (`contract_corrected`). Corrections and results are derived from
+the gold and stay private; `analysis/lsb_corrected.py` prints the
+aggregates. Four arms on `gpt-6-luna`, k=3, paired within each repeat: 720
+rows, $2.38, no errors.
+
+| tasks | n | manual_prompt | manual_corrected | contract_opus | contract_corrected |
+|---|---:|---:|---:|---:|---:|
+| held out (the test) | 28 | 21.4% | 25.0% | 32.1% | 28.6% |
+| training (upper bound) | 27 | 25.9% | 46.9% | 28.4% | 50.6% |
+| held out, meets a corrected entry | 14 | 23.8% | 28.6% | 42.9% | 42.9% |
+| held out, does not | 14 | 19.0% | 21.4% | 21.4% | 14.3% |
+
+- **(13) fails.** On the held-out tasks the corrected KB lifts the manual
+  by 2 tasks to 0 (one-sided p = 0.25).
+- **(14) fails.** The corrected contract does not beat the Opus contract it
+  was made from: 0 tasks to 2.
+- **(15) holds.** The two corrected arms tie on the held-out tasks: 3 tasks
+  to 3, 3.6 points apart.
+
+On the training tasks the same corrections lift both arms by about 21
+points, 7 tasks to 0 each (p = 0.008), and the two deliveries tie there too
+(3 to 2). The corrections are therefore right and usable where they came
+from, and the held-out null is not for want of reach: half the held-out
+tasks (14) use an entry a correction names, and on those the corrections
+change one task. A choice learned from one task's gold does not carry to
+another task's gold through the same entry -- as the training golds already
+showed where two of them used one entry differently (a 0.1 or a 1.0
+threshold; three, five or ten fields in one formula). What LiveSQLBench
+leaves undetermined is, for the most part, not a hidden but consistent body
+of knowledge a better documentation could hold; it is settled task by task
+in the gold. A contract, which can only hold knowledge that holds across
+questions, has nothing to hold there. On DABStep the fee procedure is one
+procedure for every question that needs it, which is why writing it down
+once pays.
+
+Two cautions. The corrections were written by model reviewers from 27
+tasks, and a held-out task meets them only through the benchmark's
+task-to-KB mapping, which the blind raters found off on about one task in
+seven. And 28 held-out tasks make every test here weak.
+
+### Is the gain where the knowledge carries procedure? Predictions (16)-(19)
+
+The account's second condition -- the knowledge is easy to get wrong from
+prose -- had so far been read off the outcome. This test measures it without
+the outcome. Two blind raters per task rated the procedural load (0-3) of the
+knowledge each question needs (`analysis/procedural_load_rubric.md`): 401
+DABStep tasks with `manual_resolved`'s manual, and LiveSQLBench's 302 primary
+tasks with the KB entries the mapping lists. They saw no answer, query,
+contract or result, and the two benchmarks were shuffled together under
+anonymous ids, so each rater used one scale. The plan, the rubric and the
+analysis were committed in `143e009` before any rating existed. The outcome
+is the delivery gain with knowledge held equal: `contract` minus
+`manual_resolved` on DABStep (three models, 9 runs a task); `contract` minus
+`manual_prompt` on LiveSQLBench (luna and Qwen, 6 runs), on the 138 tasks the
+blind clarity test calls determined. A task is high-load at a mean rating of
+2 or more. `analysis/procedural_load.py` prints every number here.
+
+The raters agree closely: quadratic-weighted kappa 0.96 (DABStep) and 0.93
+(LiveSQLBench), kappa 0.82 and 0.86 on high or not. Both are instances of
+one model, though, and on one batch they matched on all 71 loads with
+different notes, so this agreement overstates how reliable a human rater
+would be.
+
+| tasks | n | high-load | prose | contract | gain, high vs other | permutation p |
+|---|---:|---:|---:|---:|---|---:|
+| (16) DABStep | 401 | 239 | 51.0% / 83.0% | 71.7% / 82.9% | +0.207 vs -0.001 | 1e-5 |
+| (17) DABStep, no fee family | 225 | 139 | 41.8% / 91.0% | 54.6% / 89.8% | +0.128 vs -0.012 | 1e-5 |
+| (18) LiveSQLBench, determined | 138 | 39 | 58.1% / 60.6% | 57.3% / 59.8% | -0.009 vs -0.008 | 0.54 |
+
+(Prose and contract give high-load / other accuracy.)
+
+- **(16) holds.** On DABStep the gain sits on the high-load tasks (119
+  tasks to 20) and is zero on the rest.
+- **(17) holds.** The same holds outside the fee-matching families (52 to 8).
+- **(18) fails, with enough tasks to count.** The 39 high-load determined
+  LiveSQLBench tasks gain nothing (8 to 5, p = 0.58). Their prose arm is
+  right 58% of the time, so the null is not a ceiling. Neither secondary
+  split changes this: all 302 tasks (+0.017, p = 0.27), and determined tasks
+  whose needed compiled metrics were judged faithful (21 high-load, 5 to 3,
+  p = 0.6). The compiled contract's own errors do not hide a gain.
+- **(19) holds.** High-load tasks are 60% of DABStep and 48% of LiveSQLBench
+  (p = 0.001). The difference is real but small, and does not explain the
+  null by itself.
+
+As fixed in advance, (16) holding with (18) failing means **procedural load,
+as rated, does not explain LiveSQLBench's null**. The condition holds within
+DABStep and does not carry across.
+
+**Exploratory, chosen after (18) failed.** By load level, the gain is
+confined to the top level, on both benchmarks:
+
+| load (mean of two) | DABStep: n, gain, sign | LiveSQLBench determined: n, gain, sign |
+|---|---|---|
+| 0-0.5 | 71, -0.025, 7 / 13 | 48, -0.003, 7 / 5 |
+| 1-1.5 | 91, +0.017, 34 / 37 | 51, -0.013, 6 / 7 |
+| 2 (a composite) | 40, -0.008, 3 / 6 | 34, -0.025, 6 / 5 |
+| 2.5-3 (a procedure) | 199, +0.250, 116 / 14 | 5, +0.100, 2 / 0 |
+
+Composite knowledge -- several dependent formulas, bands, a change of grain
+-- gains nothing from delivery on either benchmark (DABStep 3 tasks to 6,
+LiveSQLBench 6 to 5). The whole DABStep gain is on the 199 tasks at the top
+level. Those are exactly the tasks both raters marked as matching each
+record against a table of rules, and every one of them is DABStep's fee
+procedure: matching payments to fee rules on several fields, with monthly
+volume and fraud bands and the fee formula. 102 of them lie outside the 11
+macro families, which is why (17) holds (49 tasks to 3 there). LiveSQLBench
+has almost no such knowledge: 4 of its 302 tasks are marked rule matching by
+both raters, and 5 determined tasks reach the top level.
+
+So the second condition, sharpened, is not "complex knowledge" but **a
+procedure that applies rules record by record**. Composite formulas, which
+LiveSQLBench has plenty of, come through prose as well as through a
+contract. The limit is the evidence: on these two benchmarks that kind of
+knowledge is one procedure, DABStep's fee matching. "A rule-matching
+procedure" and "this procedure" cannot be told apart here, and telling them
+apart needs a second, independent procedure -- another benchmark, or one
+built for the purpose. The ratings, the key and the packets stay private
+(they encode the task-to-KB mapping); see `results/README.md`.
+
+### Knowledge type, controlled: predictions (22)-(25)
+
+The procedural-load test left "a rule-matching procedure" and "DABStep's
+fee procedure" confounded. Experiment 4 builds the procedure itself. On
+three LiveSQLBench databases from three domains (reverse_logistics,
+labor_certification_applications, solar_panel) each gets two new pieces of
+knowledge written as KB entries (`prep/procedures/DESIGN.md`): **R**, a
+rule-matching procedure -- a seeded table of 400-520 rules matched on
+several fields at once, NULL criteria as wildcards, a band on the entity's
+monthly count, precedence by specificity, a default when nothing matches,
+and a per-record amount aggregated -- and **C**, a composite over existing
+columns (dependent formulas, a banded class, a change of grain). Every
+choice is stated, so both are determined. An independent reviewer
+reimplemented every piece from its text and matched the reference on every
+record; a blind solver given only the KB answered all 60 questions (ten per
+piece per database, in matched shapes). The contracts were written by
+`dce.author` from the extended KB without any question, and a checker found
+every R and C definition equal to the reference on every record, no edit
+needed (`contracts-procedures/`).
+
+The first smoke (12 R questions, gpt-6-luna) put every knowledge arm at 12
+of 12, so a **writing factor** was added before the run commit:
+`manual_styled` is `manual_prompt` with R and C rewritten the way a business
+manual writes them, modelled on DABStep's -- an overview addressed to the
+reader, the rule table's fields described one by one, precedence, defaults
+and edge cases in later notes, bands and formulas in words with a worked
+example -- about twice the length. `styled_facts.md` maps every fact of the
+clean version to its styled sentence, and a blind solver given the styled
+KB also answered 60 of 60. The second smoke (both models, five arms) was at
+the ceiling too. The run commit `05015db` recorded both smokes and fixed
+how each outcome reads.
+
+Five arms on gpt-6-luna and gpt-6-sol, k=3, run together in each repeat; a
+task scores 0-6 (`analysis/procedures.py`):
+
+| piece | schema_only | manual_prompt | manual_styled | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| R (30 tasks) | 12.2% | 98.3% | 100.0% | 98.3% | 99.4% |
+| C (30 tasks) | 0.6% | 98.9% | 99.4% | 97.8% | 100.0% |
+
+- **The manipulation check holds.** The questions need the knowledge:
+  `manual_prompt` beats `schema_only` on R (29 tasks to 0) and on C (30 to 0).
+- **(22) fails.** On R with styled prose, the contract beats `manual_styled`
+  on no task and loses on one.
+- **(23) and (24) fail.** Styled prose costs nothing on either piece, so
+  there is no difference between R and C to find (permutation p = 0.95 and
+  1).
+- **(25) holds.** With clean prose the contract and the prose tie on R
+  (+1.1 points, 2 tasks to 0).
+
+Each model alone, and each database, says the same: gpt-6-sol scores 100%
+on R in every knowledge arm, gpt-6-luna 96.7-100%.
+
+As fixed in advance, (22) failing means **even a manual-style rule-matching
+procedure gets through prose when the prose is complete; DABStep's gain is
+specific to its procedure or its manual**. So the type of knowledge is not
+the condition, and neither is the style of the prose. The next two sections
+find what DABStep's procedure has that these do not: a fact the manual
+leaves out.
+
+Qwen 3.8, a weaker model, runs the same materials at `c39026f`, with the
+same four tests labelled (22Q)-(25Q). It was added after the ceiling was
+seen and is reported apart (`analysis/procedures.py --set qwen`; a task
+scores 0-3):
+
+| piece | schema_only | manual_prompt | manual_styled | manual_compiled | contract |
+|---|---:|---:|---:|---:|---:|
+| R (30 tasks) | 11.1% | 98.9% | 96.7% | 96.7% | 100.0% |
+| C (30 tasks) | 0.0% | 97.8% | 96.7% | 100.0% | 100.0% |
+
+The manipulation check holds (28 tasks to 0 on R, 30 to 0 on C); (22Q),
+(23Q) and (24Q) fail (2 tasks to 0, p = 0.25; permutation p = 0.5 and
+0.63); (25Q) holds (+1.1 points, 1 task to 0). **The weaker model is at the
+ceiling too**: complete prose carries both pieces, in either style.
+
+### Text or tools: predictions (20)-(21)
+
+The contract differs from the prose arm in two ways at once: it states the
+procedure as definitions with SQL, and the agent reaches them through the
+governed tools. `contract_text` (`cb54e65`) separates the two: the
+contract's two files, verbatim, in the prompt, over the plain tools
+`manual_resolved` has. Run commit `f499053`: gpt-6-luna, k=3, the three arms
+together in each repeat, `--retry-pass`, no errors. Primary subset: the 199
+rule-matching tasks of the procedural-load test.
+
+| tasks | n | manual_resolved | contract_text | contract |
+|---|---:|---:|---:|---:|
+| rule-matching | 199 | 53.9% | 83.2% | 82.6% |
+| rest | 202 | 65.0% | 73.3% | 78.4% |
+| all | 401 | 59.5% | 78.2% | 80.5% |
+
+- **(20) holds.** On the rule-matching tasks `contract_text` beats
+  `manual_resolved`, 100 tasks to 7 (one-sided p = 2e-22).
+- **(21) holds.** There `contract` and `contract_text` tie: -0.7 points, 15
+  tasks to 18 (p = 0.73).
+- **Not predicted.** On the other 202 tasks the governed tools do add to the
+  text: `contract` beats `contract_text` by 5 points, 38 tasks to 15
+  (p = 0.002). The last section below finds where and why.
+
+Cost per repeat: `contract_text` $0.69, `manual_resolved` $1.02, `contract`
+$1.20. The text arm is the cheapest: the contract sits in the cached prompt
+prefix, and it takes 5.6 turns and 6 tool calls a run against the governed
+arm's 7.3 and 13.9. The governed arm runs the fewest queries (1.5 a run,
+against 2.7 and 7.8); its look-ups return new, uncached tokens.
+
+The reading fixed for (20) and (21) holding was "the gain is the executable
+statement of the procedure, wherever it sits". The next section shows that
+reading is premature: the text arm also knows something the prose arm does
+not.
+
+### The prose lacked a second fact: how overlapping rules combine
+
+Run 1's transcripts were compared on the 34 rule-matching tasks that
+`contract_text` solved and `manual_resolved` missed in both of the first two
+repeats (none went the other way). All 34 compute fees per transaction and
+add them up: a merchant's total fees for a day, month or year, and what-if
+changes (moving a merchant to another MCC, steering traffic to another ACI
+or card scheme). None is a "which rules apply" question.
+
+About 30 of the 34 turn on one point. The manual defines the fee of a
+transaction under one rule (`fee = fixed_amount + rate * transaction_value
+/ 10000`) and the null wildcard, and never says what happens when several
+rules match the same transaction. The contract's `total_transaction_fees`
+sums over every matched (transaction, rule) pair -- the gold convention --
+and does not mark that as an `INTERPRETATION`. The prose arm saw the overlap
+(nearly every one of these transcripts discusses specificity or double
+counting) and invented a one-rule-per-transaction policy; in two tasks it
+computed the gold number and then rejected it as double counting. Of the
+rest, two missed the empty-list check on one of the three list fields
+although the note states it, one did both, and one turns on what-if
+mechanics neither document states.
+
+**So "Knowledge or delivery?" held knowledge equal on one fact and not on
+this one.** The section's "delivery" share on gpt-6-sol -- the remaining gap
+in the total-fee families -- and the "right time" reading given there are,
+at least in large part, this second fact. Experiment 5b tests that:
+`manual_summed` (`14d627d`) is `manual_resolved` plus `SUM_NOTE`, the
+convention in words and without SQL. Run commit `c39026f` predicts that it
+beats `manual_resolved` on the rule-matching tasks (28) and ties
+`contract_text` there (29), on gpt-6-luna and on Qwen 3.8, where the four
+arms run together. Its 12-task smoke: `manual_resolved` 8, `manual_summed`
+11, `contract_text` 12.
+
+**Where the summing convention came from (traced 2026-10-21).** The
+upstream merge squashed the history. The pre-squash commits survive locally
+on branch `archive/dabstep-eval-presquash`, and they give this order, all
+on 2026-08-30:
+
+- **09:56, `46b0ed6`:** the design sets the rule "No question text, no gold
+  answer, and no score is consulted while authoring".
+- **10:34, `18577ac`:** the golds are reconstructed, into the gitignored
+  `data/golds.json`.
+- **11:37, `a2abf7c`:** the contract's first freeze ("Authored blind: no
+  DABStep question, gold answer, or score was read").
+- **11:54 to 12:26:** three re-freezes, each justified from the two
+  documents, before any score existed.
+
+`total_transaction_fees` and the empty-list `INTERPRETATION` are both in
+the first freeze, word for word as in every later version. The summing
+definition joins each transaction to "the fee rule that matches it",
+singular, and sums the join. That reads as the ordinary join-and-sum idiom,
+written without noticing that several rules can match one transaction,
+which is why it was never marked as an interpretation. The golds were on
+disk an hour before the freeze. The rule and the commit say they were not
+read, and that cannot be verified from outside.
+
+### Where the tools help: retrieval at the point of use, not validation
+
+The governed tools' 5-point lead on the non-rule-matching tasks sits in
+three families that average fees over the rule table (correct task-runs of
+three per task):
+
+| family | tasks | contract | contract_text | manual_resolved | tasks up / down |
+|---|---:|---:|---:|---:|---|
+| avg_fee_account_mcc | 20 | 59 | 43 | 29 | 14 / 1 |
+| avg_fee_credit | 19 | 39 | 25 | 4 | 12 / 3 |
+| avg_fee_account | 20 | 60 | 52 | 45 | 7 / 0 |
+| fee_ids_by_at_aci | 20 | 60 | 60 | 60 | 0 / 0 |
+| the other 123 | 123 | 257 | 264 | 256 | 5 / 11 |
+
+Every one of the 50 runs where `contract` was right and `contract_text`
+wrong (all three repeats) fails the same way: its answer equals, to six
+decimals, the result of dropping the wildcard rules -- a strict
+`list_contains(account_type, ...)` that drops the 720 rules with an empty
+list, or `is_credit = TRUE`, which drops the 100 with a null. Never the fee
+formula, the averaging, the units or the rounding.
+
+The text arm had the rule. It is stated three times in its 60,000-character
+prompt: the top-level MATCHING RULE in `contract.yml` (which mentions null
+only), the `INTERPRETATION` and SQL of `fee_rule_matches_transaction` about
+30,000 characters later, and the fee column descriptions. When its
+reasoning mentioned "empty" before its first fee query, it was right in 36
+of 38 runs, against 59 of 82 when it did not.
+
+The governed arm got there because the tools put the rule in front of the
+agent just before it wrote the query. In 34 of the 50 winning runs it
+looked up `fee_rule_matches_transaction` and copied its three-part clause
+(`IS NULL OR len(...) = 0 OR list_contains(...)`); in the other 16,
+`lookup_domain(fees)` or the governed `describe_table(fees)` (which carries
+the column descriptions; the plain one returns types) said that empty or
+null means all. Every governed run in these three families made both calls
+before its first fee query, as its instruction says. The first fee query carried the wildcard in
+35 of 57 credit-family runs against 6 for the text arm, 59 of 60 against 41
+for account, 54 of 60 against 44 for account and MCC. The text arm wins 12
+runs in this group, 11 of them in the credit family, where the governed arm
+read "for credit transactions" strictly.
+
+**`inspect_query` played no part: none of the 50 runs had a rejection.**
+That says nothing about validation in general. The contract declares one
+blocking rule (`no_select_star`) and one warn-only rule with no check, and
+the library's query checks (a required filter, required filter values, no
+`SELECT *`, blocked columns, a required `LIMIT`, a join cap) cannot express
+"a filter on this list column must accept the empty-list wildcard". A test
+of validation would need a check that can -- for example, one that blocks a
+fee query not built on the declared matching predicate -- and an arm that
+has it. On luna the tools help by retrieval at the point of use: the right
+clause, in focus, when the query is written. A contract that stated its key
+rule in full at the top might close part of this gap without tools;
+experiment 5c below comes close to testing it.
+
+The transcript analyses in this section and the one before are
+exploratory, chosen after the registered results were seen. The traces
+are kept off the repository for size (`~/data/dce-held-results/exp5/`).
+
+### The second fact, measured: predictions (26)-(29Q)
+
+Experiment 5b (run commit `c39026f`) adds `manual_summed`: `manual_resolved`
+plus `SUM_NOTE` ("Several fee rules can match the same transaction; when
+they do, each of them applies. ..."), the convention in words. On
+gpt-6-luna it ran alone and pairs by task and repeat with experiment 5's
+files; on Qwen 3.8 the four arms ran together, with Qwen's experiment 5
+predictions (26)-(27), fixed earlier in `7ffc11a`. k=3, `--retry-pass`,
+end-to-end strict on the 199 rule-matching tasks (`analysis/contract_text.py
+--model luna|qwen`).
+
+| model | tasks | manual_resolved | manual_summed | contract_text | contract |
+|---|---|---:|---:|---:|---:|
+| gpt-6-luna | rule-matching | 53.9% | 82.4% | 83.2% | 82.6% |
+| | rest | 65.0% | 67.3% | 73.3% | 78.4% |
+| Qwen 3.8 | rule-matching | 43.4% | **86.1%** | 69.5% | 79.6% |
+| | rest | 69.8% | **74.1%** | 62.9% | 55.9% |
+| | rule-matching, official | 24.6% | 45.6% | 41.5% | 51.6% |
+
+- **(28) and (28Q) hold.** The note lifts the prose by 28.5 points on luna
+  (95 tasks to 4, p = 6e-24) and 42.7 on Qwen (112 to 4, p = 9e-29). The
+  convention is knowledge the manual lacked, on both models.
+- **(29) holds on luna**: `contract_text` and `manual_summed` tie (+0.8
+  points, 26 tasks to 19, p = 0.37).
+- **(29Q) fails on Qwen, with the prose ahead**: `manual_summed` beats
+  `contract_text` by 16.6 points, 69 tasks to 14 (p = 7e-10). The run
+  commit's readings did not foresee this direction.
+- **(26) holds** (`contract_text` beats `manual_resolved`, 88 tasks to 13)
+  **and (27) holds** (the governed tools add to the text on Qwen, +10.1
+  points, 64 tasks to 16, p = 3e-8).
+- **Not predicted.** On the other 202 tasks luna's `contract_text` beats
+  `manual_summed` (41 tasks to 21, p = 0.015), in the three average-fee
+  families of the section above; on Qwen the governed `contract` trails
+  `contract_text` there (30 tasks to 49, p = 0.04).
+
+Qwen states its working and then the answer as its last paragraph, and the
+official scorer marks that wrong; the end-to-end view credits it. The
+upgrade is not even across arms (+40.5 points for `manual_summed` on the
+rule-matching tasks, +28 for each contract arm), so under official verdicts
+the order changes: `contract` leads, and `manual_summed` and `contract_text`
+are close. Sampled upgraded answers were right in every arm, and answers
+holding the gold anywhere but the last paragraph are rare (0-15 per arm and
+subset) and were wrong when read. On luna the two views agree exactly.
+Run health: Qwen's three repeats cost about $1.90 each; five
+`manual_resolved` runs of 1,203 ended at an error or the turn limit and
+count as wrong; gpt-6-luna's `manual_summed` cost $0.66 a repeat, no errors.
+
+### The notes were plainer than the contract
+
+The design was checked after (29Q) failed. The prompts were as built (one
+system prompt per arm over all 401 traces; `manual_summed` is
+`manual_resolved` plus the note and nothing else; both contract files
+verbatim in `contract_text`), the configuration matched across arms, and the
+harness between the two run commits differs only by the new arm. One thing
+was not equal. The prose arm states both deciding facts as notes of their
+own. The contract states them less plainly: its MATCHING RULE mentions null
+only, with the empty-list clause about 28,000 characters later, and
+`total_transaction_fees` speaks of each transaction "joined to **the fee
+rule** that matches it" before saying to sum over matched pairs.
+
+The traces fit that reading. A keyword count over repeat 1 (single-rule
+policies: "most specific", "cheapest", "minimum fee per transaction" and
+the like; approximate, so a direction rather than a measurement) finds
+single-rule reasoning in 103 of Qwen's 199 `contract_text` runs on the
+rule-matching tasks, against 37 of 199 on luna; in 49 of Qwen's 61 failed
+`contract_text` runs, against 8 of 30 failed `manual_summed` runs. Luna
+reads the contract as summing; Qwen often takes "the fee rule" at its word.
+So (29Q) compared a note against a sentence that half-contradicts it, not
+prose against the contract's form.
+
+### The facts stated alike: predictions (30)-(31Q)
+
+Experiment 5c tests that. `contract_text_noted` (`581feb1`) is
+`contract_text` plus `DATA_NOTE` and `SUM_NOTE`, word for word, under the
+headings and in the order `manual_summed` has them. Run commit `a960495`:
+`manual_summed`, `contract_text` and `contract_text_noted` together in each
+repeat, gpt-6-luna then Qwen 3.8, k=3, `--retry-pass`; the two older arms are
+rerun so every test pairs within a run, and their earlier files serve as a
+drift check (`analysis/contract_noted.py --model luna|qwen`).
+
+| model | tasks | manual_summed | contract_text | contract_text_noted |
+|---|---|---:|---:|---:|
+| gpt-6-luna | rule-matching | 84.1% | 80.4% | **87.8%** |
+| | rest | 68.2% | 73.8% | **77.7%** |
+| Qwen 3.8 | rule-matching | 84.1% | 70.7% | **89.6%** |
+| | rest | **75.4%** | 60.6% | 70.1% |
+| | rule-matching, official | 45.7% | 38.9% | **54.6%** |
+
+- **(30) and (30Q) fail, with the contract's text ahead.** Stated alike,
+  the facts do better in the contract than in the prose on the
+  rule-matching tasks: +3.7 points on luna (32 tasks to 13, p = 0.007) and
+  +5.5 on Qwen (35 to 10, p = 3e-4; official 74 to 45, p = 0.01).
+- **(31Q) holds**: the two notes lift Qwen's `contract_text` by 18.9 points
+  (70 tasks to 8, p = 9e-14). On luna, where none was registered, they add
+  7.4 (31 to 8).
+- **No drift.** Each rerun arm is within 3 points of its earlier run on
+  every subset (largest: luna's `contract_text` on the rule-matching tasks,
+  -2.8 points, 8 tasks to 22), so experiments 5 and 5b stand.
+- **On the other 202 tasks the models part.** Luna's noted text leads the
+  prose by 9.5 points (51 tasks to 14), most of it in the average-fee
+  families. Qwen's is behind by 5.3 points, not significantly (37 to 47,
+  p = 0.33): it wins the credit family (35 of 57 task-runs against 3) and
+  loses `fee_ids_by_at_aci` (17 of 60 against 60). There Qwen, reading the
+  contract, matches `account_type` and `aci` strictly and lists too few
+  rules, although the data note sits in the same prompt; read with the
+  prose, it never does.
+
+As fixed in the run commit, the contract's text ahead means **with the
+facts alike, the contract's form adds to them** on the tasks the procedure
+governs, on both models. One caveat: the noted arm states each fact twice
+(in the contract and in the note), the prose once, so part of the lead may
+be repetition rather than form. Run health: luna $1.97 and Qwen about $1.00
+a repeat, no errors; one `manual_summed` run per Qwen repeat ended at the
+turn limit. The family counts and the `fee_ids_by_at_aci` reading are
+exploratory. Traces: `~/data/dce-held-results/exp5b/`, `exp5-qwen/`,
+`exp5c/`.
+
+### The note on tasks nobody read (exploratory)
+
+`SUM_NOTE` was written after reading transcripts of 34 rule-matching tasks:
+those `contract_text` solved and `manual_resolved` missed in both of
+experiment 5's first two gpt-6-luna repeats. (28) was then tested on all
+199 rule-matching tasks, those 34 included. A reviewer's objection follows:
+the note may be fitted to the tasks that inspired it.
+`analysis/heldout_note.py` rebuilds the 34 from the rows and repeats each
+comparison on the other 165, which no transcript reading touched. No
+Qwen transcript was read before the note was written, so on Qwen all 199
+are unseen in that sense.
+
+| on the 165 never read | gpt-6-luna | Qwen 3.8 |
+|---|---|---|
+| `manual_summed` vs `manual_resolved` | +19.2 points, 64 tasks to 4 | +33.9, 78 to 4 |
+| `contract_text` vs `manual_summed` | -2.6, 15 to 18 (p = 0.73) | -16.0, 9 to 53 |
+| `contract_text_noted` vs `manual_summed` (5c) | +2.2, 24 to 13 (p = 0.10) | +4.6, 23 to 7 (p = 0.005) |
+
+**The second fact is knowledge, not a fit to the inspected tasks.** The note
+lifts the prose by 19 and 34 points on tasks nobody read.
+
+**The form gain is weaker on unread tasks.** On luna, experiment 5c's 3.7
+points came mostly from the 34 inspected tasks (+10.8 there, 8 tasks to 0).
+On the 165 unread ones it is +2.2 and not significant. On Qwen it holds at
++4.6.
+
+So "with the facts stated alike, the contract's form adds to them" stands on
+Qwen. On luna it rests largely on the tasks whose transcripts suggested the
+note.
+
+### Gaps the documentation leaves open: predictions (32)-(36)
+
+Experiments 4 to 5c held the knowledge fixed and varied its delivery. The
+author of those contracts had complete documentation. Experiment 4b asks the
+question a deployment faces: when the documentation leaves something open,
+does an author who can query the data recover it? And is the contract's gain
+then the author's knowledge? Design: `docs/superpowers/specs/
+2026-10-19-experiment-4b-design.md`.
+
+Experiment 4's three databases and 60 questions, each KB opened by gaps.
+G1 is the rule table's wildcard stored as a sentinel, in all three
+databases. G2 is a silent encoding of a quantity the C questions read: in
+reverse_logistics a score stored one higher, in solar_panel a fraction
+stored where the KB implies a percentage. G3 removes the precedence among
+matching rules from reverse_logistics' KB. Blind raters labelled the gaps
+(`prep/procedures4b/subsets.json`):
+- settled by the data: solar G1 and G2 (20 questions);
+- split: labor G1, reverse_logistics G1 (through R06) and G2 (21);
+- convention-only: G3 (9);
+- no gap: labor's C questions (10).
+
+Settled and split together form the data-informed subset: 41 questions in
+five gap clusters. `dce.author` drew three contracts per database with the
+data open and one without.
+
+The six arms ran together in each repeat:
+- `schema_only`: no KB;
+- `manual_gap`: the gapped KB;
+- `manual_full`: the complete KB;
+- `contract_gap`: the governed contract from draw 1;
+- `manual_noted`: the gapped KB plus draw 1's resolutions, written as notes
+  by a writer and checked by a checker;
+- `contract_text`: the same contract's files in the prompt over plain tools.
+
+Models: gpt-6-luna, qwen3.8-27b and gpt-6-sol, k=3. Run commit `a6342d0`
+(tag `exp4b-run`); results `e1467c2`; `analysis/procedures_gap.py`.
+
+**Recovery, scored before any agent ran** (`contracts-procedures4b/
+RECOVERY.md`). All four predictions hold.
+- **(32)** 12 of 15 data gap-draws were recovered.
+- **(32g)** By label: settled 6 of 6, split 6 of 9, convention-only 0 of 3.
+- **(32c)** The no-data control recovered none of five.
+- **(33)** Every draw, the no-data control included, resolved G3 as the
+  lowest `rule_id`; the gold is most specific wins.
+
+The three split misses are all reverse_logistics G2. Each data draw saw
+that the score runs from 2 to 11 and kept it as stored.
+
+| accuracy | schema_only | manual_gap | manual_full | contract_gap | manual_noted | contract_text |
+|---|---:|---:|---:|---:|---:|---:|
+| data-informed (41), pooled | 10.8% | 47.7% | 97.6% | 74.5% | 75.3% | 74.0% |
+| settled (20) | 7.2% | 59.4% | 98.3% | 99.4% | 100.0% | 98.9% |
+| split (21) | 14.3% | 36.5% | 96.8% | 50.8% | 51.9% | 50.3% |
+| convention-only (9) | 2.5% | 0.0% | 97.5% | 0.0% | 0.0% | 0.0% |
+| no gap (10) | 0.0% | 100.0% | 98.9% | 100.0% | 100.0% | 100.0% |
+| gpt-6-luna, data-informed | 10.6% | 25.2% | 95.9% | 75.6% | 75.6% | 74.8% |
+| qwen3.8-27b, data-informed | 8.1% | 68.3% | 98.4% | 72.4% | 74.8% | 71.5% |
+| gpt-6-sol, data-informed | 13.8% | 49.6% | 98.4% | 75.6% | 75.6% | 75.6% |
+
+- **(34) holds: the gaps bite.** `manual_full` beats `manual_gap` by 49.9
+  points, 38 tasks to 1 (p = 7e-11). It holds on every model (+70.7,
+  +30.1, +48.8) and every cluster.
+- **(35) holds.** `contract_gap` beats `manual_gap` by 26.8 points, 28 tasks
+  to 1 (p = 6e-8). It holds on every model (+50.4, +4.1, +26.0) and on four
+  of five clusters. The fifth is reverse_logistics G2, where both score 0.
+- **(36) holds: the gain is the author's knowledge.** The knowledge share
+  is 1.03, with 95% interval [0.98, 1.35] over gap clusters. It is 1.00 on
+  luna and on sol. On Qwen it is 1.60, over a denominator of 4.1 points.
+- **Form and tools add nothing here.** `contract_text` against
+  `manual_noted` is -1.4 points (1 task to 3); `contract_gap` against
+  `contract_text` is +0.5 (2 to 0). The three knowledge-equal arms tie on
+  every label, and all knowledge arms tie on the no-gap control.
+- **The author's misses travel with the contract.** On reverse_logistics
+  G2 and on G3, every arm built from draw 1 scores 0 and `manual_full`
+  97-98%. That is the whole of the contract arms' 23-point deficit to
+  complete documentation on the data-informed subset (-23.0 points, 6 tasks
+  to 12). It also covers G3's nine questions (0 to 9).
+
+As fixed in the run commit, (35) and (36) holding means **the DABStep
+decomposition replicates on new domains when the knowledge has to be
+recovered**. The contract carries what its author recovered, no more and no
+less. What the data settles is recovered in every draw. What the data only
+suggests is recovered two times in three. A convention the data cannot
+reveal was missed in every draw. The recovery failures read as forecast:
+the contract does no better than the gapped KB where the author kept a
+wrong reading.
+
+Qwen reads the gapped KB better than the GPT models: 68.3% against 25.2%
+and 49.6%. With prose it runs 8-12 `execute_sql` calls a run, against 2-5
+for the GPT models, and so finds some gaps itself. That leaves the contract
+only 4.1 points to add on Qwen, and a share computed over 4.1 points is not
+informative beyond its sign.
+
+**One question explained: reverse_logistics R06.** R06 is the only question
+in the reverse_logistics G1 cluster. `schema_only` gets it right in all six
+luna and sol runs, and `manual_gap` gets it wrong in all six. `manual_gap`
+reads `ANY` as a literal (the gap). `schema_only` sees `ANY` in the data and
+treats it as a wildcard. It also uses a different quantity: the customer
+profile's `total_returns` (20) where the KB means the returns that month
+(13). Both counts fall in the rule table's 8-or-more band, so the matching
+set and the verdict come out the same. Its 78% there is a coincidence of a
+set-valued answer, not knowledge. Luna's one `manual_full` miss is a SQL
+slip: it computes the monthly count with a window inside a CTE already
+filtered to the one case, so the count is 1.
+
+**Efficiency** (reported, not predicted; per model, since prices differ).
+The mean run on the data-informed subset; input is fresh plus cached.
+
+| model | arm | turns | input | m$ a run | m$ a correct answer |
+|---|---|---:|---:|---:|---:|
+| gpt-6-luna | manual_full | 4.1 | 55.1k | 2.02 | 2.11 |
+| | contract_gap | 5.2 | 63.9k | 2.33 | 3.08 |
+| | manual_noted | 3.7 | 55.6k | 1.93 | 2.55 |
+| | contract_text | 2.6 | 73.8k | 1.82 | 2.43 |
+| qwen3.8-27b | manual_full | 10.3 | 240.7k | 1.03 | 1.04 |
+| | contract_gap | 5.2 | 71.9k | 0.36 | 0.50 |
+| | manual_noted | 8.3 | 180.6k | 0.87 | 1.16 |
+| | contract_text | 3.2 | 98.8k | 0.30 | 0.42 |
+| gpt-6-sol | manual_full | 4.4 | 57.6k | 31.83 | 32.36 |
+| | contract_gap | 5.2 | 62.7k | 41.55 | 54.96 |
+| | manual_noted | 3.8 | 56.5k | 32.10 | 42.45 |
+| | contract_text | 3.8 | 109.2k | 42.68 | 56.45 |
+
+- **Where input is cached** (luna, sol), the static prompts are cheapest.
+  On luna `contract_text` and the notes tie (cheaper on 25 tasks of 41,
+  p = 0.21); on sol the notes win (`contract_text` is cheaper on 3). The
+  governed `contract_gap` costs more than the notes on 37 of 41 tasks on
+  luna and 40 of 41 on sol, about 20% and 30% more a run.
+- **Where it is not** (Qwen; output metered only), both contract forms cost
+  under half of the prose. `contract_gap` is cheaper than `manual_noted` on
+  39 of 41 tasks. That comes from behaviour, not context size: with the
+  contract, Qwen stops exploring. It runs 5.2 and 3.2 turns against 8.3,
+  and a sixth of the reasoning tokens.
+- **Progressive disclosure saves input but not money, at this scale.**
+  `contract_gap` fetches contract text on demand: about four lookups a run.
+  That brings 13% less input into context than `contract_text` on luna,
+  27% less on Qwen and 43% less on sol. It also takes more turns on 39 or
+  more of 41 tasks on every model. In dollars it costs more on luna (37 of
+  41 tasks) and Qwen (32 of 41), and ties on sol (cheaper on 20, dearer on
+  21). The fetched
+  text is billed fresh, and each extra turn re-sends the prefix. One
+  contract of three databases is too small for the saving to pay. The test
+  at a size where it should is gap 8 of `docs/paper-plan.md`.
+- Every contract arm reasons less than the prose arms on every model:
+  luna 311 and 297 reasoning tokens against 491 for the notes and 847 for
+  the gapped KB.
+
+Run health: three repeats per model at about $0.86 (luna), $15.30 (sol)
+and $0.38 (Qwen, output only) each. Three Qwen runs ended in an error and
+were retried; one Qwen run ended at the turn limit and counts as wrong. The
+R06 reading and the efficiency figures are exploratory. Traces:
+`~/data/dce-held-results/exp4b/`.
+
+### Disclosure at scale: predictions (37)-(40)
+
+Experiment 4b found that progressive disclosure saves input but not money
+on one database's contract: about 25k tokens fit in a cached prompt, so
+loading it all up front is nearly free. Experiment 6 grows the contract
+until it should pay. Design: `docs/superpowers/specs/
+2026-10-20-experiment-6-disclosure-scale-design.md`, with one amendment.
+
+Experiment 4's three databases and 60 questions, each base contract at the
+ceiling. Padding is real but irrelevant: the other two base contracts
+first, then 19 contracts `dce.author` wrote for other LiveSQLBench
+databases, in a seeded order. Each padding contract is namespaced into its
+own database's name, its enforcing rules dropped and its prose kept. The
+base sits at the middle of the merged contract. Five levels take whole
+contracts: 1x (the base alone), 2x, 4x, 8x and all (22 databases).
+
+The arms:
+- `contract_scaled_<level>`: the governed contract, with an index in the
+  prompt and lookups on demand;
+- `contract_text_scaled_<level>`: the same merged files in the prompt over
+  plain tools, at every level that fits;
+- `manual_scaled`: the base KB plus the padding KBs as prose, at 1x and 4x;
+- `contract_text_first_4x`: the text arm with the base first, a position
+  control.
+
+Prompt size grows very differently. The governed prompt grows from 8k
+tokens at 1x to 10k at 4x and 20k at all. The text arm's grows from 26k to
+92k and 551k. 4x is the common top: the largest level both arms fit on
+every model. Qwen's 262k window, less the output reserve, does not fit the
+text arm at 8x or all. gpt-6-luna, gpt-6-sol and qwen3.8-27b, k=3. Run
+commit `fbca5ec` (tag `exp6-run`); results `a6ffe53`;
+`analysis/disclosure_scale.py` and `analysis/disclosure_mechanism.py`.
+
+**Amendment, before any test.** gpt-6-sol's text arm at 8x and all was
+dropped for cost. A run at "all" cost $1.13. By then 33 sol runs were in,
+all correct. sol's four finished runs at those levels are kept in its
+file, and enter no table or test. Every prediction is still tested at 4x
+on all three models.
+
+| accuracy, pooled | 1x | 2x | 4x | 8x | all |
+|---|---:|---:|---:|---:|---:|
+| `contract_scaled` | 99.6% | 99.8% | 99.4% | 99.6% | 99.8% |
+| `contract_text_scaled` | 100.0% | 99.4% | 99.4% | 100.0%* | 98.3%* |
+| `manual_scaled` | 98.3% | | 97.8% | | |
+| `contract_text_first` | | | 99.6% | | |
+
+\* gpt-6-luna only.
+
+- **(37) is equivalent: size costs the text arm no accuracy, up to 4x.** The
+  text arm at 4x is below itself at 1x on 3 tasks and above on none
+  (p = 0.12). The 95% interval of the mean drop is [+0.0, +1.3] points,
+  inside the ±5-point bound. The drops by model: luna +1.7 points, sol 0,
+  Qwen 0. luna's text arm at "all", 551k tokens in the prompt, still scores
+  98.3%.
+- **(38) and (38b) fail.** There is no drop for disclosure to hold:
+  4 tasks to 2 (p = 0.34), and the governed arm against itself 3 to 2
+  (p = 0.5).
+- **(39) holds: disclosure is cheaper at size.** At 4x the governed arm
+  costs less per run on luna on 58 of 60 tasks (p = 2e-15), and on sol on
+  all 60 (p = 9e-19).
+- **(40) holds.** Qwen's governed arm scores 100% at 8x and at all, where
+  the text arm does not fit its window, against 100% at 1x.
+
+As fixed in the run commit, (37) equivalent reads: **up to the common top,
+the whole contract in the prompt costs no accuracy, and disclosure's case is
+cost and size.** Both hold: (39) and (40).
+
+**Cost** (per model, since prices differ). The mean run's dollars, and its
+input (fresh plus cached):
+
+| model | arm | 1x | 2x | 4x | 8x | all |
+|---|---|---:|---:|---:|---:|---:|
+| gpt-6-luna | governed | 2.22 m$, 62k | 2.23, 67k | 2.34, 73k | 2.44, 82k | 2.97, 129k |
+| | text | 1.75 m$, 71k | 2.93, 166k | 4.05, 264k | 7.57, 562k | 19.10, 1,511k |
+| gpt-6-sol | governed | 42.0 m$, 63k | 42.3, 67k | 44.3, 75k | 46.4, 83k | 57.4, 130k |
+| | text | 40.3 m$, 101k | 67.4, 220k | 104.2, 384k | | |
+| qwen3.8-27b | governed | 72k | 73k | 83k | 89k | 134k |
+| | text | 86k | 168k | 279k | | |
+
+- **The crossover is 2x.** At 1x the text arm is as cheap or cheaper:
+  1.75 against 2.22 m$ on luna, 40.3 against 42.0 on sol. From 2x on, the
+  governed arm is cheaper. At 4x the text arm costs 1.7 times as much on
+  luna and 2.4 times on sol. At "all" it costs 6.4 times as much on luna.
+- **Turns do not change; the prompt does.** The governed arm takes about
+  5.1 turns at every level, the text arm 2.7-4.1. From 1x to all, the
+  governed arm's input doubles (62k to 129k on luna): its index grows, and
+  is re-sent each turn. The text arm's input grows 21-fold.
+- **The result does not rest on how a route bills.** Under one fixed price
+  at 4x, the governed arm costs 37 against 70 m$ on luna fully cached, and
+  169 against 545 uncached. On Qwen the figures are 43 against 76 cached,
+  and 192 against 578 uncached. Uncached, it is already cheaper at 1x on
+  every model. Qwen's own route meters only output, so its prompts are
+  free. There the text arm costs less (0.26 against 0.35 m$ at 4x), because
+  it takes fewer turns.
+- Caching holds up for both arms: 91-95% of the governed arm's input is
+  cached, and 96-98% of the text arm's.
+
+**Mechanism** (from the traces). The governed arm makes the same number of
+lookups at every level: luna 4.0-4.3 a run, sol 4.7-5.7, Qwen 3.0-3.4. No
+lookup on any model names a padding database or one of its metrics, and no
+SQL from any arm touches a padding table. A lookup result mentions padding
+in 0-1.7% of runs on luna and sol, and in 9.2% (8x) and 6.3% (all) on
+Qwen. Those are `list_metrics` calls without a domain, which return every
+domain's metrics. The largest tool result is 13.7k characters on sol and
+Qwen. On luna one unfiltered call at "all" returned 315k. **The index
+steers the model to the base domain; padding reaches its context only when
+it lists metrics unfiltered.**
+
+**Reported, not predicted.**
+- **Prose.** `manual_scaled` is below the governed arm by 1.3 points at 1x
+  (1 task to 8, two-sided p = 0.039) and by 1.7 at 4x (2 to 7, p = 0.18).
+  The gap is on luna (97.8% and 96.1%) and Qwen (97.8% at both); sol
+  scores 99.4%. Qwen again explores with prose: 9-9.5 turns and 206-321k
+  input a run.
+- **Position.** Moving the base to the front of the text arm's prompt
+  changes nothing at 4x: +0.2 points (2 tasks to 1, p = 1).
+
+**What this does not show.** Accuracy sits at the ceiling at 1x (99.6% and
+100%), so the test of (37) could detect a drop but not a gain. The
+experiment shows that these models find the base in a prompt of up to 551k
+tokens of real but irrelevant contracts. It does not show the same for
+harder questions, or for padding that resembles the base. The padding here
+is other databases, namespaced by name; a contract padded with neighbouring
+domains of one database would be the harder test.
+
+Run health:
+- **Cost a repeat:** luna about $3.40, sol about $38-41, Qwen $0.28
+  (output only). Totals: $10.10, $116.26 and $0.84.
+- **Failures:** no overflow and no truncated prompt. One error, on Qwen
+  `manual_scaled_1x`, which counts as wrong.
+- **Traces:** none was cut at the cap. 174-180 of each arm-level's 180
+  runs have a trace; the rest ran before a pod restart, and their traces
+  were lost with the pod's disk.
+- Traces: `~/data/dce-held-results/exp6/`.
+
+### What the lookup log tells an auditor (exploratory)
+
+The governed arm leaves a record of which knowledge each answer consulted:
+every `lookup_metric` names a metric and returns its `sql_expression`. This
+asks whether that record supports trust in two senses. Does the final SQL
+implement what was looked up? And does a departure flag a wrong answer?
+`analysis/lookup_fidelity.py` parses each metric expression and the run's
+last `run_query` (DuckDB, table aliases stripped). A run counts as
+**exact** if a looked-up expression is a subtree of the SQL, and as
+**columns** if only the expression's columns appear. This was not
+predicted. It reads the traces of experiment 6's governed arm at every
+level and 4b's `contract_gap`.
+
+**Models use what they look up.** In experiment 6, the final SQL contains a
+looked-up metric verbatim in 91% of luna's runs (811 of 894), 98% of
+sol's (865 of 885), and 87% of Qwen's runs with a lookup (421 of 485).
+Qwen answered without any metric lookup in 385 runs, all correct. 4b is
+similar: 82%, 96% and 78%.
+
+**A departure does not flag a wrong answer.** Every experiment 6 run that
+departed from its looked-up formula was right: 75 on luna, 17 on sol, 64
+on Qwen. Eight of the nine wrong answers used a looked-up metric exactly;
+their errors lie in filters or joins, which a metric check cannot see. In
+4b, Qwen's 61 runs without a lookup score 30% against 87% for exact
+use. But all 43 wrong ones are reverse_logistics questions, where every
+arm built from that contract scores 0. On the questions where it both
+looked up and skipped, the two score the same (6 of 10 right without, 6
+of 8 with). The lookup log is not a per-answer correctness signal.
+
+**It does locate the source of an error.** Of 4b's 175 wrong governed
+answers, 174 are in reverse_logistics, the database whose contract carries
+the author's misses (G2 and G3). 90 of them applied the contract's metric
+verbatim: sol on G2's C questions, both GPT models on G3's R questions.
+Each such answer names its source definition, so an auditor can trace a
+wrong figure to the contract entry that produced it, and fix that entry
+once for every later answer. With the contract in the prompt, the SQL can
+be matched against definitions after the fact. Only the log records what
+the agent read before writing it.
+
+So the trust the contract offers is accountability, not detection. It does
+not tell a right answer from a wrong one. It tells you which definition an
+answer came from, and so where a correction belongs. Caveats: the
+classifier is syntactic, so "columns" may be an equivalent rewrite. Rules
+read through `lookup_domain` are not checked.
 
 ## The contract compiles, so the residual gap is derivation, not information
 
@@ -1680,6 +2887,35 @@ across 9 tasks where the earlier scan recorded 27 across 8 — a detail of
 statement splitting, affecting no conclusion. Run C's zero is unambiguous
 under either, and the same detector is what produced run D's 22 across 2.)
 
+### Across every run since: corrupted working copies
+
+The count above is of mutating statements *submitted*, in runs A-D.
+Every run also gets its own working copy of the database, which the
+harness checks afterwards (`db_corrupted`). That gives a stronger outcome
+measure, and it now covers every DABStep run: the k=3 panels, the
+knowledge-or-delivery series, experiments 5-5c and the compiler runs.
+Smoke files are excluded; `analysis/corruption.py` prints the numbers.
+
+- **Governed arms:** 0 corrupted copies in 22,946 runs. These are the
+  contract arms behind the governed tools, including `contract_hollow`
+  and the compiled contracts.
+- **Ungoverned arms:** 50 corrupted copies in 29,866 runs. These are
+  `schema_only`, the manual arms, and the contract's text over the plain
+  tools.
+- **The paper's seven models only:** 0 of 22,138 governed runs and 50 of
+  29,008 ungoverned. Leaving out a Qwen 3.6 sweep and a 62-row
+  deepseek-v4-pro probe changes no corrupted copy.
+- **What this measures:** a corrupted copy, not an attempted write. The
+  count of submitted mutating statements above covers runs A-D only; the
+  later runs were not searched for attempts.
+- **Where they fall:** 44 are Qwen 3.8's (18 `manual_prompt`, 24
+  `manual_resolved`, one each `manual_summed` and `schema_only`). The rest
+  are glm 3, Sonnet 5 1, deepseek 1 and gpt-6-sol 1.
+
+The contract's text over the plain tools never corrupted a copy. Its
+prompt states the same forbidden operations, so the declared rules,
+read from the prompt, seem to do the deterring here too.
+
 ### The harness converts a harmless idiom into a harmful one
 
 The mutating statements are not malformed SQL. `execute_sql` opens a fresh
@@ -1803,6 +3039,41 @@ disposable per-worker copy, so nothing real was harmed.
 are the defensible number.
 
 ## Operational findings
+
+### The scorer ignores sign
+
+DABStep's official scorer, vendored verbatim, reads the first number in
+an answer with a pattern that has no minus sign (`extract_numeric`). So
+`5.24` matches a gold of `-5.24`, and the reverse. Nine questions have a
+negative gold: 1931, 2057, 2229, 2419, 2463, 2477, 2481, 2491 and 2499.
+Each asks for the change in a merchant's fees under a what-if, and the
+gold is negative when the fees fall.
+
+Across every DABStep result file, 114 official verdicts are correct on a
+number of the opposite sign, and the end-to-end view credits 43 more. Their 21
+distinct answer texts were all read. All give the magnitude bare or as "the delta is 74.67", and
+none states the direction in words. They are wrong answers credited as
+right.
+
+They fall mostly on Qwen, and mostly on its baseline arms. In the Qwen
+panel there are 16 for `schema_only` against 5 for `contract_hollow` and
+none for `contract`. In experiment 5, `manual_resolved` has 5-6 a repeat.
+
+`analysis/sign_regrade.py` re-grades with the sign enforced, in both
+views. It runs each DABStep analysis twice and prints what moves:
+- **No registered prediction changes its outcome:** (16), (17), (26)-(31Q),
+  and the knowledge-or-delivery predictions.
+- **The large changes are on Qwen:**
+  - the note's share of the gap falls from 41% to 38%;
+  - the panel's scaffolding step moves from -4.3 to -3.4 points (official)
+    and from +0.2 to +1.2 (end-to-end);
+  - experiment 5c's (30Q) lead grows from +5.5 to +6.4 points.
+- **Runs A-D:** glm and deepseek move by one or two tasks an arm. Sonnet 5,
+  gpt-5.6-sol and every gpt-6 run do not move.
+
+The official verdicts stay the headline everywhere, as fixed; the re-grade
+is reported beside them. The defect inflates the arms that fail more
+often, so it works slightly against the contract arms.
 
 ### Two harness defects found by a post-hoc code review
 
@@ -2579,6 +3850,406 @@ of its work (runs B, C and D).
 The contrasts stay paired and same-task and their directions are not in
 doubt; their magnitudes carry this alongside the flip rate above.
 
+## Clustered inference and intervals (review round 2)
+
+Exploratory, written after every result it re-reads, in answer to a second
+review round. Every p-value above treats tasks as independent, and they are
+not. `analysis/clustered.py` re-reads the paired contrasts with the cluster
+as the unit:
+
+- **DABStep:** the question shape (`templates.shape_of`) is the primary
+  cluster. The 332 hard tasks fall in 38 shapes; the 69 easy tasks are 69
+  shapes; the 199 rule-matching tasks are 25. The sensitivity column is the
+  macro family (`counterfactuals.family_of`, 11 families over 176 hard
+  tasks), with every other task its own cluster (167 clusters on the hard
+  set).
+- **LiveSQLBench:** the database (22 for the main runs, 3 for experiments 2
+  and 3).
+- **Experiment 4b:** the gap cluster (5). **Experiment 6:** the knowledge
+  piece, a database's ten R or ten C questions (6).
+
+For each contrast the script prints the effect in points, a bootstrap
+interval over tasks, a bootstrap interval over clusters (whole clusters
+resampled, the ratio of summed differences to summed tasks) and a sign test
+over clusters (each cluster's summed difference, ties dropped, two-sided).
+Both bootstraps use 10,000 resamples and seed 2026. Below six clusters the
+two-sided sign test cannot reach p < 0.05, and a cluster interval over three
+to six clusters is not a reliable 95% interval. Intervals below are 95%, in
+points, by shape unless named otherwise. "Survives" means the shape interval
+excludes zero; where the shape sign test disagrees, the table says so.
+
+### The k=3 panels, hard tasks
+
+Official and end-to-end scores are identical on gpt-6-sol.
+
+| contrast | model, view | effect [over tasks] | by shape | shapes | by family | survives |
+|---|---|---|---|---|---|---|
+| HOLLOW - SCHEMA | sol | -8.5 [-11.8, -5.3] | [-16.3, -1.9] | 5/15, p = 0.04 | [-18.2, -1.1] | yes |
+| CONTRACT - HOLLOW | sol | +50.0 [+44.9, +55.0] | [+32.1, +66.2] | 23/5, p = 9e-4 | [+34.2, +61.2] | yes |
+| CONTRACT - MANUAL | sol | +19.9 [+16.0, +23.8] | [+7.0, +33.7] | 15/4, p = 0.02 | [+6.9, +32.8] | yes |
+| MANUAL - SCHEMA | sol | +21.6 [+17.1, +26.0] | [+8.9, +35.4] | 19/6, p = 0.02 | [+10.7, +32.0] | yes |
+| HOLLOW - SCHEMA | Qwen official | -5.5 [-8.1, -3.1] | [-10.5, -1.4] | 6/8, p = 0.79 | [-9.6, -2.6] | interval only |
+| CONTRACT - HOLLOW | Qwen official | +34.5 [+30.5, +38.5] | [+23.6, +45.4] | 30/2, p = 3e-7 | [+26.0, +42.5] | yes |
+| CONTRACT - MANUAL | Qwen official | +22.7 [+18.4, +27.0] | [+11.3, +35.2] | 29/4, p = 1e-5 | [+13.3, +32.5] | yes |
+| MANUAL - SCHEMA | Qwen official | +6.3 [+3.5, +9.2] | [+1.4, +11.6] | 16/6, p = 0.05 | [+1.1, +11.1] | interval only |
+| HOLLOW - SCHEMA | Qwen end-to-end | +0.2 [-1.7, +2.1] | [-3.4, +3.4] | 10/4, p = 0.18 | [-1.9, +2.3] | null |
+| CONTRACT - HOLLOW | Qwen end-to-end | +43.8 [+38.9, +48.6] | [+28.1, +59.8] | 28/3, p = 5e-6 | [+28.7, +56.7] | yes |
+| CONTRACT - MANUAL | Qwen end-to-end | +23.2 [+18.1, +28.4] | [+7.4, +40.7] | 23/7, p = 0.005 | [+7.6, +39.8] | yes |
+| MANUAL - SCHEMA | Qwen end-to-end | +20.8 [+17.2, +24.6] | [+11.8, +31.0] | 19/3, p = 9e-4 | [+9.7, +31.9] | yes |
+
+Qwen's official MANUAL - SCHEMA splits 27 families to 24 (p = 0.78).
+
+**The decomposition survives clustering.** The content step is +34 to +50
+points with shape intervals whose lower ends lie at +24 to +32. The sol
+scaffolding deficit survives, narrowly by the shape sign test. Qwen's
+official deficit (-5.5) has an interval clear of zero, but 6 shapes go
+one way and 8 the other.
+
+**The content step lives in the fee tasks** (reviewer R3, W4). The fee
+bucket is the 294 hard tasks whose question names fees (*Where the effect
+lives*); the other 38 hard tasks are the non-fee bucket.
+
+| CONTRACT - HOLLOW | sol | Qwen official | Qwen end-to-end |
+|---|---|---|---|
+| fee hard (294, 31 shapes) | +57.6, shape [+39.6, +73.5], 23/0 | +38.5 [+27.1, +50.1], 28/1 | +49.5 [+33.1, +66.6], 27/1 |
+| non-fee hard (38, 7 shapes) | -8.8 [-16.7, -1.8]; shape [-33.3, -2.7], 0/5, p = 0.06 | +3.5 [-1.8, +9.6] | -0.9 [-6.1, +5.3] |
+| easy (69, each its own shape) | +13.0 [+4.3, +22.7], 14/3, p = 0.01 | +6.3 [-2.4, +15.5], 11/7 | +11.6 [+2.4, +21.3], 11/3, p = 0.06 |
+
+Off the fee domain the content buys nothing on Qwen. On sol it costs
+about 9 points (10 task-runs of 114): 4 in the 30-task "most expensive MCC
+/ ACI" family, which sol's bare arm partly solves, and 6 in the eight
+average-transaction-value tasks. Five of the seven non-fee shapes go
+against the content and none for it. On easy tasks it buys 6 to 13 points; that is significant on sol
+only.
+
+### The two facts, on the 199 rule-matching tasks
+
+| contrast | effect [over tasks] | by shape (25) | shapes | by family (109) | survives |
+|---|---|---|---|---|---|
+| (28) luna, MANUAL+WS - MANUAL+W | +28.5 [+23.5, +33.7] | [+14.2, +43.3] | 18/1, p = 8e-5 | [+16.1, +40.8] | yes |
+| (28Q) Qwen | +42.7 [+36.7, +49.1] | [+23.6, +62.0] | 20/0, p = 2e-6 | [+26.1, +59.5] | yes |
+| (29) luna, TEXT - MANUAL+WS | +0.8 [-2.5, +4.2] | [-4.5, +5.8] | 8/5, p = 0.58 | [-3.2, +4.5] | tie; within +/-5 except by shape |
+| (29Q) Qwen | -16.6 [-21.3, -12.1] | [-31.6, -5.3] | 3/15, p = 0.008 | [-22.2, -11.4] | yes |
+| (30) luna, TEXT+WS - MANUAL+WS | +3.7 [+1.0, +6.5] | [+0.6, +7.9] | 11/2, p = 0.02 | [+0.9, +7.3] | yes |
+| (30Q) Qwen | +5.5 [+2.0, +9.2] | [-0.4, +10.4] | 11/4, p = 0.12 | [+1.3, +9.3] | by family only |
+| (30) luna, the 165 never read | +2.2 [-0.8, +5.3] | [-0.4, +5.7] | 10/3, p = 0.09 | [-0.7, +5.7] | no |
+| (30Q) Qwen, the 165 never read | +4.6 [+1.2, +8.3] | [-0.5, +9.7] | 8/5, p = 0.58 | [+0.6, +8.7] | by family only |
+| luna tools, CONTRACT - TEXT, rule-matching | -0.7 [-3.0, +1.7] | [-4.9, +3.0] | 3/4 | [-4.2, +2.4] | tie |
+| luna tools, the other 202 (82 shapes) | +5.1 [+1.7, +8.7] | [-1.8, +11.1] | 8/10, p = 0.81 | [-1.8, +10.7] | **no** |
+| Qwen tools, rule-matching | +10.1 [+6.2, +13.9] | [+3.1, +16.7] | 14/7, p = 0.19 | [+1.9, +16.8] | interval only |
+| Qwen tools, the other 202 | -6.9 [-12.4, -1.8] | [-22.0, +9.4] | 10/9 | [-21.5, +9.4] | **no** |
+
+**The facts' lift is robust on both models.** **The form gain is
+registered-direction but loosely bounded.** With the facts stated alike,
+the contract's text leads by +3.7 [+0.6, +7.9] on luna and +5.5
+[-0.4, +10.4] on Qwen. Upper limits of 8 and 10 points are not "a few
+points at most". On the 165 unread tasks neither model's gain clears
+clustering. So the earlier reading, "clearly on Qwen, not significantly on
+luna", does not hold at the shape level. Both are positive in direction,
+and both are unresolved.
+
+**The governed tools' accuracy gain on luna's other 202 tasks does not
+survive.** Over tasks it is +5.1 (38 tasks to 15, p = 0.002). Over shapes
+its interval spans zero, and the shapes split 8 to 10: three families carry
+it. Qwen's -6.9 there does not survive either.
+
+**The (28) selection on luna (M6).** The 34 inspected tasks were chosen on
+`manual_resolved`'s r1 and r2 rows, which (28) reuses as its comparator.
+Repeat r3 played no part in the choice, so it gives a selection-free
+comparison:
+
+| (28) on luna | effect [over tasks] | by shape |
+|---|---|---|
+| the 34 inspected, r3 only | +67.6 [+50.0, +82.4], 23/0 | [+50.0, +79.4] |
+| the 165 never read, r1-r3 | +19.2 [+14.7, +23.8] | [+8.5, +31.9] |
+| the 165 never read, r3 only | +20.6 [+13.9, +27.3] | [+8.9, +35.5] |
+| all 199, r3 only | +28.6 [+22.1, +35.2] | [+13.4, +44.6] |
+
+`manual_resolved` scores 0% on the 34 in r1 and r2, by construction, and
+11.8% in r3. On the 165 it scores 65.5%, 65.5% and 61.8%. Removing the 34
+removed tasks that `manual_resolved` had failed twice, which raises its r1
+and r2 accuracy on the remainder. So +19.2 on the 165 is **biased down**,
+which is conservative; r3 alone gives +20.6. The bias runs up on the 34
+and down on the 165, and on all 199 it nets out: r3 alone gives +28.6,
+against the registered +28.5. **The selection moved the estimate between
+the two subsets, not its total.**
+
+**Experiment 5's gap-recovery shares (m3).** (MANUAL+W - MANUAL) /
+(CONTRACT - MANUAL), all 401 tasks, end-to-end:
+
+| model | share | over tasks | by shape | by family |
+|---|---|---|---|---|
+| gpt-6-sol | 0.77 | [0.64, 0.88] | [0.16, 1.01] | [0.18, 1.00] |
+| gpt-6-luna | 0.38 | [0.30, 0.45] | [0.16, 0.60] | [0.16, 0.59] |
+| qwen3.8-27b | 0.41 | [0.25, 0.60] | [-0.07, 1.49] | [-0.09, 1.47] |
+
+Over tasks, sol's share sits above the other two. Over shapes, all three
+overlap. The share is set by which families the note repairs (every
+rule-set family, no total-fee family), so a handful of clusters decides it.
+Prediction (1) failed on point estimates; under clustering it is
+inconclusive, and the ordering of shares across models is not established.
+
+### LiveSQLBench
+
+**The knowledge gain survives.** MANUAL - SCHEMA on the 302 primary tasks:
+
+- luna: +15.6 [+11.6, +19.6]; by database [+10.6, +20.6]; 18 databases to 2
+  (p = 4e-4).
+- Qwen: +14.1 [+9.8, +18.4]; by database [+9.1, +19.0]; 19 to 2 (p = 2e-4).
+
+**Determinacy (M3).** This is the confound check's gain: the three
+knowledge arms on both models (18 runs a task) minus `schema_only` (6).
+Intervals are by database.
+
+| labels | determined: gain | undetermined: gain | difference, points | difference, log-odds |
+|---|---|---|---|---|
+| consensus (138 / 132) | +20.8 pts, +0.84 log-odds | +7.6, +0.89 | +13.2 [+4.8, +22.4] | -0.04 [-0.70, +0.51] |
+| first rater alone (156 / 146) | +21.1, +0.86 | +9.0, +0.95 | +12.1 [+3.4, +20.7] | -0.09 [-0.71, +0.44] |
+| second rater alone (152 / 150) | +20.9, +0.85 | +9.5, +1.02 | +11.4 [+3.9, +19.4] | -0.17 [-0.77, +0.31] |
+
+The 32 split tasks, as a middle group, gain +22.7 points [+9.9, +36.3]
+(+1.52 log-odds) from 9% to 32%. That is the largest gain on either scale,
+not an intermediate one.
+
+**"Nearly three times" is a statement about the points scale only.** In
+points, the determined tasks gain more under every labelling, and the
+difference clears clustering. In log-odds the two gains are equal: the
+difference is about zero, with an interval of about +/-0.6. From baselines
+of 39% and 6%, determinacy cannot be separated from the floor. Which rater's
+labels are used does not matter.
+
+**The nulls, as bounds (M7).**
+
+- **Experiment 2** (55 tasks, three databases, luna):
+  - the Opus compile against the Sonnet compile: +1.8 [-3.0, +7.3], 5 tasks
+    to 3;
+  - the author session against the Sonnet compile: -1.8 [-9.1, +5.5], 3 to 4.
+
+  These exclude gains above 7.3 and 5.5 points. They do not exclude
+  moderate ones. Three databases allow no cluster inference.
+- **Experiment 3**, the 28 held-out tasks:
+  - the manual's corrections: +3.6 [0.0, +9.5], 2 tasks to 0;
+  - the contract's: -3.6 [-9.5, 0.0], 0 to 2.
+
+  On the training tasks the same corrections gain +21.0 [+7.4, +35.8] and
+  +22.2 [+8.6, +38.3]. The held-out intervals exclude any transfer of that
+  size, and any gain above about 10 points. Smaller gains are not excluded.
+
+### Experiment 4b: authored against gapped, by gap cluster (M2b)
+
+CONTRACT_gap - MANUAL_gap on the 41 data-informed questions. The per-gap
+gains are listed in the order labor g1 (10 questions), reverse_logistics
+g1 (1), reverse_logistics g2 (10), solar g1 (10), solar g2 (10).
+
+| model | effect [over tasks] | tasks | per gap | gaps, one-sided p |
+|---|---|---|---|---|
+| gpt-6-luna | +50.4 [+38.2, +62.6] | 28/0 | +67, +100, 0, +33, +97 | 4/0, 0.06 |
+| qwen3.8-27b | +4.1 [-0.8, +9.8] | 6/2 | +3, -33, 0, 0, +17 | 2/1, 0.5 |
+| gpt-6-sol | +26.0 [+13.8, +39.8] | 12/0 | +3, +100, 0, 0, +93 | 3/0, 0.12 |
+| pooled | +26.8 [+18.7, +35.8] | 28/1 | +24, +56, 0, +11, +69 | 4/0, 0.06 |
+
+**(35)'s p = 6e-8 is over tasks.** Over gap clusters the evidence is 4 of
+5 clusters with one tie: p = 0.06 one-sided, near the 0.03 floor that five
+clusters allow. The registered "majority of gap clusters" condition holds.
+Qwen's gain does not clear even the task interval, so "on every model"
+holds in direction only.
+
+### Experiment 6: the equivalence as an exact bound (m2)
+
+TEXT at 1x against the common top, 4x: 60 tasks, 9 runs each.
+
+- The drop is +0.6 points [0.0, +1.3]. Three runs were lost and none
+  gained: 3 of 540.
+- The exact 95% interval on the lost-run rate is [0.11%, 1.61%].
+- The three losses fall in three different knowledge pieces (the R
+  questions of each database). The design effect over pieces is 0.62, so
+  clustering does not widen the bound.
+- The cruder per-task bound is 3 of 60 tasks with any loss, at most 13.9%
+  of tasks.
+
+The governed arm drops +0.2 [-0.6, +0.9] over the same range: 3 runs lost
+and 2 gained. **The +/-5-point equivalence survives an exact, clustered
+treatment**, within the ceiling-level scope the questions set.
+
+### The A/A noise floor
+
+Each arm experiment 5c reran, against its earlier files, by task and repeat:
+
+| arm, model | subset | drift [over tasks] | by shape | shapes |
+|---|---|---|---|---|
+| MANUAL+WS luna (5c - 5b) | rule-matching | +1.7 [-1.0, +4.4] | [-1.6, +4.4] | 9/8 |
+| MANUAL+WS luna | other 202 | +0.8 [-2.5, +4.1] | [-1.1, +2.6] | 8/7 |
+| TEXT luna (5c - 5) | rule-matching | -2.8 [-5.4, -0.5] | [-7.8, +0.9] | 3/6 |
+| TEXT luna | other 202 | +0.5 [-2.1, +3.1] | [-2.1, +3.1] | 6/7 |
+| MANUAL+WS Qwen (5c - 5) | rule-matching | -2.0 [-5.5, +1.3] | [-4.2, 0.0] | 4/7 |
+| MANUAL+WS Qwen | other 202 | +1.3 [-1.2, +3.8] | [-0.7, +3.4] | 10/5 |
+| TEXT Qwen (5c - 5) | rule-matching | +1.2 [-2.3, +4.7] | [-1.4, +4.5] | 9/9 |
+| TEXT Qwen | other 202 | -2.3 [-5.6, +1.0] | [-5.1, +1.1] | 8/8 |
+
+Identical arms move by up to 2.8 points between runs. One of eight
+intervals excludes zero over tasks; none does over shapes (luna's TEXT
+drift is 6 families to 20, p = 0.009). A cross-run contrast smaller than
+about 3 points is inside this floor. The cross-run contrasts in the paper
+are (28) on luna and the sol share (MANUAL+W ran a day after the panel).
+Both are many times that size.
+
+### Corrupted copies, stratified by whether the rules were stated (m5, W4)
+
+Every contract arm's prompt lists the forbidden operations. The governed
+arms render the contract's constraints ("Forbidden operations: DELETE,
+DROP, ..."). The TEXT arms paste `contract.yml`, `forbidden_operations`
+included. No schema or manual arm states them, and the manual and the
+payments readme say nothing about writes. `analysis/corruption.py` now
+splits the paper's seven models this way:
+
+| model | rules stated | not stated | Fisher p |
+|---|---|---|---|
+| qwen3.8-27b | 0 / 8,421 (<= 0.044%) | 44 / 8,421 (0.52%) | 1e-13 |
+| glm-5.3-flash | 0 / 1,252 (<= 0.29%) | 3 / 1,255 | 0.25 |
+| Sonnet 5 | 0 / 802 (<= 0.46%) | 1 / 802 | 1 |
+| deepseek-v4-flash | 0 / 802 (<= 0.46%) | 1 / 802 | 1 |
+| gpt-6-sol | 0 / 4,010 (<= 0.092%) | 1 / 3,609 | 0.47 |
+| gpt-5.6-sol | 0 / 836 (<= 0.44%) | 0 / 886 | 1 |
+| gpt-6-luna | 0 / 13,233 (<= 0.028%) | 0 / 6,015 | 1 |
+| all seven | **0 / 29,356** (exact <= 0.013%; rule of three 1.0e-4) | **50 / 21,790** (0.23%, [0.17%, 0.30%]) | |
+
+Upper bounds are the exact 95% limits. Of the stated runs, 7,218 are the
+TEXT arms over the plain tools, with no enforcement (luna and Qwen, 3,609
+each), and none corrupted a copy. Qwen's TEXT arms (0 of 3,609) against
+its unstated arms (44 of 8,421) give p = 2e-7. **The operative variable is
+whether the rules are stated, not whether they are enforced.** Only Qwen
+supports the contrast on its own; the other models' unstated cells hold 0
+to 3 events.
+
+### Operating numbers, the k=3 runs
+
+`analysis/cost_decomposition.py --operating` gives the mean run over every
+graded run. Dollars are the route's bill in milli-dollars; per correct
+answer they use the official verdicts. The rows carry no timing field, so
+wall-clock is read from each run's trace, first message to last. It
+includes the route's queueing.
+
+| run | arm | m$ / run | m$ / correct | turns | input | of it cached | output | wall-clock mean / median s |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| sol panel | SCHEMA | 31.4 | 70.6 | 8.7 | 27,822 | 21,910 | 1,518 | 32.2 / 23.3 |
+| | HOLLOW | 32.3 | 86.4 | 9.0 | 47,736 | 42,486 | 1,333 | 33.8 / 28.6 |
+| | MANUAL | 30.4 | **46.8** | 8.0 | 56,425 | 53,039 | 1,306 | 28.3 / 22.6 |
+| | CONTRACT | 48.0 | 59.2 | 7.6 | 69,231 | 59,559 | 1,672 | 30.2 / 27.5 |
+| Qwen panel | SCHEMA | 1.58 | 6.50 | 13.3 | 179,842 | - | 11,994 | 177 / 49 |
+| | HOLLOW | 2.12 | 10.59 | 11.7 | 179,868 | - | 16,068 | 255 / 123 |
+| | MANUAL | 1.66 | 5.43 | 12.8 | 229,275 | - | 12,571 | 193 / 45 |
+| | CONTRACT | **0.82** | **1.66** | 7.7 | 101,525 | - | 6,246 | 109 / 37 |
+| luna 5c | MANUAL+WS | 1.66 | 2.18 | 7.2 | 50,359 | 46,790 | 1,674 | 28.6 / 23.3 |
+| | TEXT | 1.69 | 2.19 | 5.6 | 82,339 | 80,370 | 1,375 | 23.8 / 18.7 |
+| | TEXT+WS | 1.56 | **1.89** | 5.3 | 79,069 | 77,316 | 1,221 | 20.8 / 18.2 |
+| Qwen 5c | MANUAL+WS | 0.88 | 1.61 | 10.4 | 149,121 | - | 6,684 | 106 / 49 |
+| | TEXT | 1.02 | 2.19 | 9.0 | 290,413 | - | 7,688 | 128 / 54 |
+| | TEXT+WS | **0.54** | **0.93** | 7.8 | 240,525 | - | 4,107 | 75 / 43 |
+
+Qwen's route meters output only and has no cache tier. On sol the
+contract is the dearest arm per run (+58% over MANUAL) and second per
+correct answer. On Qwen it is the cheapest on both counts and the fastest,
+at about 60% of the other arms' turns. With the facts stated alike (5c), TEXT+WS is the
+cheapest per correct answer on both models.
+
+### What survives clustering, and what does not
+
+Survives: the content step, on both panels and both views; the sol
+scaffolding deficit; CONTRACT over MANUAL; MANUAL over SCHEMA (except
+Qwen's official view); (28), (28Q) and (29Q); (30) on luna; the
+LiveSQLBench knowledge gain; the determinacy gap in points; experiment 6's
+equivalence; the stated-rules corruption contrast on Qwen.
+
+Does not survive, or only on one clustering:
+
+- luna's governed tools on the other 202 tasks (+5.1);
+- Qwen's tools on either subset;
+- (30Q) by shape, and both models' form gain on the 165 unread tasks;
+- Qwen's official scaffolding deficit and manual gain, by the shape sign
+  test;
+- (35)'s p = 6e-8, which is 0.06 over gap clusters;
+- the ordering of the one-fact shares across models;
+- the determinacy ratio on the log-odds scale;
+- (29)'s +/-5 equivalence, by shape (upper limit +5.8).
+
+The LiveSQLBench nulls are now bounds. A better author gains at most about
+7 points, and a gold-derived correction transfers at most about 10.
+
+## Cross-family blind ratings (2026-10-23)
+
+The paper's three subsets rest on blind ratings, and every rating came from Opus 5.5 sessions:
+- the 199 DABStep rule-matching tasks;
+- the held-out set, the rule-matching tasks whose transcripts were never read;
+- the LiveSQLBench determined/undetermined split.
+
+One rater each from two other model families re-rated the same items: gpt-6.1-sol and gemini-4-argon, via Copilot CLI 1.0.103 at reasoning effort high.
+
+**Method.**
+- The plan was committed before any rating: `prep/cross-family-ratings/PLAN.md`, 2081a89, corrected in a2f2db6.
+- The harness (47d5ddd) and the analysis (`analysis/cross_family.py`, 7edb136) were committed before any rating was read.
+- Each rater had the Opus raters' packets, rubrics and prompts, with only the paths changed, in 16 sessions per model.
+- Each session ran in a user, mount and PID namespace whose home held only the Copilot install, a Copilot state folder of its own, and its chunk.
+- Determinacy raters could run read-only queries through a socket to the grader's read-only connection.
+- All 32 sessions produced valid output. Four GPT load sessions (c05 to c08) ran at the same time and lost the model connection together: transport errors in Copilot's log, no rating written. Their one rerun, which the plan allows, was valid.
+- The analysis script's LiveSQLBench step first crashed on a single-rater alternative: with one rater as both raters nothing is split, so the three-group variant was empty. It now computes only the plan's comparison, split dropped and by database, through the same gains function.
+- The public labels are in `ratings/cross-family/`, cut the same way as the Opus labels. Output: `uv run python analysis/cross_family.py`, which needs the private rating folders.
+
+**Agreement (plan section A).**
+
+| | Opus r1 / r2 | Opus / GPT | Opus / Gemini | GPT / Gemini |
+|---|---|---|---|---|
+| DABStep load, weighted κ | 0.96 | 0.91 to 0.93 | 0.96 to 0.97 | 0.91 |
+| DABStep rule_matching, κ | 0.89 | 0.93 | 0.84 to 0.87 | 0.89 |
+| LiveSQLBench settled, κ (302) | 0.79 | 0.64 to 0.67 | 0.75 | 0.68 |
+| LiveSQLBench four values (302) | 83% | 68% | 76 to 78% | 67% |
+
+- Across families, agreement on the DABStep labels is as high as within Opus.
+- Determinacy agreement is lower across families (κ 0.64 to 0.75 against 0.79) but still substantial.
+- On LiveSQLBench's rule_matching, which no paper subset uses, Gemini disagrees widely: κ 0.40 against Opus and 0.25 against GPT.
+
+**Subsets (B).**
+- **Rule-matching tasks:**
+  - Opus, the paper's set: 199;
+  - GPT alone: 205;
+  - Gemini alone: 222;
+  - cross-family: 202.
+- **Determined/undetermined/split on LiveSQLBench:**
+  - Opus: 138/132/32;
+  - GPT alone: 176/126;
+  - Gemini alone: 156/146;
+  - cross-family: 142/112/48.
+
+**Results recomputed (C, D).** The test is whether each result keeps its sign and stays significant, using the interval over question shapes (DABStep) or databases (LiveSQLBench).
+
+Of the 11 results significant in the paper:
+- 11 are robust on GPT alone;
+- 11 are robust on the cross-family subsets;
+- 10 are robust on Gemini alone.
+
+The one miss is Qwen's tools step on rule-matching tasks, `contract` against `contract_text`. It is +10.1 [+3.1, +16.7] in the paper and +8.4 [−0.2, +16.0] on Gemini's 222 tasks: the same sign, with the interval just reaching zero. Selected rows:
+
+| result | paper | GPT alone | Gemini alone | cross-family |
+|---|---|---|---|---|
+| luna, second fact (28) | +28.5 [+14.2, +43.3] | +27.6 | +24.6 | +28.1 |
+| luna, representation (30) | +3.7 [+0.6, +7.9] | +3.6 [+0.6, +7.7] | +5.7 [+2.0, +11.0] | +3.6 [+0.6, +7.8] |
+| luna, held out, second fact | +19.2 [+8.5, +31.9] | +18.5 | +15.7 | +18.8 |
+| Qwen, second fact (28Q) | +42.7 [+23.6, +62.0] | +41.5 | +38.9 | +42.1 |
+| Qwen, text against manual (29) | −16.6 [−31.6, −5.3] | −18.5 | −17.7 | −17.7 |
+| Qwen, representation (30Q) | +5.5 [−0.4, +10.4] | +3.1 | +3.0 | +4.5 |
+| LiveSQLBench accuracy, determined − undetermined | +46.1, p = 3e−18 | +39.1 | +52.7 | +54.2 |
+| LiveSQLBench gain in points, determined − undetermined | +13.2 [+4.8, +22.4] | +11.6 [+3.3, +19.8] | +20.2 [+11.7, +28.2] | +18.7 [+9.4, +27.6] |
+| LiveSQLBench gain in log-odds | −0.0 [−0.7, +0.5] | −0.2 | +0.3 | −0.3 |
+| experiment 2's 55, accuracy gap | +46.6, p = 0.0002 | +47.8 | +50.4 | +56.8 |
+
+Results that were not significant in the paper get no claim either way:
+- Qwen's representation step (30Q) stays small: +3.0 to +4.5, with intervals including zero.
+- luna's representation step on never-read tasks is +2.2 in the paper, and significant only on Gemini's subset (+4.5 [+1.1, +9.3]).
+- The log-odds equality on LiveSQLBench holds on every alternative.
+
+**What this does and does not show.**
+- The paper's subsets, and the results computed on them, do not depend on the rater coming from the Claude family.
+- It is still model agreement. A human check of a sample (the packet in `~/data/dce-held-results/human-rating/`) remains the stronger test.
+
 ## What these runs do not show
 
 - **The pre-registered primary comparison was never run.** It names
@@ -2694,6 +4365,14 @@ uv run python analysis/gold_disagreement.py                # the 19, and why
 uv run python analysis/leniency.py                        # exposure + transfer
 uv run python analysis/group_consistency.py               # the gold-free check
 uv run python analysis/replay.py                          # answer vs its own query
+uv run python analysis/stronger_author.py                 # predictions (7)-(12)
+uv run python analysis/knowledge_reuse.py                 # reuse; needs the private LSB mapping
+uv run python analysis/lsb_distinct_regrade.py            # DISTINCT stripping; needs the private golds
+uv run python analysis/lsb_kb_clarity.py [--all]          # blind test (55, or all 302); needs the private audit files
+uv run python analysis/lsb_corrected.py                   # experiment 3; needs the private results and corrections
+uv run python analysis/clustered.py                       # clustered CIs (review round 2); needs the private ratings
+uv run python analysis/corruption.py                      # corrupted copies, by whether the rules were stated
+uv run python analysis/cost_decomposition.py --operating  # k=3 operating numbers; reads traces and held archives
 ```
 
 Run A: ~3.5 hours at 6 workers, $3.26. Run B: ~4 hours, $6.32, of which the

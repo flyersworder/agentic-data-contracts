@@ -1,0 +1,262 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: museum_artifact, author: claudeopus5.5
+version: '1.0'
+name: museum-artifact
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: 'Museum artifact conservation database: artifacts, curatorial ratings, environmental
+      sensitivity profiles, showcases, exhibition halls, environmental / air / surface / light readings,
+      condition and risk assessments, conservation & maintenance, usage records, security access.'
+    preferred: true
+    tables:
+    - ArtifactsCore
+    - ArtifactRatings
+    - SensitivityData
+    - ExhibitionHalls
+    - Showcases
+    - EnvironmentalReadingsCore
+    - AirQualityReadings
+    - SurfaceAndPhysicalReadings
+    - LightAndRadiationReadings
+    - ConditionAssessments
+    - RiskAssessments
+    - ConservationAndMaintenance
+    - UsageRecords
+    - ArtifactSecurityAccess
+    - Monitor_Showcase_Map
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_model
+    summary: How the tables join, JSON storage, and data coverage limits
+    description: 'JOIN PATH (verified against the data). The tables are fragments of one denormalised
+      record set. An artifact (ArtifactsCore.ARTregID) reaches its showcase, reading and maintenance data
+      through ConditionAssessments: ConditionAssessments.art_exam = ArtifactsCore.ARTregID; ConditionAssessments.case_exam
+      = Showcases.caseID; ConditionAssessments.light_link = LightAndRadiationReadings.rad_id; LightAndRadiationReadings.env_link
+      = EnvironmentalReadingsCore.monitor_code (and that reading''s case_link equals case_exam for all
+      999 matched rows); ConservationAndMaintenance.monitor_link, UsageRecords.env_link, AirQualityReadings.env_link
+      and SurfaceAndPhysicalReadings.env_link all point to EnvironmentalReadingsCore.monitor_code; Showcases.hall_ref
+      = ExhibitionHalls.Hall_ID. Use light_link (not case_exam alone) to reach the reading: joining readings
+      on case_link fans out (1,095 rows vs 1,000). The derived table in the metrics'' from_sql `artifact_scores`
+      encodes this path; it has 1,006 rows (995 artifacts, a few with 2 assessments, plus a small fan-out
+      from one duplicated maintenance / usage link).
+
+      COVERAGE LIMITS. ArtifactRatings holds only 10 artifacts (HIST_sign 1-10) and SensitivityData only
+      3 artifacts (ART54317 Low, ART54254 High, ART48028 Medium). So CPI exists for at most 10 artifacts
+      (9, since one has NULL conserve_status) and ERF for only 3; every metric built on them is NULL elsewhere.
+      ArtifactSecurityAccess has 3 rows keyed by loan_stat (On Loan / Available / Not Available) and NO
+      artifact key: insurance value (insUSD) and SEC_LEVEL cannot be attached to an individual artifact.
+      All three rows are ''Level 3''; max insUSD is 968,368 (no value exceeds 1,000,000).
+
+      STORAGE. JSON columns are DuckDB JSON; extract with ->> and a JSONPath such as rating_profile->>''$.research_score''
+      and CAST numbers to DOUBLE. JSON nulls come back as SQL NULL. Missing numeric values in plain columns
+      are SQL NULL (not NaN). CO2 (air_quality_metrics gases_ppm_ppb.co2_ppm) is text like ''794 ppm''.
+      Readings span 2024-02-19 to 2025-02-19; date-relative metrics use CURRENT_DATE as the documentation
+      says "current date".
+
+      '
+    tables:
+    - main.ArtifactsCore
+    - main.ConditionAssessments
+    - main.LightAndRadiationReadings
+    - main.EnvironmentalReadingsCore
+    - main.Showcases
+    - main.ExhibitionHalls
+    - main.ConservationAndMaintenance
+    - main.UsageRecords
+    - main.ArtifactSecurityAccess
+    - main.Monitor_Showcase_Map
+    - main.AirQualityReadings
+    - main.SurfaceAndPhysicalReadings
+  - name: conservation_priority
+    summary: Conservation status scale, significance ratings, CPI and priority levels
+    description: 'CONSERVATION STATUS CATEGORIES (ArtifactsCore.conserve_status): ''Excellent'' (recently
+      conserved, no issues), ''Good'' (stable with minor issues), ''Fair'' (stable but with noticeable
+      issues), ''Poor'' (active deterioration), ''Critical'' (severe deterioration requiring immediate
+      intervention). NULL means no status provided. For CPI the status is mapped Excellent=1, Good=3,
+      Fair=5, Poor=7, Critical=10 (so a Critical artifact has CPI 0).
+
+      HISTORICAL SIGNIFICANCE RATING = ArtifactRatings.HIST_sign, a 1-10 scale: 1-3 minor historical significance,
+      4-7 moderate significance, 8-10 exceptional historical importance. Research Value Rating = rating_profile
+      research_score; Cultural Score = rating_profile cultural_score (unbounded, e.g. 4..100).
+
+      CPI = ((Historical Significance + Research Value + Cultural Score) * (10 - Conservation Status Value))
+      / 30. Conservation Priority Level: ''High Priority'' CPI > 7, ''Medium Priority'' 4 < CPI <= 7,
+      ''Low Priority'' CPI <= 4. Conservation Emergency: conserve_status ''Critical'' AND treatment priority
+      (ConservationAndMaintenance.prio_tag) ''Urgent''. Critical Conservation Alert: Conservation Emergency
+      AND AVS > 8. Dynasty Value Artifact: dynasty among historically significant dynasties (the documented
+      examples ''Ming'', ''Han'', ''Tang'') AND research value > 8; Dynasty Artifact at Risk adds MAP
+      > 3.
+
+      '
+    tables:
+    - main.ArtifactsCore
+    - main.ArtifactRatings
+    - main.ConservationAndMaintenance
+  - name: sensitivity
+    summary: Sensitivity weights, ERF, light/humidity sensitivity levels and thresholds
+    description: 'SENSITIVITY WEIGHT VALUES: Low=1, Medium=5, High=10, applied to every qualitative sensitivity
+      rating (light, temperature, humidity, vibration, pollutants, ...). ERF = average of the artifact''s
+      environmental sensitivity weights; the contract uses the five env_handling_sensitivity.environment
+      fields (light, temperature, humidity, vibration, pollutants), averaging only the non-NULL ones.
+      SensitivityData.ENVsense (High/Low/Medium) is the artifact''s overall environmental sensitivity
+      rating.
+
+      LIGHT SENSITIVITY LEVELS: ''Low'' can tolerate up to 300 lux, ''Medium'' should be limited to 150-200
+      lux, ''High'' restricted to 50 lux or less. LIGHT INTENSITY IMPLICATIONS: conservation standards
+      recommend 50 lux for highly sensitive materials, 150-200 lux for medium sensitivity, up to 300 lux
+      for low sensitivity. LIGHT EXPOSURE THRESHOLDS: High sensitivity (e.g. textiles, paper) must not
+      exceed 50 lux; Medium (e.g. paintings, wood) must not exceed 200 lux.
+
+      HUMIDITY SENSITIVITY LEVELS: ''Low'' tolerates a wide range of humidity, ''Medium'' requires a controlled
+      range, ''High'' requires a very stable and narrow range. HUMIDITY EXPOSURE THRESHOLDS: High sensitivity
+      must not exceed 55% RH; Medium must not exceed 60% RH. Exposure Status: ''Over Exposure'' if current
+      RH exceeds the threshold for the artifact''s humidity sensitivity level, otherwise ''Within Limits''.
+
+      Organic Material Vulnerability: MatKind organic (''Wood'', ''Textile'', ''Paper'') AND overall environmental
+      sensitivity ''High''; these require specialised environmental controls. Organic Material Emergency
+      adds TETL > 12. Accelerated Deterioration Scenario: MDR > 5 AND at least two environmental sensitivities
+      rated ''High''; High Deterioration Risk Artifact adds TETL > 15.
+
+      '
+    tables:
+    - main.SensitivityData
+    - main.ArtifactsCore
+    - main.LightAndRadiationReadings
+  - name: environment
+    summary: Environmental readings, implications, instability, compliance, chronology
+    description: 'TEMPERATURE (EnvironmentalReadingsCore.TEMPc, Celsius): ideal for most collections 18-22
+      C; fluctuations greater than 2 C within 24 hours can stress materials; values outside 10-30 C may
+      indicate control failure. RELATIVE HUMIDITY (RH, %): ideal for mixed collections 45-55%; fluctuations
+      greater than 5% within 24 hours are risky; below 30% or above 65% indicates significant risk. PM2.5
+      (air_quality_metrics particulates.pm25_ug_m3, ug/m3): clean museum air below 5; above 15 potential
+      risk; above 30 hazardous.
+
+      ENVIRONMENTAL INSTABILITY EVENT: 24-hour temperature variation (tempVar24) exceeds 1 C OR 24-hour
+      humidity variation (RHvar) exceeds 3%. ECI = 10 - (|temp - ideal| + |RH - ideal| / 5 + ERF / 2);
+      ideal is taken as the midpoint of the ideal ranges: 20 C and 50% RH. Compliance Level: ''Excellent''
+      ECI > 7, ''Good'' 4-7 inclusive, ''Poor'' <= 4 (the documentation puts 4 in both Good and Poor;
+      the metric gives Good, honouring "inclusive"). Environmental Control Failure: ECI < 4 AND an Environmental
+      Instability Event. MDR = (age years * ERF * (RH - 50)^2 * temp C) / 100000. TETL = ERF + LER + MDR*2.
+      MAP = MDR * (1 + TETL/20).
+
+      CONSERVATION ENVIRONMENT CHRONOLOGY (CEC): segment environmental readings into fixed time intervals
+      (e.g. by year of readTS) to discern patterns. Observed data: TEMPc 18-22 (integer), RH 45-55 (integer);
+      TEMPc and tempVar24 are NULL in 150 of 999 readings.
+
+      '
+    tables:
+    - main.EnvironmentalReadingsCore
+    - main.AirQualityReadings
+    - main.SurfaceAndPhysicalReadings
+  - name: showcases
+    summary: Showcase stability (SESR), airtightness, failure risk, protection adequacy
+    description: 'SESR = 10 - ((24h temperature variation + 24h humidity variation / 5 + leak rate) /
+      3); higher is more stable. Inputs: EnvironmentalReadingsCore tempVar24 and RHvar of the showcase''s
+      reading, and Showcases.case_environment_profile physical_state.leak_rate_per_day. SHOWCASE FAILURE
+      RISK: SESR < 4 OR at least three maintenance indicators in a critical state. Critical states used:
+      seal_state ''Poor'', maint_status ''Overdue'', filter_status ''Replace Now'', silica_status ''Replace
+      Now'' (documentation lists seal condition, maintenance status, filter status as examples; silica
+      status is the fourth such indicator). SECONDARY STABILITY THRESHOLD: a less stringent SESR threshold
+      (SESR < 5 instead of < 4) to prompt deeper evaluation. AIRTIGHTNESS: measured as air changes per
+      day; museum-grade showcases are below 0.1, values up to 5.0 indicate poor airtightness. That unit
+      matches leak_rate_per_day (observed 0.0x-0.5), not airtightness_factor (a 0-100 style figure, e.g.
+      95.1). AEC = 10 - |ERF - SESR| (closer to 10 = better compatibility). SPA = SESR - ERF*0.5; positive
+      = adequate protection. Showcase Compatibility Issue: SPA < 0 AND High-Value Artifact.
+
+      '
+    tables:
+    - main.Showcases
+    - main.EnvironmentalReadingsCore
+  - name: visitors_security
+    summary: Visitor impact, crowd risk, CCTV levels, high-value and security exposure
+    description: 'VIR = (avg daily visitors * visitor flow rate * avg dwell minutes) / 1000, flow mapped
+      Low=1, Medium=3, High=5 (ExhibitionHalls security_visitor_overview.visitor_statistics). VISITOR
+      CROWD RISK: VIR > 5 AND any artifact in the hall has the lowest security level rating. VCSF = VIR
+      / (AVS * 0.1); lower is safer. Visitor Traffic Safety Concern: VCSF > 2 AND Visitor Crowd Risk.
+      ESQ = average of (10 - AVS), AEC and (10 - VIR); higher is safer. CCTV COVERAGE: ''Full'' 100% space
+      coverage, ''Partial'' 60-90%, ''Limited'' less than 60%. HIGH-VALUE ARTIFACT: insurance value exceeds
+      $1,000,000 OR both historical significance and cultural score in the top 10% of all artifacts. High-Value
+      Category: ''Monetary High-Value'' if insurance > $1,000,000; ''Cultural/Historical High-Value''
+      if significance and cultural scores in the top 10%; otherwise ''Other''. ARV: high rarity and valuation
+      if insurance value exceeds $1,000,000. SRE = (insurance value / 100000) * (10 - VIR) / 10; higher
+      = greater security risk. High Security Priority Artifact: High-Value AND SRE > 5. DATA LIMITS: insurance
+      and SEC_LEVEL live only in ArtifactSecurityAccess (3 rows, keyed by loan status, no artifact key,
+      all ''Level 3'', max insUSD 968,368), so the monetary branch cannot be evaluated per artifact and
+      can never fire in this data. INTERPRETATION: the lowest security level is ''Level 1'' (bottom of
+      the Level 1-3 scale); with no artifact key it is checked table-wide, and no row has it, so Visitor
+      Crowd Risk is false everywhere in current data. Top 10% is measured as >= the 0.9 quantile_cont
+      of each score over ArtifactRatings (the only artifacts rated).
+
+      '
+    tables:
+    - main.ExhibitionHalls
+    - main.ArtifactSecurityAccess
+    - main.ArtifactRatings
+  - name: conservation_budget
+    summary: CBE, CBR, CRAE, budget crisis and overdue maintenance
+    description: 'CBE = average over artifacts of CPI * budget ratio, where the budget ratio is the proportion
+      of the total conservation budget allocated to the artifact. INTERPRETATION: no numeric budget exists;
+      ConservationAndMaintenance.budget_alloc is text, so allocation is weighted Adequate=1.0, Review
+      Required=0.5, Insufficient=0.0 and the ratio is the artifact''s weight over the sum of weights over
+      all artifact rows. CONSERVATION BUDGET CRISIS: CBE < 0.5 AND at least one artifact has ''Critical''
+      conservation status and an ''Insufficient'' budget allocation. CBR = (CPI * (days since last cleaning
+      date - cleaning interval days)) / 100, higher = more risk. Days since last cleaning = CURRENT_DATE
+      - lastClean; cleaning interval days = cleanDays (INTERPRETATION: cleanDays is described as days
+      since last cleaning but does not match the dates; it is used as the interval). CRAE = CBE * (1 -
+      CBR/10); higher = more efficient. Conservation Resource Crisis: CRAE < 0.3 AND a Conservation Budget
+      Crisis. OVERDUE DAYS = CURRENT_DATE - nextClean; positive = days overdue.
+
+      '
+    tables:
+    - main.ConservationAndMaintenance
+    - main.ArtifactsCore
+  - name: rotation
+    summary: Display Safety Duration, LER, rotation candidates and ERPS
+    description: 'DSD = (Base Duration * (10 - light weight) * (10 - temperature weight) * (10 - humidity
+      weight)) / 1000, Base Duration 36 months (a High weight gives DSD 0). LER = (lux * light sensitivity
+      weight * visible light exposure lux-hours) / 1000. Exhibition Rotation Candidate: current display
+      duration (UsageRecords.displayMonths) exceeds 75% of DSD OR LER > 7. ERPS = (DSD - months on display)
+      * (LER + 1) * (CPI + 1) / 100; lower = higher rotation priority. ERPS Decision: ERPS < 0 -> ''Immediate
+      Rotation'', otherwise ''Monitor''. Exhibition Rotation Urgency: Rotation Candidate AND ERPS < 0.
+
+      '
+    tables:
+    - main.UsageRecords
+    - main.LightAndRadiationReadings
+    - main.SensitivityData
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: 'Indices (CPI, ERF, AVS, DSD, SESR, AEC, MDR, LER, CBE, VIR, TETL, SPA, CBR, VCSF, ESQ,
+      CRAE, MAP, ERPS, ECI, SRE) and the flags built on them must follow the metric SQL and thresholds
+      in semantic.yml, including the sensitivity weights Low=1/Medium=5/High=10, the status mapping Excellent=1/Good=3/Fair=5/Poor=7/Critical=10
+      and the flow mapping Low=1/Medium=3/High=5. Thresholds are strict where stated as "greater than"/"less
+      than".
+
+      '
+    enforcement: warn
+  - name: artifact_join_via_light_link
+    description: 'Link an artifact to its reading through ConditionAssessments.light_link -> LightAndRadiationReadings.env_link
+      -> EnvironmentalReadingsCore, not by joining all readings of the showcase.
+
+      '
+    enforcement: warn

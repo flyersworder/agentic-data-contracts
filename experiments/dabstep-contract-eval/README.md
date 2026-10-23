@@ -216,10 +216,10 @@ uv run python -m dce.stats results/smoke12.jsonl
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data` is LiveSQLBench's. |
+| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data`, `--lsb-dbs` and `--lsb-contracts` (the contracts root, one folder per database) are LiveSQLBench's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
 | `--n` | `0` (all) | Stratified sample of exactly `n` tasks, proportional across the benchmark's groups (DABStep's `level`, LiveSQLBench's database) by largest remainder. |
-| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved` and `contract_compiled` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |
+| `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved`, the `contract_compiled*` arms and `contract_text` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |
 | `--models` | `z-ai/glm-5.3-flash` | Any subset of the pinned ids in `dce/pricing.py`. An unpinned id is rejected. |
 | `--out` | `results/results.jsonl` (DABStep), `results/<benchmark>/results.jsonl` otherwise | One JSON row per `(task, arm, model)`. Appended to, never rewritten. A file holds one benchmark's rows; pointing a sweep at another benchmark's file is refused. |
 | `--db` | `data/dabstep.duckdb` | The pristine warehouse. Each process runs against a working *copy*. |
@@ -551,6 +551,30 @@ with per-task results alongside it under `data/task_scores/`.
 Those per-task scores are also the only external check on this experiment's
 reconstructed golds, and they found a real one-sided bias in them. See
 [`FINDINGS.md`](FINDINGS.md#the-leaderboard-submission-an-external-check-on-the-reconstructed-golds).
+
+## What is released, and what is not
+
+* **Result rows**, `results/`: every run the paper uses. Each row records its
+  commit, contract digest, gold-set hash, scorer, model, endpoint, tokens,
+  cost and the post-run integrity check of its database copy.
+* **DABStep golds are in those rows in plain text.** DABStep withholds its
+  test answers; ours are rebuilt by `dce.prepare` from the leaderboard's
+  public submissions, so anyone can recompute them. The validated leaderboard
+  is closed to new entries ahead of DABStep-v2. Do not use the rows to tune a
+  leaderboard submission.
+* **LiveSQLBench rows carry only a hash of the gold result.** Its gold SQL,
+  gold results, test cases and task-to-KB mapping are the benchmark's private
+  material and are not here; the analyses that need them read
+  `~/data/livesqlbench` and print aggregates only.
+* **Blind ratings**, `ratings/` (written by `analysis/export_ratings.py`): the
+  DABStep procedural-load ratings whole, which define the 199 rule-matching
+  tasks and the held-out set, and the LiveSQLBench determinacy ratings cut to
+  their labels. The raters' notes, the failure audits and the metric reviews
+  quote the LiveSQLBench gold and stay private.
+* **Transcripts** are release assets, not tracked: one archive per run with
+  SHA-256 digests (`dce.trace.read_trace` reads them). LiveSQLBench
+  transcripts are withheld: a transcript graded correct is a working solution
+  to a task whose solution the benchmark keeps private.
 
 ## Accepted gaps
 

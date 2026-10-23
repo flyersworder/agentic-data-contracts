@@ -1,0 +1,199 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: hulushows, author: claudeopus5.5
+version: '1.0'
+name: hulushows
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: Hulu show catalog snapshot (cached 2017-08-10). core = one row per content entry (1000
+      rows, 109 distinct titles / series); content_info, availabilitys and promo_info are 1:1 with core
+      on content_key; show_rollups holds one row per (show, tier) and every one of the 1000 shows has
+      a row in all 7 tiers of rollups; companies holds 34 studios.
+    preferred: true
+    tables:
+    - companies
+    - show_rollups
+    - rollups
+    - core
+    - content_info
+    - availabilitys
+    - promo_info
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_quality
+    summary: Noisy encodings of booleans, dates, scores and ratings, and how to parse them
+    description: 'BOOLEAN VALUE VARIANTS: true/false values appear in many encodings across fields --
+      strings (''Yes'',''No''), booleans (''TRUE'',''FALSE'') or numerics (''1'',''0''). Always normalise
+      with upper(trim(x)) before comparing. High-resolution logo flag (companies.brandingassets.HasLogo_Flag):
+      ''TRUE'',''FALSE'',''Yes'',''No'',''1'',''0'' all indicate presence or absence of a high-res logo
+      (observed data: ''True'' x14, ''False'' x20, stored as JSON strings) -- use metric has_high_res_logo.
+      Movie identifier (availabilitys.accessflags.Movie_Flag): ''TRUE'',''FALSE'',''Y'',''N'',''Movie'',''Series''
+      signal whether content is a movie (observed: all 1000 rows are ''no'', so there are zero movies)
+      -- use metric is_movie. Subscriber_Only, Showtime_Only, COPPA_Comp, Web_Only are real JSON booleans
+      (->> yields ''true''/''false''). REDUNDANT BOOLEAN FORMAT: a field is flagged as storing booleans
+      in redundant encodings when its Boolean Value Redundancy Rate (metric boolean_value_redundancy_rate)
+      exceeds a threshold; the documentation gives no number, so the user must supply the threshold. CACHE
+      TIME FORMATS: availabilitys.cache_time may be ''2024-12-08'', ''Dec 8, 2024'', ''08/12/24'', ''2024/12/8'',
+      ''24/12/8'' or ISO-8601; observed data is all ISO-8601 with offset (''2017-08-10T14:53:04+00:00'').
+      Use metric cache_date. LAUNCH / LATEST-ADD DATES: show_rollups.launchmoment is documented as noisy
+      (''2024-12-08 10:30'',''Dec 8, 2024'',''08/12/24'' = day/month/year); observed values are ''YYYY-MM-DD''
+      or NULL. latestadd is ''M/D/YYYY'' or NULL. Use metrics launch_date and latest_add_date; never compare
+      these text columns directly. USER SCORE FORMATS: raw numbers ''4.35'', ''4.35★'', ''$4.35M'', ''4.35
+      RTG'', ''435 bp'' (basis points = /100). Observed values are all plain decimals between 2.19 and
+      4.80. Use metric user_score_numeric. JSON: all jsonb columns are DuckDB JSON; extract text with
+      ->> and wrap the extraction in parentheses before casting, e.g. CAST((sr.contentvols->''standard_content''->>''Media_Total'')
+      AS DOUBLE). JSON null becomes SQL NULL under ->>. Integer division follows PostgreSQL, so cast numerators
+      to DOUBLE in ratios.
+
+      '
+    tables:
+    - main.companies
+    - main.availabilitys
+    - main.show_rollups
+    - main.core
+  - name: ratings
+    summary: TV ratings, peak rating normalisation, unrated media
+    description: 'TV RATING TYPES / CANONICAL RATING ENUMERATION: the six recognised TV content ratings,
+      in increasing maturity, are TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA. show_rollups.ratinginfo.TV_Rating
+      is NULL in every row (7000/7000), so rating questions use Peak_Rating, which is noisy: observed
+      variants TV-14/TV14/Teen/T/14+ (-> TV-14), TV-MA/TVMA/MA/Mature/Adult/18+ (-> TV-MA), TV-PG/TVPG/PG/''Parental
+      Guidance'' (-> TV-PG), TV-G/TVG/G/General/ALL (-> TV-G; ALL co-occurs with the TV-G variants for
+      the same show), TV-Y7/TV-Y7-FV (-> TV-Y7), TV-Y, ''Not Rated'' and NULL (1246 rows). Documentation
+      also names ''T14'' and ''FOURTEEN'' (-> TV-14). Use metric peak_rating_canonical (and peak_rating_ordinal
+      1..6 for numeric work). UNRATED MEDIA: media is unrated when there is no official rating information
+      available; ratinginfo.Unrated_Vol counts such items per show-tier, and ''Not Rated''/NULL peak ratings
+      map to NULL canonical rating. RATING INCONSISTENCY IN FRANCHISE: franchise groups whose range of
+      rating types is very wide are labelled inconsistent; measure it with rating_diversity_score (stddev)
+      or the range MAX-MIN of peak_rating_ordinal per series_id. No threshold is documented -- ask for
+      or state the one used.
+
+      '
+    tables:
+    - main.show_rollups
+  - name: tiers
+    summary: Subscription / availability tiers, tier presence and access flags
+    description: 'rollups lists the 7 tiers: 1 free, 2 subscriber, 3 current, 4 free_on_web (''free on
+      website''), 5 subscriber_on_device (''subscriber on device''), 6 auth_on_web (''auth on website''),
+      7 showtime (''show time''). show_rollups.srlinks -> rollups.tierkey. TIER PRESENCE: a show is present
+      in a tier when it has a show_rollups row for it; count tiers with COUNT(DISTINCT sr.srlinks). Every
+      show has rows in all 7 tiers (716 shows have Media_Total > 0 in all 7, 284 in 5), so if the question
+      means "has media in the tier" add Media_Total > 0 and say so. MULTI-TIER PRESENCE: content in two
+      or more distinct tiers (is_multi_tier). MULTITIER SYNDICATED SHOW / MULTI-TIER SYNDICATION: three
+      or more distinct tiers (is_multitier_syndicated) -- note the two documentation entries both say
+      ''multi-tier'' with different thresholds (>=2 and >=3); use >=3 when the word ''syndicated'' or
+      ''syndication'' is used, >=2 for ''multi-tier presence''. SUBSCRIBER-ONLY: content not available
+      in the free tier, accessible only to paying users (accessflags.Subscriber_Only true). SHOWTIME EXCLUSIVE:
+      Showtime_Only true. PREMIUM ACCESS CONTENT: Subscriber_Only true OR Showtime_Only true. Observed:
+      all flags false. TIER-SPECIFIC CONTENT GAPS: tiers whose normalised content amount (e.g. tier_distribution_ratio
+      or tier_normalized_media_load) is below a user-given threshold. LEGACY TITLE INDICATOR: shows with
+      no launch date (launchmoment NULL) whose content has not been updated for a long time (temporal_staleness_days
+      large); no threshold documented. MISSING LAUNCH MOMENT (legacy-uploaded): launchmoment NULL while
+      Media_Total > 0. NULL UPDATE TAG: a NULL latestadd means the content has received no new additions
+      since it first appeared (so its last change is its launch date).
+
+      '
+    tables:
+    - main.rollups
+    - main.show_rollups
+    - main.availabilitys
+  - name: media_volumes
+    summary: Episode/clip/feature/trailer/game volumes and HTML5 counts
+    description: 'Per show-tier volumes live in show_rollups.contentvols.standard_content (Ep_Vol, Clip_Vol,
+      Feature_Vol, FilmClip_Vol, Trailer_Vol, Game_Vol, Season_Vol, Media_Total); Ep_Vol is NULL in 247
+      rows, others always present integers (Clip_Vol may in principle use ''288K'' notation). HTML5 counts
+      in html5metrics.html5_volumes (H5_Clips, H5_Episodes, H5_Games, H5_Features, H5_Trailers, H5_FilmClips,
+      H5_MediaTotal): media types that support cross-platform playback. Show-level totals live in content_info.mediacounts.content_volumes
+      (Episode_Total, Clips_Total, Videos_Total, Feature_Films, Film_Clips, Seasons_Total; Episode_Total,
+      Videos_Total, Seasons_Total can be NULL). Vocabulary: ''extra video segments'' = clips (Clip_Vol);
+      ''full episodes'' = Ep_Vol. HIGH ENGAGEMENT SHOW: a show with a very large number of episodes and
+      extra video segments (clips); no threshold is documented -- rank by Ep_Vol + Clip_Vol (or content_size_index)
+      and state the cut-off. INCOMPLETE HIGH-ENGAGEMENT TITLE: high content_size_index and annotated_content_ratio
+      < 0.5 (ACR for a single title is 1 if annotations present else 0). TRAILER-DEFICIENT FEATURE: many
+      main episodes (Ep_Vol) but Trailer_Vol = 0; ''many'' is not quantified. HIGHLY RATED BUT VISUALLY
+      EMPTY: among top-rated shows (highest user_score_numeric), find those with Clip_Vol = 0 and Trailer_Vol
+      = 0 across tiers (see is_high_visibility_empty_bucket) and take the top-rated one. ''Highly rated''
+      is not given a number anywhere; this contract uses user score > 4.2 (the High band of episode_rating_band)
+      and says so.
+
+      '
+    tables:
+    - main.show_rollups
+    - main.content_info
+  - name: genres
+    summary: Primary genre, genre hierarchy strings and genre-complexity labels
+    description: 'core.genreclass.Primary_Genre observed values: Comedy, Drama, Reality and Game Shows,
+      Animation and Cartoons, Kids, Anime, Action and Adventure, Food, Health and Wellness, Classics,
+      Teen, Science Fiction, Family, News and Information. Documentation examples ''Documentary'', ''Reality'',
+      ''Animation'' are not literal values here (use ''Reality and Game Shows'', ''Animation and Cartoons'').
+      Content_Type is ''show'' for all 1000 rows (documented labels: ''show'',''movie'',''special'').
+      GENRE HIERARCHY FORMAT: Hierarchical_Genres uses ''~'' for sub-genres and ''|'' for alternatives,
+      e.g. ''Comedy~Sitcoms|Family''. Tokens = pieces after splitting on both delimiters (max observed
+      7 tokens / 6 delimiters). ANIMATION FAMILIES genre group: ''Animation and Cartoons'', ''Primetime
+      Animation'', ''Teen'', ''Comedy'', ''Sitcoms'' (match as tokens of Hierarchical_Genres). HIGHLY
+      DIVERSIFIED SHOW / FRAGMENTED GENRE DEFINITION: genres spanning many types and combinations / a
+      high number of types and subtypes -- use multi_genre_spread_score; no threshold documented. OVER-FRAGMENTED
+      OFFERING: more than six nested genre categories and short-form assets exceeding long-form features
+      (is_over_fragmented).
+
+      '
+    tables:
+    - main.core
+  - name: franchises
+    summary: Series / franchise grouping via core.series_id
+    description: 'FRANCHISE GROUP: content entries in the same story world share core.series_id; group
+      by series_id. There are 109 series, each with up to 10 entries that share one title and canonical
+      name. A ''show'' inside a franchise is a content entry (content_key). Long-running series: 10 or
+      more years or installments (is_long_running_series uses Seasons_Total >= 10). Limited series: one
+      season and <= 10 episodes.
+
+      '
+    tables:
+    - main.core
+    - main.content_info
+    - main.show_rollups
+  - name: studios
+    summary: Studios (companies), branding and output
+    description: 'core.studiolink -> companies.entity_key is the primary production studio. Studio-level
+      counts of ''distinct/unique titles'' use COUNT(DISTINCT c.content_title); ''how many titles are
+      tied'' uses COUNT(c.content_key). High-res logo status is per company (has_high_res_logo). Studio
+      brand consistency = studio HBR = 1.
+
+      '
+    tables:
+    - main.companies
+    - main.core
+  - name: promotions
+    summary: Promotional / notification notes per tier
+    description: 'promo_info.tiernotices has free_tier and member_tier, each with Avail_Note, Promo_Note,
+      Alert_Note, Expire_Note: 8 promotional slots per content. A note is filled when its ->> value is
+      not NULL and not blank (no empty strings observed).
+
+      '
+    tables:
+    - main.promo_info
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_declared_definitions
+    description: 'Ratios, flags, bands and parsed values must reuse the metric SQL in semantic.yml (normalised
+      booleans, canonical ratings, parsed dates/scores) rather than ad-hoc comparisons on raw noisy text.
+
+      '
+    enforcement: warn

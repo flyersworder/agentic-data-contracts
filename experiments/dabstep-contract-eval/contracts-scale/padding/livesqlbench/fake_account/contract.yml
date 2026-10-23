@@ -1,0 +1,236 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: livesqlbench, database: fake_account, author: claudeopus5.5
+version: '1.0'
+name: fake-account-detection
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: main
+    description: Fake-account / bot detection database. One row per account in accounts; profiles, security_sessions,
+      content_activity, network_metrics, interaction_metrics, behavioral_scores and risk_and_moderation
+      are 1:1 extensions of accounts (670 rows each, keyed by the account reference under a different
+      column name). account_clusters links accounts to cluster_analysis (200 clusters; each account belongs
+      to 1-3 clusters). monitoring holds the security detection records (exactly one per account in this
+      data).
+    preferred: true
+    tables:
+    - accounts
+    - platforms
+    - profiles
+    - security_sessions
+    - content_activity
+    - network_metrics
+    - interaction_metrics
+    - behavioral_scores
+    - risk_and_moderation
+    - account_clusters
+    - cluster_analysis
+    - monitoring
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: account_scores
+    summary: Per-account composite scores (AAF, CAS, NGV, BBI, SRS, PCI, TEI, CMS, MPS, CPRI, ETS, CSI,
+      ABS, ARS, BAS)
+    description: 'All per-account formulas are computed once in the shared derived table of the metrics
+      (alias sc, one row per account). Definitions: AAF = session count / account age in days (AGE_D).
+      Content Authenticity Score = 0.3*authenticity score + 0.3*content uniqueness + 0.4*conversation
+      naturalness, components scaled to 0-1 first (checked: all three are already stored in [0,1], so
+      no rescaling is applied). NGV = sqrt(follower growth rate^2 + following growth rate^2). BBI = 0.4*bot
+      likelihood + 0.3*automated behavior + 0.3*(1 - conversation naturalness). SRS = 0.4*risk value +
+      0.3*(1 - trust value) + 0.3*impact value. PCI = 0.3*credibility score + 0.3*reputation score + 0.4*profile
+      completeness (profile completeness = accounts.ProfileScore). TEI = 0.4*VPN ratio + 0.3*proxy count/10
+      + 0.3*login country count/20. CMS = 0.4*(1 - content uniqueness) + 0.3*media reuse ratio + 0.3*(1
+      - text uniqueness). MPS = 0.3*abuse report count/1000 + 0.4*impact value + 0.3*risk value. CPRI
+      = SRS*(1 + 0.2*login country count). ETS = 0.5*PCI + 0.5*Content Authenticity Score. CSI = 0.7*(1
+      - CMS) + 0.3*Content Authenticity Score. ABS = 0.4*BBI + 0.3*TEI + 0.3*(1 - Content Authenticity
+      Score). ARS = 0.5*TEI + 0.3*(1 - PCI) + 0.2*SRS. BAS = 0.4*BBI + 0.4*AAF + 0.2*NGV. ACRONYM CLASH:
+      "CAS" names two different scores in the documentation — Content Authenticity Score (account level)
+      and Coordinated Activity Score (cluster level). ETS, CSI and ABS use the Content Authenticity Score
+      (metric content_authenticity_score); NMI and CBR use the Coordinated Activity Score (metric coordinated_activity_score).
+      DATA FINDINGS: VPN usage is text like ''0.30%'' (range ''0.00%''-''1.00%''); the VPN ratio is the
+      number with ''%'' stripped divided by 100. proxy_hits is NULL for 106 accounts, so TEI (and everything
+      built on it) is NULL there. bot_likelihood is NULL for 112 accounts (BBI NULL). A NULL in any component
+      makes the score NULL; nothing is coalesced.
+
+      '
+    tables:
+    - main.accounts
+    - main.profiles
+    - main.security_sessions
+    - main.content_activity
+    - main.network_metrics
+    - main.interaction_metrics
+    - main.behavioral_scores
+    - main.risk_and_moderation
+  - name: account_patterns
+    summary: 'Account classifications: High-Risk, Trusted, Content Farm, Dormant Bot, VPN Abuser, Engagement
+      Manipulator, Serial Violator, High-Activity, Reputational Risk, etc.'
+    description: 'High-Risk Account: SRS > 0.8 and at least one active security detection (monitoring
+      row with InvestState = ''Active'') while the account''s threat_level = ''Critical''. Trusted Account:
+      PCI > 0.8 and no security detections (monitoring rows) in the past 180 days (relative to CURRENT_DATE;
+      note all snapshots in the data are from 2024-02 to 2025-02). Content Farm: CMS > 0.7 and more than
+      50 posts per day. Dormant Bot: account status (StateFlag) = ''Dormant'' — that is the whole documented
+      definition; acct_form is NOT additionally required. VPN Abuser: TEI > 0.8 and at least 3 different
+      login countries (country_count >= 3). Engagement Manipulator: engagement authenticity (EngAuth)
+      < 0.3 and temporal interaction pattern (TempIntPtn) = ''Automated''. Serial Violator: suspension
+      history count > 2 and warning count > 5. High-Activity Account: session count > 1000 or total post
+      frequency > 50 (stated twice in the documentation, identically). Max stored session_count is 1000,
+      so only the post side can fire. Session Count = the account''s session_stats.session_count; Total
+      Post Frequency = sum of the account''s posts_per_day over its content entries (one per account).
+      Reputational Risk: reputation score < 30 on the documented 0-100 scale (stored 0-1, so < 0.30) and
+      abuse report count in the top quartile (NTILE(4) = 4 over abuse_count). Authentication Risk Account:
+      ARS > 0.7 and the account is a VPN Abuser. High-Impact Amplifier: NIC > 0.8 and posts per day >
+      30. Trusted Content Creator: ETS > 0.8 and CIS < 0.2. TEI quartile: NTILE(4) over TEI ascending
+      (1 = lowest 25%), computed only over accounts with non-NULL TEI. TEI Risk Category: 1 ''Low Risk'',
+      2 ''Moderate Risk'', 3 ''High Risk'', 4 ''Very High Risk''. Influence ranking by NIC: rank = number
+      of other accounts with higher NIC + 1 (RANK() over NIC descending). ACCOUNT-LEVEL USE OF CLUSTER-GRAIN
+      SCORES: NIC, CIS, NMI, CBR, NTS depend on the cluster an account is in (cluster NetInfl / CoordScore
+      / size), so they exist per account-cluster membership. An account satisfies a condition on them
+      when at least one of its memberships does (for ranking accounts by NIC, use each account''s MAX(nic)).
+      INTERPRETATION.
+
+      '
+    tables:
+    - main.accounts
+    - main.monitoring
+    - main.risk_and_moderation
+    - main.network_metrics
+  - name: networks
+    summary: 'Clusters: NIC, Coordinated Activity Score, NMI, CBR, NTS, CIS and Bot / Sockpuppet / Amplification
+      networks and their derivatives'
+    description: 'NIC = 0.4*connection quality (ConnQual) + 0.3*network influence score (cluster NetInfl)
+      + 0.3*interaction diversity (IntDiv). Coordinated Activity Score = 0.5*coordination score (CoordScore)
+      + 0.3*NIC + 0.2*cluster size (ClusterQty, raw count, not normalised; so any cluster of size >= 4
+      already exceeds 0.8). NMI = 0.6*BBI + 0.4*Coordinated Activity Score. CBR = BBI * Coordinated Activity
+      Score * cluster size. NTS = PCI*(1 - NGV)*(1 - CBR). CIS = CMS * MPS * NIC. Bot Network: cluster
+      with cluster size > 10 and average BBI over its accounts > 0.7. Sockpuppet Network: cluster with
+      more than 5 linked accounts and Coordinated Activity Score > 0.8 (averaged over members). Amplification
+      Network: cluster with role = ''Amplifier'' and CoordScore > 0.8 — CluRole has no ''Amplifier'' value
+      in the data (values: Botnet, Community, InfluenceNetwork, SocialGroup, SpamRing), so this returns
+      no clusters; do not substitute another role silently. High-Risk Bot Network: Bot Network with CBR
+      > 0.8 and SRS > 0.7 (cluster averages). Network Security Threat: account with NTS < 0.3 that is
+      part of a Bot Network. Content Manipulation Ring: Sockpuppet Network where all accounts have CMS
+      > 0.7. Automated Spam Network: Bot Network with average ABS > 0.8 and all accounts Content Farms.
+      Cross-Platform Threat: High-Risk Account with CPRI > 0.9 that is part of a Sockpuppet Network. Behavioral
+      Anomaly Cluster: cluster with average BAS > 0.8 that contains at least one Bot Network (clusters
+      are not nested, so: the cluster is itself a Bot Network). Mass Manipulation Campaign: Content Manipulation
+      Ring where CIS > 0.8 for all accounts. Advanced Persistent Threat: High-Risk Bot Network with NMI
+      > 0.9 and TEI > 0.8 (averages). "All accounts" conditions treat a member with a NULL score as failing.
+      Cluster-grain metrics are aggregates over the account-cluster derived table m: add GROUP BY m.cluster_id.
+      CLUSTER IDENTIFIER for the Amplification-Network grouping reports: the platform identifier (accounts.plt_key)
+      of the accounts is the cluster identifier. member count = COUNT(DISTINCT account) per that identifier;
+      maximum coordination score = MAX CoordScore among the members'' clusters; member account IDs = array
+      of distinct account ids. Data: cluster_analysis.ClusterQty equals the number of account_clusters
+      rows of the cluster for all 200 clusters.
+
+      '
+    tables:
+    - main.cluster_analysis
+    - main.account_clusters
+    - main.accounts
+    - main.network_metrics
+  - name: monitoring
+    summary: Security detections, latest bot likelihood, last activity proxy and inactivity, review priority
+    description: '"Security detection" records are rows of monitoring (acct_mon = account, snap_ts = detection
+      timestamp, InvestState ''Active''/''Completed''/''Pending''/NULL). Each account has exactly one
+      row here, but write queries for many. Latest Bot Likelihood Score: the bot likelihood recorded at
+      the account''s most recent detection timestamp (arg_max over snap_ts). Last activity proxy time:
+      MAX(snap_ts) of the account''s detection records, used when direct session timestamps are unavailable.
+      Account Inactivity: last activity proxy time < CURRENT_DATE - 90 days. Review priority: the documentation
+      describes a flag in the account table set to a value such as ''Review_Inactive_Trusted'' to signal
+      that an otherwise trusted account needs review due to prolonged inactivity. No such column exists
+      and the database is read-only: produce it as a derived output column (e.g. CASE WHEN trusted AND
+      inactive THEN ''Review_Inactive_Trusted''). snap_ts / LastUp are TIMESTAMPTZ; cast them to VARCHAR
+      when returning them (the client cannot render tz-aware timestamps).
+
+      '
+    tables:
+    - main.monitoring
+    - main.behavioral_scores
+  - name: score_scales
+    summary: Value meanings and thresholds of 0-1 scores
+    description: 'Detection score (monitoring.DetectConf): 0-1; > 0.8 high-confidence detection, < 0.3
+      uncertain, requiring manual review. Coordination score (CoordScore): 0-1; > 0.7 strongly indicates
+      coordinated behavior, < 0.2 independent actions. Engagement authenticity (EngAuth): 0-1; > 0.9 highly
+      authentic, < 0.4 artificial or automated engagement. Content uniqueness (content_quality.content_uniqueness):
+      0-1; > 0.8 highly unique, < 0.3 duplicate or templated. Conversation naturalness (ConvNat): 0-1;
+      > 0.7 natural human conversation, < 0.3 automated or scripted. IP reputation (ip_reputation.ip_reputation_score):
+      0-1; > 0.8 trusted IPs, < 0.3 potentially malicious or compromised. Profile completeness (accounts.ProfileScore):
+      0-1; > 0.8 well-maintained, < 0.4 placeholder or abandoned. Trust value (risk_scores.trust_score):
+      0-1; > 0.7 highly trusted, < 0.3 untrusted or suspicious. Impact value (risk_scores.impact_score):
+      0-1; > 0.7 high-impact violations requiring immediate attention, < 0.3 low-priority. Bot likelihood:
+      documented as 0-100 (> 70 strongly bot, < 20 human-like) but STORED 0-1 (0.001-0.998), so the thresholds
+      are 0.70 and 0.20 on the stored value; the formulas (BBI etc.) use the stored 0-1 value.
+
+      '
+    tables:
+    - main.monitoring
+    - main.cluster_analysis
+    - main.network_metrics
+    - main.interaction_metrics
+    - main.accounts
+    - main.risk_and_moderation
+    - main.behavioral_scores
+    - main.content_activity
+    - main.security_sessions
+  - name: not_computable
+    summary: Documented definitions with no data behind them (TPDS, MACI, RVI, CDPS, BCS, NSI, CAE, APS,
+      CPCS and patterns built on them)
+    description: 'Carried in substance; no metric because the inputs do not exist. TPDS: for each of 24
+      hours, percentage deviation between observed and expected hourly activity frequency, squared, summed
+      over hours, square-rooted (no hourly activity data; only Morning/Afternoon/Night spread text). MACI:
+      mean Pearson correlation of the chosen activity metric across every pair of linked accounts (no
+      per-account time series). RVI: coefficient of variation (stddev/mean) of the account''s reputation
+      score over time, scaled by the relative rate of change in the window (one reputation value per account).
+      CDPS = 0.4*entropy of post times + 0.3*burstiness + 0.3*(1 - periodicity) (no post timestamps).
+      BCS = (1 - TPDS)*(1 - RVI) *(1 - behavior pattern deviation/100). NSI: mean time-synchronisation
+      score over all unique account pairs in a cluster multiplied by MACI. CAE = CIS*NIC*log(1 + reshare
+      count) (no reshare count). APS = (1 - TEI)*BCS*(1 - authentication anomaly count/100). CPCS = CPRI*MACI*
+      (1 + platform link count/10) (each account has one platform). Patterns: Coordinated Influence Operation
+      (network with NSI > 0.8 and CAE > 0.7 containing at least one Content Manipulation Ring); Behavioral
+      Pattern Anomaly (BCS < 0.3 and TPDS > 0.7 and not a Trusted Account); Cross-Platform Bot Network
+      (Bot Network with CPCS > 0.8 and all accounts with similar MACI patterns); Authentication Anomaly
+      Cluster (cluster with average APS < 0.3 containing at least one Authentication Risk Account); Network
+      Influence Hub (NIC > 0.8 and CAE > 0.7, part of a Coordinated Influence Operation); Reputation Manipulation
+      Ring (Content Manipulation Ring where all accounts have RVI > 0.7 and similar CDPS patterns); Synchronized
+      Behavior Cluster (NSI > 0.9 and all accounts with similar BCS patterns); Multi-Platform Threat Network
+      (Cross-Platform Threat with CPCS > 0.8, all accounts in a Synchronized Behavior Cluster); Advanced
+      Influence Campaign (Mass Manipulation Campaign containing at least one Network Influence Hub and
+      high NSI); Persistent Pattern Anomaly (Behavioral Pattern Anomaly persisting over 30 days with high
+      TPDS). Answer questions on these by stating the missing inputs rather than approximating.
+
+      '
+    tables: []
+  rules:
+  - name: use_declared_metrics
+    description: 'Compute every documented score and classification with the declared metric SQL and its
+      from_sql; do not re-derive formulas ad hoc. Keep the two "CAS" scores apart (see account_scores
+      domain).
+
+      '
+    enforcement: warn
+  - name: json_extraction
+    description: 'JSON fields are read with ->> and a ''$.a.b'' path then CAST to DOUBLE/BIGINT; vpn_usage_pct
+      and mention_ratio are text with a trailing ''%'' (strip it; divide by 100 for a ratio).
+
+      '
+    enforcement: warn
+  - name: bot_likelihood_scale
+    description: 'Bot likelihood is stored 0-1 although documented 0-100: compare against 0.70 / 0.20,
+      never 70 / 20.
+
+      '
+    enforcement: warn

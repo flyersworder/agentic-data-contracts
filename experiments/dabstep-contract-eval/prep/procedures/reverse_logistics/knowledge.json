@@ -1,0 +1,92 @@
+[
+  {
+    "id": 30,
+    "knowledge": "Return Handling Charge Schedule",
+    "description": "Rule table that sets the charge a customer pays for having a return handled.",
+    "definition": "Each row of return_charge_rules is one rule, identified by rule_id. Its criteria are compared with a return as follows: customer_segment with customers.seg_category of the return's customer; return_channel with returns.return_channel; item_category with products.itemcategory of the returned item (returns.itemlink = products.itemcode); primary_reason with the text at JSON path reasoning.primary_reason in returns.return_details; item_condition with the text at JSON path condition.item_condition in quality_assessment.assessment_summary (quality_assessment.inspectref = returns.casenum); and the band from min_monthly_returns to max_monthly_returns with the return's Customer Monthly Return Count. The rule's charge terms are flat_charge and charge_pct.",
+    "type": "domain_knowledge",
+    "children_knowledge": [31, 20, 22],
+    "piece": "R"
+  },
+  {
+    "id": 31,
+    "knowledge": "Customer Monthly Return Count (CMRC)",
+    "description": "Number of returns a customer has processed in one calendar month.",
+    "definition": "The customer of a return is orders.buyerlink of its order (returns.srctxn = orders.txnnum). The month of a return is the calendar month of returns.revdate, a 'YYYY-MM-DD' text whose first seven characters give 'YYYY-MM'. CMRC of a return is the number of rows in returns with the same customer and the same month, the return itself included, so it is at least 1 and is the same for every return of that customer in that month.",
+    "type": "calculation_knowledge",
+    "children_knowledge": -1,
+    "piece": "R"
+  },
+  {
+    "id": 32,
+    "knowledge": "Return Charge Rule Matching",
+    "description": "When a rule of the Return Handling Charge Schedule matches a return.",
+    "definition": "A rule matches a return when all of its criteria match. A text criterion (customer_segment, return_channel, item_category, primary_reason, item_condition) matches when it is NULL, or when it equals the return's value exactly; a non-NULL criterion never matches a return whose value is NULL (for example a customer whose seg_category is NULL). The band matches when $$min\\_monthly\\_returns \\le CMRC \\le max\\_monthly\\_returns$$, both bounds inclusive; a NULL bound sets no limit on its side.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [30, 31],
+    "piece": "R"
+  },
+  {
+    "id": 33,
+    "knowledge": "Return Charge Rule Precedence",
+    "description": "Which single rule sets the charge of a return.",
+    "definition": "At most one rule applies to a return: among the rules that match it, the one with the highest specificity, ties broken by the lowest rule_id. Specificity counts each non-NULL text criterion as 1, plus 1 for the band if min_monthly_returns or max_monthly_returns is non-NULL (0 to 6). A return that matches no rule takes the Standard Handling Charge, flat_charge 15.00 and charge_pct 5.0, and has no applying rule id.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [32],
+    "piece": "R"
+  },
+  {
+    "id": 34,
+    "knowledge": "Return Handling Charge (RHC)",
+    "description": "Charge for handling one return under the Return Handling Charge Schedule.",
+    "definition": "$$RHC = F + \\frac{P}{100} \\times V$$ where F is flat_charge and P is charge_pct of the applying rule (or of the Standard Handling Charge), and V is products.unit_value of the returned item, in the currency units of unit_value. Every row of returns has an RHC. A customer's or group's RHC over a period is the sum over its returns whose revdate falls in the period; its average is that sum divided by the number of those returns. No intermediate rounding; round only the reported result, to 2 decimals.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [33],
+    "piece": "R"
+  },
+  {
+    "id": 35,
+    "knowledge": "Customer Return Month",
+    "description": "The customer-and-month grain at which return value leakage is reviewed.",
+    "definition": "The customer of a return is orders.buyerlink of its order (returns.srctxn = orders.txnnum). The month of a return is the calendar month of returns.revdate, a 'YYYY-MM-DD' text whose first seven characters give 'YYYY-MM'. A customer return month is the set of rows in returns with one customer and one month; a customer has one only for months in which it has at least one return.",
+    "type": "domain_knowledge",
+    "children_knowledge": -1,
+    "piece": "C"
+  },
+  {
+    "id": 36,
+    "knowledge": "Inspected Resale Value (IRV)",
+    "description": "Value of a returned item that inspection says can still be resold.",
+    "definition": "$$IRV = V \\times \\frac{A}{10} \\times K$$ where V is products.unit_value of the returned item (returns.itemlink = products.itemcode); A is the aesthetic score at JSON path results.aesthetic_score in quality_assessment.assessment_summary (quality_assessment.inspectref = returns.casenum), a number from 1 to 10 read as a decimal; and K is the completeness factor from the text at JSON path condition.completeness in the same assessment_summary: 1.00 for 'Complete', 0.85 for 'Accessories Missing', 0.60 for 'Missing Parts'. IRV is in the currency units of unit_value.",
+    "type": "calculation_knowledge",
+    "children_knowledge": -1,
+    "piece": "C"
+  },
+  {
+    "id": 37,
+    "knowledge": "Return Value Leakage (RVL)",
+    "description": "Value lost on one return: the item value inspection cannot recover, plus the return shipping.",
+    "definition": "$$RVL = V - IRV + S_f$$ where V is products.unit_value of the returned item, IRV is its Inspected Resale Value, and $S_f$ is the shipping fee at JSON path shipping.fee in returns.return_details, read as a decimal. RVL is computed for every row of returns, in the currency units of unit_value.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [36, 10],
+    "piece": "C"
+  },
+  {
+    "id": 38,
+    "knowledge": "Customer Leakage Ratio (CLR)",
+    "description": "Share of the value a customer returned that leaked away.",
+    "definition": "$$CLR = \\frac{\\sum RVL}{\\sum V}$$ with both sums over the same returns, V being products.unit_value: a ratio of sums, not an average of per-return ratios. CLR is computed per Customer Return Month; a customer's or group's CLR over another period takes both sums over its returns whose revdate falls in that period. Its RVL over a period is the sum over those returns, and its average is that sum divided by their number. No intermediate rounding; round only the reported result, to 2 decimals.",
+    "type": "calculation_knowledge",
+    "children_knowledge": [35, 37],
+    "piece": "C"
+  },
+  {
+    "id": 39,
+    "knowledge": "Leakage Class",
+    "description": "Banded grade of a Customer Return Month by its Customer Leakage Ratio.",
+    "definition": "A Customer Return Month is graded on its unrounded CLR: 'Contained' when CLR < 0.55; 'Elevated' when 0.55 <= CLR < 0.70; 'Severe' when CLR >= 0.70. Each lower bound is inclusive and each upper bound exclusive. The class belongs to the customer-month, so one customer can hold different classes in different months.",
+    "type": "domain_knowledge",
+    "children_knowledge": [38],
+    "piece": "C"
+  }
+]

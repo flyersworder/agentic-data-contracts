@@ -35,7 +35,9 @@ model-dependent if (41) holds. Failing with the text ahead means the route
 costs Qwen accuracy once the facts are plain.
 
 Also reported: the official verdicts beside end-to-end ones, the rest and
-all 401, and a drift check -- each rerun arm against its earlier files, by
+all 401, intervals clustered over question shapes and over fee families
+(the paper's primary uncertainty, added before any row was read), and a
+drift check -- each rerun arm against its earlier files, by
 task and repeat, flagged when the two differ by more than 5 points.
 
 Prints aggregates only.
@@ -94,6 +96,29 @@ def notes_test(model: str, score: dict[str, Counter[str]], tasks: set[str]) -> V
     return is_tie(gap, p), gap, up, down, p
 
 
+#: The two registered comparisons, as (a, b).
+PAIRS = (("contract_noted", "contract_text_noted"), ("contract_noted", "contract"))
+
+
+def clustered_contrasts(
+    score: dict[str, Counter[str]],
+    subsets: tuple[tuple[str, set[str]], ...],
+    clusterings: dict[str, dict[str, str]],
+) -> list[tuple[str, dict]]:
+    """Each registered comparison on each subset, with the task interval and
+    one interval and sign test per clustering (`clustered.contrast`)."""
+    from clustered import contrast
+
+    return [
+        (
+            f"{label}: {a} vs {b}",
+            contrast(score[a], score[b], among, runs=3, clusterings=clusterings),
+        )
+        for label, among in subsets
+        for a, b in PAIRS
+    ]
+
+
 def main() -> None:
     import argparse
 
@@ -140,6 +165,12 @@ def main() -> None:
                 f"   {arm} {label}: now {_acc(score[arm], among):.1%}, "
                 f"before {_acc(before, among):.1%}, {gap:+.1%} ({up} / {down}){flag}"
             )
+
+    from clustered import dabstep_clusterings, report
+
+    print("== clustered (end-to-end)")
+    for label, r in clustered_contrasts(score, subsets, dabstep_clusterings()):
+        report(label, r)
 
     route_label, notes_label = LABELS[model]
     for label, (holds, gap, up, down, p) in (

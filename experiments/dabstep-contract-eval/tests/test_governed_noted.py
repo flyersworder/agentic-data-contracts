@@ -57,3 +57,23 @@ def test_the_notes_test_on_qwen_is_one_sided_and_the_luna_one_a_tie():
     flat = _score({"contract_noted": low, "contract": low})
     assert gn.notes_test("luna", flat, tasks)[0]
     assert not gn.notes_test("qwen", flat, tasks)[0]
+
+
+def test_the_clustered_contrasts_cover_both_tests_on_every_subset():
+    tasks = {str(t) for t in range(6)}
+    score = _score(
+        {
+            "contract_noted": {t: 3 for t in tasks},
+            "contract_text_noted": {t: 1 for t in tasks},
+            "contract": {t: 2 for t in tasks},
+        }
+    )
+    clusterings = {"shape": {t: f"s{int(t) % 3}" for t in tasks}}
+    out = gn.clustered_contrasts(score, (("all", tasks),), clusterings)
+    assert [label for label, _ in out] == [
+        "all: contract_noted vs contract_text_noted",
+        "all: contract_noted vs contract",
+    ]
+    first = out[0][1]
+    assert first["n"] == 6 and first["tasks"] == (6, 0)
+    assert first["clusters"]["shape"]["n"] == 3

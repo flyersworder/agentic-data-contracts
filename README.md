@@ -1923,6 +1923,8 @@ DATA_PLUGIN_PATH=/tmp/kwp/data \
 
 **Do I have to use dbt or Cube?** No. Author metrics inline in a `semantic.yml` with `YamlSource`. dbt (`manifest.json`), Cube, and Apache Ossie are supported if you already have them — the agent-facing behavior is identical regardless of source.
 
+**How does this compare to WrenAI?** [WrenAI](https://github.com/Canner/WrenAI) is a governed text-to-SQL *engine*: you model your data in its MDL semantic layer, and its Apache DataFusion-based engine plans each agent query against that model, dry-plan validates it, and executes it across its supported sources. This library has no engine. It checks the SQL the agent writes against a YAML contract, then passes the query to your own database through a `DatabaseAdapter` as written, and it reads metric definitions from the semantic source you already maintain (dbt, Cube, Apache Ossie, or inline YAML). Pick Wren if you want one engine to own both modelling and execution; pick this library if your warehouse and semantic layer stay as they are and you need governance in front of them. One licensing difference: per-caller table and column rules ([`caller_principal`](#per-caller-access-control-optional)) are part of this MIT library, while Wren lists row- and column-level security as a commercial feature.
+
 **Does it work without the Claude Agent SDK?** Yes. The tools are plain async functions usable from LangChain/deepagents, Pydantic AI, or directly; the example agents fall back to a no-SDK demo mode.
 
 **Is it production-ready?** It's pre-1.0 and actively evolving. Every breaking change is documented in [`CHANGELOG.md`](CHANGELOG.md) with migration notes.

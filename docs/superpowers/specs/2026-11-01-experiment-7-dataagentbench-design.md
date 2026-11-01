@@ -356,9 +356,10 @@ What phase 2 needs beyond phase 1:
 >    schema, and read-only SQL access to the sanctioned stores. It never
 >    sees `query.json`, `ground_truth.csv`, `validate.py`, or any run
 >    output. We would publish the contracts and the authoring logs with the
->    traces. Is that a legitimate input under section 2.2 ("discovered
->    through exploration of the sanctioned data"), and would you mark it as
->    "tuned prompt"?
+>    traces. Section 2.2 allows facts an agent discovers through its own
+>    exploration of the sanctioned data; here that exploration happens in a
+>    separate session before the run. Is the contract a legitimate input,
+>    and would you mark it as "tuned prompt"?
 > 2. **One SQL session per dataset.** Our tools query a single DuckDB
 >    session. We would load each dataset's SQLite, DuckDB and PostgreSQL
 >    stores unchanged into one DuckDB file, one schema per logical database,

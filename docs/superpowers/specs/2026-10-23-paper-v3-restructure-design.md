@@ -134,8 +134,16 @@ These apply to every sentence of both builds.
          tasks;
        - on luna it rests largely on the 34 inspected tasks;
        - it is close to the 2.8-point drift between identical arms;
-       - under exact-match scoring luna's +3.7 falls to about +1.8
-         (p about 0.08). The sensitivity analysis reports this.
+       - under exact-match scoring luna's +3.7 falls to +1.8 (22 tasks to
+         11, p = 0.08; shape interval [-2.0, +6.6]). Qwen's keeps its
+         direction: +9.7 on the full message, +4.7 on the recovered
+         paragraph, both p < 0.05 (FINDINGS, *Exact-match sensitivity*).
+     - **Qwen's views split by which text is scored.** Whole-message
+       scoring favours the arms whose correct answers more often are the
+       value alone: 65% for the governed contract against 60% for its text
+       in experiment 5, 67% against 59% in 5d. So part of every Qwen effect
+       under the official view is answer-format compliance. luna gives the
+       value alone in every arm. Descriptive, not predicted.
      - **The other 202 tasks:** +9.6 on luna (51 tasks to 14); -5.3 on
        Qwen, not significant.
    - **Route** (governed delivery against the same text). Experiment 5's
@@ -474,7 +482,9 @@ is posted.
 2. ~~Experiment 5d completes; copy down, verify, commit; analysis and
    FINDINGS. Fill the abstract's and thesis's 5d clause from what it
    shows.~~ Done 2026-11-01.
-3. The exact-match sensitivity for form and route, both Qwen variants.
+3. ~~The exact-match sensitivity for form and route, both Qwen variants.~~
+   Done 2026-11-01: `analysis/exact_match.py`, FINDINGS *Exact-match
+   sensitivity*.
 4. The claims table applied across sections 1 and 5 to 10, appendices C,
    I, J and K, the captions and the figure labels.
 5. The restructure:

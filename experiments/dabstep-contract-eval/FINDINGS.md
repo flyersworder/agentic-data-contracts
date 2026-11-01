@@ -1821,6 +1821,67 @@ governed arm. Once that is done, the route shows no advantage end-to-end
 on either model, and on Qwen it may cost about 2 points. On Qwen's official
 view, it leads by 5.4.
 
+### Exact-match sensitivity of the form and route effects
+
+The small effects rest on DABStep's scorer, which tolerates format
+differences. A round-3 reviewer found luna's form effect falls from +3.7 to
+about +1.8 when an answer must match the gold exactly. This sensitivity
+covers every small effect (`analysis/exact_match.py`, not registered).
+Exact match is `analysis/leniency.py`'s: strip whitespace and bold, compare
+to the gold. Two variants keep leniency apart from final-paragraph
+recovery:
+- *exact, full message*: officially correct, and the whole answer is the
+  gold;
+- *exact, final paragraph*: correct end-to-end, and the text that was
+  graded is the gold.
+
+Rule-matching tasks (199), co-run, k=3. The gap is arm a minus arm b in
+points, with the task sign test (two-sided) and the interval clustered over
+question shapes:
+
+| contrast | model | official | end-to-end | exact, full | exact, paragraph |
+|---|---|---|---|---|---|
+| form (5c): text with notes − prose with notes | luna | +3.7, p = 0.007, [+0.6, +7.9] | same | +1.8, p = 0.08, [-2.0, +6.6] | same |
+| | Qwen | +8.9, p = 0.01, [-1.3, +20.5] | +5.5, p = 3e-4, [-0.4, +10.4] | +9.7, p = 0.005, [+1.3, +21.2] | +4.7, p = 0.013, [-0.8, +9.9] |
+| route (5): governed − text | luna | -0.7, p = 0.73 | same | 0.0, p = 1 | same |
+| | Qwen | +10.1, p = 0.002, [+5.1, +15.5] | +10.1, p = 6e-8, [+3.1, +16.7] | +8.7, p = 0.014, [+2.4, +15.4] | +5.7, p = 0.002, [-1.0, +12.1] |
+| route, notes in both (5d) | luna | -1.8, p = 0.34 | same | +0.8, p = 0.85 | same |
+| | Qwen | +5.4, p = 0.024, [-7.1, +18.1] | -2.2, p = 0.071, [-6.9, +1.9] | +10.1, p = 8e-4, [+0.4, +20.0] | -0.7, p = 0.77, [-4.1, +2.5] |
+
+luna's official and end-to-end views coincide: every correct luna answer
+is the answer alone.
+
+- **luna's form effect is the one that weakens.** On the rule-matching
+  tasks it falls to +1.8 (22 tasks to 11, p = 0.08), and its shape interval
+  crosses zero. On the other 202 tasks it holds: +7.9 (50 to 18,
+  p = 1e-4). Over all 401 it is +4.9 (p = 2e-5).
+- **Qwen's form effect keeps its direction under both exact variants:**
+  +9.7 on the full message and +4.7 on the paragraph, both with p < 0.05.
+  The paragraph variant's shape interval crosses zero, as the end-to-end
+  one does.
+- **Qwen's route effect in experiment 5 keeps its direction:** +8.7 full,
+  +5.7 paragraph (p = 0.002). The paragraph variant's shape interval
+  crosses zero.
+- **On Qwen, the views split by which text is scored, not by tolerance.**
+  The two whole-message views (official and exact, full) put the governed
+  arm ahead in 5d, +5.4 and +10.1. The two final-paragraph views
+  (end-to-end and exact, paragraph) find no advantage, -2.2 and -0.7.
+- **The mechanism is answer format.** Of Qwen's answers that are correct
+  end-to-end on the rule-matching tasks, the share that is the answer alone
+  (officially correct too):
+
+  | experiment | governed | text |
+  |---|---:|---:|
+  | 5 | 65% (308 of 475) | 60% (248 of 415) |
+  | 5d | 67% (345 of 518) | 59% (313 of 531) |
+  | 5c, form | 61% (text with notes) | 54% (prose with notes) |
+
+  On luna the share is 100% in every arm. On Qwen, the governed route and
+  the contract's text make Qwen more likely to answer with the value
+  alone, as the prompt asks. Part of every Qwen effect under whole-message
+  scoring is that compliance, not a more often correct value. This is
+  descriptive: which arm complies more was not predicted.
+
 ### Gaps the documentation leaves open: predictions (32)-(36)
 
 Experiments 4 to 5c held the knowledge fixed and varied its delivery. The

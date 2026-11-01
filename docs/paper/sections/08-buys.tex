@@ -1,12 +1,12 @@
 \section{Beyond Accuracy}
 \label{sec:buys}
 
-With the facts equal, delivery moves accuracy by a few points
-(Section~\ref{sec:delivery}). What else is the governed contract
-for? Two things that delivery buys, each measured: it keeps cost nearly
-flat as the contract grows, and it records which knowledge each answer
-used. A third, safety, goes with stating the rules, however they are
-delivered.
+Section~\ref{sec:delivery} found no consistent accuracy difference between
+the two routes once the facts are stated alike. Where accuracy is
+comparable, the choice of route turns on other things. Two are measured
+here: cost and capacity as the contract grows, and a log of what each
+answer consulted. A third, the absence of writes, goes with stating the
+rules, however they are delivered.
 
 \subsection{Cost and scale}
 \label{sec:scale}
@@ -62,10 +62,10 @@ databases (Figure~\ref{fig:scale}). The largest level that both arms fit
 on every model is 4x: \mQwen{}'s window does not fit the prompt arm beyond
 it.
 
-\textbf{Size costs no accuracy, up to 4x, in an easy regime.} The prompt
-arm at 4x is below itself at 1x on 3 tasks and above on none: 3 of 540
-runs lost, all on \mLuna{}, inside the registered $\pm$5-point
-equivalence bound (37). Treating the runs as independent puts the loss
+\textbf{Pasting the contract's YAML at 4x, about 92k tokens, met the
+registered equivalence margin, in an easy regime.} The prompt arm at 4x is
+below itself at 1x on 3 tasks and above on none: 3 of 540 runs lost, all
+on \mLuna{}, inside the registered $\pm$5-point equivalence bound (37). Treating the runs as independent puts the loss
 below 1.6\%; the runs share 60 questions in six pieces, so that bound
 describes these questions, not a population of them. \mLuna{}'s prompt arm, with
 all 22 databases (551k tokens) in its prompt, still scores 98.3\%, though
@@ -81,7 +81,7 @@ question shares no words with what it needs, where distractors resemble
 it, or where the task is harder~\cite{nolima,context-rot,ruler}, and some
 loss from length alone~\cite{context-rot,length-alone-hurts}. At these lengths and with these questions
 we saw none. The result says that a contract's size alone need not cost
-accuracy; it is not a test of context rot.
+accuracy in this regime; it is not a test of context rot.
 
 \textbf{Cost is where the deliveries differ.} At one database the prompt
 arm is as cheap or cheaper: its prompt is cached, and it takes 2.7 to 3.8
@@ -92,7 +92,15 @@ on each: 1.7 and 2.4 times cheaper there, and 6.4 times cheaper on
 22x, as its index grows; the prompt arm's grow 21-fold. On \mQwen{}, priced by its output alone, the prompt arm stays
 cheaper at 4x. Under one fixed price the result holds fully cached and
 uncached, and uncached the lookup
-arm is cheaper even at one database. The traces show why the lookup arm's
+arm is cheaper even at one database. The YAML is a verbose comparator: the
+same knowledge as a prose KB is several times smaller. Against the prose
+KB in the prompt, lookup is about 1.1 times cheaper at 4x on the GPT
+models (2.34 against 2.64 thousandths of a dollar on \mLuna{}, 44.3
+against 48.4 on \mSol{}), and the prose is cheaper at 1x. On \mQwen{} the
+prose costs most (0.90 at 4x). Capacity follows the same comparator:
+\mQwen{}'s window stops fitting the YAML from 8x, but the prose KB fits
+even with all 22 databases (about 99k tokens); its accuracy there was not
+run. The traces show why the lookup arm's
 cost stays flat: its lookups never name a padding database or metric, and
 no query touches a padding table. Padding reaches its context only through
 an unfiltered metric listing, in 0 to 1.7\% of runs on the GPT models and
@@ -102,13 +110,15 @@ than the manual (59 against 47 thousandths of a dollar) and \mQwen{} less
 23 on \mSol{} and 37 against 45 on \mQwen{}\fi. Every row records its token counts,
 so the cost can be recomputed at any price.
 
-\subsection{A record of what each answer used}
+\subsection{A log of what each answer consulted}
 \label{sec:audit}
 
-Every governed lookup names the definition it returns, so the trace
-records which knowledge each answer read before its query was written; a
-log of the SQL alone shows only what was computed. This analysis was not
-predicted. In the scale experiment the final SQL
+Every governed lookup names the definition it returns, so the trace is a
+log of the definitions consulted before a query was written; a log of the
+SQL alone shows only what was computed. The log is not provenance in the
+database sense~\cite{buneman-provenance}: it records what was read, not
+what the answer was derived from. A syntactic check adds part of that.
+This analysis was not predicted. In the scale experiment the final SQL
 contains a looked-up metric's expression verbatim in 91\% of \mLuna{}'s
 lookup runs, 98\% of \mSol{}'s and 87\% of \mQwen{}'s runs with a lookup.
 A departure does not mark a wrong answer: there every run that departed
@@ -119,7 +129,7 @@ applied the wrong definition verbatim; each names the contract entry that
 produced it, to be fixed once for every later answer. The record does not
 detect a wrong answer; it says where to fix one.
 
-\subsection{Runs that state the rules do not write}
+\subsection{No observed write where the rules were stated}
 \label{sec:governance}
 
 The contract declares forbidden operations, rendered into the prompt and
@@ -133,8 +143,10 @@ forbidden operations, against 50 in 21{,}790 whose prompt did not}
 (0.23\%). The first group includes 7{,}218 runs of the contract's text over
 the plain tools, where nothing enforced the rules. 44 of the 50 are
 \mQwen{}'s, 42 of them in \armM{} and \armMw{}: 44 of its 8{,}421 runs
-without the rules, none of its 8{,}421 with them; on the other models the
-counts are too small to compare. One
+without the rules, none of its 8{,}421 with them, and none of its 3{,}609
+runs of the contract's text, which stated the rules without enforcing
+them ($p{=}2{\times}10^{-7}$); on the other models the counts are too small
+to compare. One
 escalation in the single runs shows the hazard: an agent lost a temporary
 table to the plain tool's per-call connection, diagnosed it, and switched
 to persistent tables (\appref{app:escalations}). The validator never had

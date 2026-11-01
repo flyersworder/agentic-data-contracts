@@ -100,10 +100,10 @@ A near-replicate of the \mGLM{} contract arm at temperature~0 disagreed
 with the original on 94 of 401 tasks, symmetrically; the four single runs
 are therefore read only through paired tests, and differences between
 those models are directional. No multiplicity correction is applied across
-the 53 predictions. Of the registered directional predictions that held,
-all survive a Bonferroni correction over the 53 except (19), marginally,
-and (35) at the cluster level; six of the 29 that held are ties, which
-hold by not rejecting. Exploratory $p$-values between 0.001 and 0.05 would
+the 57 predictions. Of the registered directional predictions that held,
+all survive a Bonferroni correction over the 57 except (19), marginally,
+and (35) at the cluster level; seven registered ties held, and a tie holds
+by not rejecting. Exploratory $p$-values between 0.001 and 0.05 would
 not survive a correction and are hypotheses.
 
 \paragraph{Scope.} One harness, the authors', runs every arm, and both
@@ -111,9 +111,10 @@ benchmarks' schemas fit in a context window; where they do not, retrieval
 is needed and the delivery result may not
 transfer~\cite{death-schema-linking,spider2}. No arm puts the original
 documentation behind a retrieval tool, the alternative a practitioner
-would also consider. The delivery experiments ran on \mLuna{} and \mQwen{}
-only, and the knowledge-equal ladder was assembled from runs that did not
-all run together (Table~\ref{tab:ladder}).
+would also consider. The two-semantics attribution and the delivery
+experiments ran on \mLuna{} and \mQwen{} only; \mSol{} was given only the
+first semantic. Each delivery contrast is read within one co-run block
+(Table~\ref{tab:ladder}), and comparisons across blocks are not paired.
 
 \paragraph{Our interest.} We wrote the library we evaluate, and report
 where it does not help: its tools without knowledge cost \mSol{}

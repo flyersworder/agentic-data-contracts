@@ -1,0 +1,69 @@
+{
+ "dab_commit": "bcc2e1b06c708abfde5fa3c69e1e4e514eaaf716",
+ "duckdb_version": "1.5.5",
+ "datasets": {
+  "bookreview": {
+   "sha256": "7e29637773b3cb2793318e2aab208b5a868b25574cbe66ab263b6caf6fd59ec6",
+   "bytes": 3682304,
+   "tables": 2,
+   "rows": 2033,
+   "content_sha256": "860de31f2d950ce44ad4427bed4da562cc4013c0e63fa1e16a9fc88bd670f56a"
+  },
+  "crmarenapro": {
+   "sha256": "818a56d8869f925942af86961e36ff452ac33a1465f30716ac24ad2a285415f2",
+   "bytes": 33042432,
+   "tables": 27,
+   "rows": 29221,
+   "content_sha256": "91d01ac5f22522b20b844780e43cb00ead3dba325add8493b4f077ac7ad1a696"
+  },
+  "DEPS_DEV_V1": {
+   "sha256": "48d7029f436bf861bfa971db699c94d3ae9751beae04f0e1feebb44691d112a0",
+   "bytes": 199766016,
+   "tables": 3,
+   "rows": 1259744,
+   "content_sha256": "ca5de58bacd725371c38f7a03e4b767bf853f1203439ab9ce91fccb7b390299c"
+  },
+  "GITHUB_REPOS": {
+   "sha256": "22aa8727a49cac3f4a7cbc67d164f97c15b8ab2c0370d03be731f42b263c8da1",
+   "bytes": 606875648,
+   "tables": 6,
+   "rows": 7617607,
+   "content_sha256": "72606e50b2c5db946f5eac6f70deb0a9e94095d48db35a6a65deadd4bb67adcb"
+  },
+  "googlelocal": {
+   "sha256": "8f5e549b8efbd42519e5037ae9bd7165ed911c0e337b901bbce5934ae271a274",
+   "bytes": 1323008,
+   "tables": 2,
+   "rows": 2079,
+   "content_sha256": "8aae9b1897038f31f932cc9e9c91212a40e134e77d35d0cd625846ae74a899d4"
+  },
+  "music_brainz_20k": {
+   "sha256": "aac20611f4d5c550c02c6d0cf8cdf0cdceb92cd7701e3a859fa91a540d8f87e2",
+   "bytes": 2371584,
+   "tables": 2,
+   "rows": 77424,
+   "content_sha256": "b05f3794641d63e2ce34a6c881bcc46da8c2bf16413ca081dab2f8c7eb627233"
+  },
+  "PANCANCER_ATLAS": {
+   "sha256": "f923c1291d6b7c85221b9127e7c375e7297c3664fedd72d75408586cf4bb58b9",
+   "bytes": 298594304,
+   "tables": 3,
+   "rows": 12134523,
+   "content_sha256": "357d4f487fa9dcf44f34e487e9cf987652c7accfce44880bb4bb694e466e529e"
+  },
+  "stockindex": {
+   "sha256": "e6547918ddfb28a352850e2980fcbe00ad919f4501930758a13ed73d4da7b2ce",
+   "bytes": 4730880,
+   "tables": 2,
+   "rows": 104238,
+   "content_sha256": "57ef31fb4224df8bf07598e121161b00d7a60cf54adf743ef0adf411360d0325"
+  },
+  "stockmarket": {
+   "sha256": "4d7341d50d9a89fc889ac93896a74983139bfba01388d0de4afcddcb6338f009",
+   "bytes": 903622656,
+   "tables": 2754,
+   "rows": 6475857,
+   "content_sha256": "1eff6e1525c3ed21a98163aada7110de8d4226062418675d9fbcf2dc7bd14766"
+  }
+ }
+}

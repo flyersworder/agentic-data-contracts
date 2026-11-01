@@ -216,7 +216,7 @@ uv run python -m dce.stats results/smoke12.jsonl
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep` or `livesqlbench` (see [LiveSQLBench](#livesqlbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data`, `--lsb-dbs` and `--lsb-contracts` (the contracts root, one folder per database) are LiveSQLBench's. |
+| `--benchmark` | `dabstep` | Which benchmark to run: `dabstep`, `livesqlbench` (see [LiveSQLBench](#livesqlbench)) or `dataagentbench` (see [DataAgentBench](#dataagentbench)). `--db`, `--golds`, `--tasks` and `--ungolded` are DABStep's; `--lsb-data`, `--lsb-dbs` and `--lsb-contracts` (the contracts root, one folder per database) are LiveSQLBench's; `--dab-data`, `--dab-datasets` and `--dab-contracts` are DataAgentBench's. |
 | `--max-spend` | **required** | Cap in USD on the *guard ledger* across every resume of this results file. See [Money](#money-read-this-before-the-first-paid-run). |
 | `--n` | `0` (all) | Stratified sample of exactly `n` tasks, proportional across the benchmark's groups (DABStep's `level`, LiveSQLBench's database) by largest remainder. |
 | `--arms` | the benchmark's arms | DABStep: the four in `ARMS`; `contract_uninterpreted`, `manual_resolved`, the `contract_compiled*` arms and `contract_text` run only when named. LiveSQLBench: `schema_only manual_prompt manual_compiled contract`. |
@@ -336,6 +336,34 @@ again, with every entry built on them; the log keeps what the first try
 cost and records the redo. The audit
 drafts per-database counts and a seeded sample of metrics; the verdicts
 are filled in by hand.
+
+## DataAgentBench
+
+Experiment 7's benchmark
+([spec](../../docs/superpowers/specs/2026-11-01-experiment-7-dataagentbench-design.md)):
+DataAgentBench at commit `bcc2e1b`, the 40 queries of its nine phase-1
+datasets. Everything DAB ships (descriptions, hints, queries, golds,
+validators, data) lives in `DAB_DATA` (default `~/data/dataagentbench`) and is
+never committed. One command fetches the pinned files, checks every LFS file
+against DAB's `dataset_manifest.tsv`, builds one DuckDB file per dataset (a
+schema per logical database, values and types as in the SQLite, DuckDB and
+PostgreSQL sources), checks each table's rows and each column's values
+against its source, and checks each dataset's content digest against
+[`prep/dataagentbench/build-manifest.json`](prep/dataagentbench/build-manifest.json):
+
+```bash
+UV_FROZEN=1 uv run python -m dce.benchmarks.dab_data --out ~/data/dataagentbench
+uv run python -m dce.runner --benchmark dataagentbench --arms dab_desc dab_hints \
+  --models gpt-6-luna --max-spend 1 --out results/dataagentbench/pilot.jsonl
+```
+
+The arms are `dab_desc`, `dab_hints`, `dab_contract`, `dab_contract_text` and
+`dab_hints_contract` ([`dce/benchmarks/dataagentbench.py`](dce/benchmarks/dataagentbench.py)).
+The contract arms read `contracts-dataagentbench/<draw>/<dataset>/`, and a
+sweep asking for one stops before any spend while a contract is missing.
+Each answer is graded by its query's own `validate.py` in an isolated
+subprocess; a row carries `overlong` (a pass more than 200 characters longer
+than the gold) and `gold`, the gold string's sha256.
 
 ## Arms
 

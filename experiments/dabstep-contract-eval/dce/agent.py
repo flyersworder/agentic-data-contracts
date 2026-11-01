@@ -32,9 +32,11 @@ import json
 import os
 import subprocess
 import time
+from collections.abc import Mapping
 from decimal import Decimal
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 
 from dce.benchmark import Benchmark, Task
 from dce.pricing import MODELS, cost
@@ -735,6 +737,7 @@ def build_result_row(
     contract_digest: str,
     scorer: str,
     failure: str | None = None,
+    grade_fields: Mapping[str, Any] | None = None,
 ) -> dict:
     row = {
         **task_fields,
@@ -841,6 +844,10 @@ def build_result_row(
         # Grading-side failure category (e.g. LiveSQLBench's `no_sql`).
         # Added only when present, so a DABStep row's key set is unchanged.
         row["failure"] = failure
+    if grade_fields:
+        # The benchmark's own grading facts (DataAgentBench's `overlong`).
+        # Added only when present, so other benchmarks' rows are unchanged.
+        row.update(grade_fields)
     return row
 
 
@@ -1625,7 +1632,10 @@ def run_task(
             # happened yet, so this is genuinely free to retry.
             raise AgentConstructionError(f"{type(exc).__name__}: {exc}") from exc
 
-        prompt = task.prompt
+        # An arm may carry its own user message (DataAgentBench's hints arms
+        # append the hints to the description, as DAB does); else the task's.
+        user_prompt = getattr(setup, "user_prompt", None)
+        prompt = user_prompt if user_prompt is not None else task.prompt
         # Experiment 6's arms carry a larger guard so it never binds before
         # `REQUEST_LIMIT` at their prompt sizes; every other arm keeps the
         # shared one.
@@ -1831,10 +1841,12 @@ def run_task(
             # no gold is the benchmark's call (`DABStep.grade` returns
             # `ungraded`), never a wrong answer.
             failure = None
+            grade_fields: Mapping[str, Any] = {}
             if verdict == "unset":
                 try:
                     grade = benchmark.grade(task, answer)
                     verdict, failure = grade.verdict, grade.failure
+                    grade_fields = grade.fields
                 except Exception:
                     verdict = "scoring_error"
 
@@ -1861,6 +1873,7 @@ def run_task(
                 request_limit=REQUEST_LIMIT,
                 token_cap=token_cap,
                 failure=failure,
+                grade_fields=grade_fields,
                 **provenance,
             )
         except Exception as exc:

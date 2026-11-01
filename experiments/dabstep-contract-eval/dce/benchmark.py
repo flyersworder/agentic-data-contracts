@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 #: contract's lead that is knowledge rather than delivery.
 ROLES: tuple[str, ...] = ("baseline", "manual", "manual_plus", "contract")
 
-BENCHMARK_NAMES: tuple[str, ...] = ("dabstep", "livesqlbench")
+BENCHMARK_NAMES: tuple[str, ...] = ("dabstep", "livesqlbench", "dataagentbench")
 
 #: What a row with no `benchmark` field is: every row written before the
 #: field existed is a DABStep row.
@@ -57,6 +57,9 @@ class Task:
 class Grade:
     verdict: str  # "correct" | "incorrect" | "ungraded"
     failure: str | None = None  # grading-side failure category, if any
+    # Extra grading facts the row carries as fields of its own (DataAgentBench's
+    # `overlong`). Empty for every other benchmark, so their rows are unchanged.
+    fields: Mapping[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -109,6 +112,10 @@ def benchmark_class(name: str) -> type[Benchmark]:
         from dce.benchmarks.livesqlbench import LiveSQLBench
 
         return LiveSQLBench
+    if name == "dataagentbench":
+        from dce.benchmarks.dataagentbench import DataAgentBench
+
+        return DataAgentBench
     raise ValueError(f"unknown benchmark: {name!r}; expected one of {BENCHMARK_NAMES}")
 
 

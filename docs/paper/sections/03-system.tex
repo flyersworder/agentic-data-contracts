@@ -126,8 +126,8 @@ never edited. That the data stores ``all'' as an empty list was taken from
 the data and marked as an interpretation. That the fees of overlapping
 rules add up was not marked: the contract sums over a join of each
 transaction to ``the fee rule that matches it'', which counts every rule
-that matches. That is a convention the data cannot settle, adopted as the
-ordinary join-and-sum idiom (Section~\ref{sec:account}).
+that matches. That is a convention the data cannot settle, the ordinary join-and-sum
+idiom, which the gold also uses (Section~\ref{sec:compiled}).
 
 \textbf{Compiled.} The compiler turns a manual or a knowledge base (KB)
 into a contract entry by entry. For each entry a model writes a definition,
@@ -136,7 +136,7 @@ refuses it with a reason; refused entries keep their text. It translates
 the documentation rather than rewriting it: on LiveSQLBench every one of
 the 1{,}369 KB definitions appears verbatim in the compiled contracts. Its
 checks against the data can add what the data shows, and a strong compiler
-records it (Section~\ref{sec:better-compile}). We use Sonnet~5 and
+records it (Section~\ref{sec:compiled}). We use Sonnet~5 and
 Opus~5.5 as compiler models, with and without declared joins.
 
 \textbf{Authored.} The author is one model session

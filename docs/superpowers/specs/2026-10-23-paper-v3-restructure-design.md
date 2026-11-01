@@ -485,8 +485,12 @@ is posted.
 3. ~~The exact-match sensitivity for form and route, both Qwen variants.~~
    Done 2026-11-01: `analysis/exact_match.py`, FINDINGS *Exact-match
    sensitivity*.
-4. The claims table applied across sections 1 and 5 to 10, appendices C,
-   I, J and K, the captions and the figure labels.
+4. ~~The claims table applied across sections 1 and 5 to 10, appendices C,
+   I, J and K, the captions and the figure labels.~~ First pass done
+   2026-11-01 (with steps 5 and 6): sections 1-10, appendices A, C, I, J
+   rewritten; both builds clean, PVLDB content ends on page 12. Not yet
+   done: the merged arm-and-experiment table (section 4 keeps both
+   tables), appendix K re-read, a number-by-number check (step 7).
 5. The restructure:
    - section 4: gold, timeline, subset, registration, the merged table;
    - section 5, new;

@@ -24,10 +24,9 @@ knowledge base of metric, class and convention definitions written for the
 benchmark, so its documentation is native rather than a vendor manual
 repurposed. Its knowledge is spread across many entries, most of them used by a
 single task, rather than concentrated in one procedure. We chose the two
-for breadth; that they differ in whether the documentation determines what
-the gold requires is something we found by running both
-(Section~\ref{sec:lsb-knowledge}), and it is the property the account of
-Section~\ref{sec:authoring} turns on. BIRD-Interact builds on
+for breadth; that they differ in how often the documentation settles what
+the gold requires is something we found by running both, by model raters
+(Section~\ref{sec:lsb-knowledge}). BIRD-Interact builds on
 LiveSQLBench by masking knowledge on purpose~\cite{bird-interact}; we ask
 how much of it the released KB leaves open without masking. Enterprise
 benchmarks whose schemas exceed a context window~\cite{spider2,beaver} are
@@ -72,8 +71,8 @@ layer with text-to-SQL~\cite{dbt-benchmark,semantic-paired}. Evidence can
 also be generated, by a model trained for it or from the
 data~\cite{knowledge-to-sql,seed}, the precedent for our compiled and
 authored contracts. These measure the value of the content. None removes it
-while holding its delivery fixed, or asks whether the documentation
-determines the answer. Benchmark golds are often wrong or
+while holding its delivery fixed, or holds it equal while varying the
+delivery. Benchmark golds are often wrong or
 ambiguous~\cite{annotation-errors,bird-noise,ambrosia}; our determinacy
 ratings (Section~\ref{sec:lsb-knowledge}) measure a related property, how
 much of the gold the documentation settles.
@@ -111,10 +110,11 @@ expectation Section~\ref{sec:governance} runs against. Least privilege, a
 read-only role, removes the hazard outright and is the baseline any
 deployment should keep.
 
-What is new here is a decomposition with knowledge held equal by
-construction where it matters: a control that removes the content while
-holding the scaffolding fixed, notes that add one fact at a time, the same
-knowledge delivered three ways, three ways of authoring it, a test of
-whether the documentation determines the gold, and 53 predictions committed in advance. That knowledge outweighs delivery confirms what the
-long-context literature leads one to expect; the determinacy and authoring
-results are the parts it does not predict.
+What is new here is a protocol that holds knowledge equal where it
+matters: a control that removes the content while holding the scaffolding
+fixed, notes that add one fact at a time in identical words, and the same
+knowledge by two routes, with 57 predictions committed in advance. Its
+finding is specific: an apparent delivery advantage on DABStep is mostly
+two pieces of data semantics one side omits. We do not rank contracts
+against documentation retrieval, which no arm runs; we attribute what a
+layer's content does and compare routes for the same content.

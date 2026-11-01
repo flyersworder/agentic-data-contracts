@@ -1738,7 +1738,85 @@ Fixed before the run, how the outcomes read:
 - Failing with the text ahead means the route costs Qwen accuracy once the
   facts are plain.
 
-Results: pending.
+**Results.** Run commit `9cb3643` (tag `exp5d-run`), all 401 tasks in each of
+the six repeats, every row with its transcript. Qwen's retry pass reran 15
+errored runs, and the last row of each counts. Cost: $9.01 on luna, $2.29 on
+Qwen.
+
+End-to-end strict, three repeats:
+
+| model | subset | tasks | `contract` | `contract_text_noted` | `contract_noted` |
+|---|---|---:|---:|---:|---:|
+| gpt-6-luna | rule-matching | 199 | 82.2% | 88.1% | 86.3% |
+| | rest | 202 | 78.2% | 79.5% | 76.7% |
+| | all | 401 | 80.2% | 83.8% | 81.5% |
+| qwen3.8-27b | rule-matching | 199 | 79.7% | 88.9% | 86.8% |
+| | rest | 202 | 55.4% | 73.1% | 78.2% |
+| | all | 401 | 67.5% | 81.0% | 82.5% |
+
+- **(41) holds.** On luna, `contract_noted` is 1.8 points below
+  `contract_text_noted` on the rule-matching tasks: 16 tasks to 23,
+  p = 0.34.
+- **(41Q) fails narrowly, with the text ahead.** On Qwen the gap is
+  -2.2 points, inside the 5-point bound, but 10 tasks to 21 gives
+  p = 0.071, below the registered 0.10. The task interval is [-4.5, +0.2].
+  Clustered over question shapes, it is [-6.9, +1.9] (p = 0.39). Over fee
+  families, it is [-5.8, +1.0] (p = 0.0015).
+- **(42Q) holds.** The notes lift Qwen's governed arm by 7.0 points on the
+  rule-matching tasks: 36 tasks to 9, one-sided p = 3e-5. The interval is
+  [+4.2, +10.2]; over shapes, [+1.8, +13.2]. On the rest the lift is
+  22.8 points (91 to 5), and over all 401 it is 15.0.
+- **(42) fails: the notes lift luna's governed arm too.** The lift is
+  +4.0 points on the rule-matching tasks: 22 tasks to 6, p = 0.004. The
+  interval is [+1.8, +6.4]; over shapes, [+0.7, +8.4]. On the rest it is
+  -1.5 (20 to 21, p = 1). The prediction assumed luna read the contract's
+  original wording correctly. On these tasks, a plainer statement of the
+  same two facts still adds 4 points.
+
+As fixed before the run, (41Q) failing with the text ahead reads: **the
+route costs Qwen accuracy once the facts are plain.** The size is about
+2 points, and the significance depends on the clustering. Neither model
+shows the tools ahead once both arms state the facts alike:
+- luna: -1.8 on the rule-matching tasks, -2.3 over all 401;
+- Qwen: -2.2 on the rule-matching tasks, +1.5 over all 401 (58 tasks to 53,
+  p = 0.7).
+
+Qwen's +10.1 for the tools in experiment 5 was the original wording, not
+the route.
+
+The other comparisons:
+- **`contract` against `contract_text_noted`.** It is what experiment 5's
+  pairing becomes once only the text arm carries the notes. On the
+  rule-matching tasks, the text leads by 5.9 points on luna (11 to 27,
+  p = 0.014) and by 9.2 on Qwen (7 to 43, p = 2e-7). The notes account for
+  most of each gap: 4.0 of luna's 5.9, and 7.0 of Qwen's 9.2.
+- **The official view.** It agrees on luna, whose answers are formatted the
+  same in both views. On Qwen, the official scorer puts `contract_noted`
+  ahead of `contract_text_noted` on the rule-matching tasks: 57.8% against
+  52.4%, 75 tasks to 49, p = 0.024. The end-to-end view puts it 2.2 points
+  behind. As in experiments 5 and 5c, Qwen's official scores turn on answer
+  format, which differs by arm. Any route effect on Qwen is stated with its
+  scoring view.
+- **Drift.** Every rerun arm is within 3.0 points of its earlier files on
+  every subset, so none is flagged. The largest gap is Qwen's
+  `contract_text_noted` on the rest: +3.0, 39 tasks to 31.
+- **Cost per run.**
+
+  | model | arm | cost | turns | input tokens |
+  |---|---|---:|---:|---:|
+  | gpt-6-luna | `contract_noted` | 2.93 m$ | 7.2 | 70k |
+  | gpt-6-luna | `contract_text_noted` | 1.58 m$ | 5.4 | 80k |
+  | qwen3.8-27b | `contract_noted` | | 7.1 | 93k |
+  | qwen3.8-27b | `contract_text_noted` | | 7.8 | 239k |
+
+  Qwen's route meters output only. At the size of a single DABStep
+  contract, the text arm is the cheaper of the two on luna, as at 1x in
+  experiment 6.
+
+Record: (41) and (42Q) hold; (41Q) and (42) fail. Both failures point the
+same way as the thesis. Stating the two facts plainly helps both models'
+governed arm. Once that is done, the route adds nothing detectable on
+either model, and on Qwen it may cost about 2 points end-to-end.
 
 ### Gaps the documentation leaves open: predictions (32)-(36)
 

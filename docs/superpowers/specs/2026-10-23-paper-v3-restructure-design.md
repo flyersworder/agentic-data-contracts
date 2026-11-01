@@ -52,8 +52,10 @@ These apply to every sentence of both builds.
 > contract keeps a 6-point lead on the rule-matching tasks). A
 > six-model control and a held-out check support it. With the facts held
 > equal, the contract's representation still leads on the rule-matching
-> tasks; whether looking the contract up adds to the same text is
-> experiment 5d's question; on LiveSQLBench the route makes no detectable
+> tasks. Once both facts are pasted into both arms (experiment 5d), the
+> lookup route shows no advantage end-to-end on luna or Qwen; on Qwen's
+> official view it leads by 5 points. The notes lift the governed contract
+> on both models. On LiveSQLBench the route makes no detectable
 > difference.
 
 ## The storyline
@@ -144,11 +146,28 @@ These apply to every sentence of both builds.
        interval excludes zero, its shape sign test does not, and it crosses
        zero on Gemini's subset. On the rest the route gives +5.1 on luna
        and -6.9 on Qwen, neither surviving clustering.
-     - **Experiment 5d** asks whether that holds once the two notes are in
-       both prompts. It tests governed delivery of the rest of the
+     - **Experiment 5d** (co-run, k=3, results `ddddb75`) puts the two notes
+       in both prompts. It tests governed delivery of the rest of the
        contract, with the deciding facts pasted in both arms. It does not
        test whether the facts themselves reach the agent better by lookup.
-       It reports shape intervals beside its registered tests.
+       On the rule-matching tasks, end-to-end:
+       - **luna:** governed 86.3 against text 88.1, -1.8 (16 tasks to 23,
+         p = 0.34). No detectable difference; (41) holds.
+       - **Qwen:** 86.8 against 88.9, -2.2 (10 to 21, p = 0.071). This
+         fails the registered tie test (p >= 0.10), with the text ahead.
+         Its shape interval is [-6.9, +1.9] (p = 0.39); over fee families
+         it excludes zero.
+       - **Qwen, official view:** the governed arm leads, 57.8 against
+         52.4, 75 tasks to 49, p = 0.024.
+       - **Over all 401, end-to-end:** -2.3 on luna, +1.5 on Qwen (58 to
+         53, p = 0.7).
+       - **The notes lift the governed contract:** +4.0 on luna (22 to 6,
+         p = 0.004; (42) predicted no difference and failed) and +7.0 on
+         Qwen ((42Q) holds), +15.0 on Qwen over all 401.
+
+       Experiment 5's +10.1 for the route on Qwen, under the original
+       wording, does not survive the plain wording end-to-end. The route's
+       effect on Qwen depends on the wording and on the scoring view.
    - **Other route contrasts point the same way:**
      - **4b's constructed questions:** authored contract by two routes,
        +0.5 (2 tasks to 0); `contract_text` against `manual_noted` -1.4;
@@ -160,8 +179,10 @@ These apply to every sentence of both builds.
        prediction (3) had the tools ahead and failed. Both arms sit at a
        knowledge-limited level of about 37%.
    - **Summary:** form estimates are positive on the rule-matching tasks of
-     both models. The other contrasts are unresolved and vary by model and
-     task family. No range is offered as a bound.
+     both models. Route estimates with the facts pasted alike are near zero
+     end-to-end and change sign on Qwen's official view. The other
+     contrasts are unresolved and vary by model, task family and view. No
+     range is offered as a bound.
 6. **Where the knowledge comes from (secondary).**
    - **Data inspection.** It grounds instance-verifiable encodings. The
      stronger compile found the empty-list wildcard. Its gain over the
@@ -259,8 +280,8 @@ These apply to every sentence of both builds.
 4. **The artifact:**
    - the harness, the contracts and the result rows;
    - 53 earlier predictions plus 4 for experiment 5d, each fixed in a
-     commit before its run, with one timing exception, and 20 of the 53
-     failed;
+     commit before its run, with one timing exception. 20 of the 53
+     failed, and 2 of the 4 ((41Q) and (42));
    - the transcripts on Zenodo.
 
    Its limits: the LiveSQLBench transcripts are not released, and 208 rows
@@ -282,7 +303,8 @@ The paper does not claim:
   constructed-question results are separate evidence;
 - that the scale result tests context rot;
 - that any delivery effect is bounded, or that delivery never affects
-  accuracy: (27) held, and 5d is pending;
+  accuracy: (27) held, and in 5d the route reverses between Qwen's two
+  scoring views;
 - that what a layer can add is bounded by what the documentation and data
   determine;
 - that the summing convention is recoverable from the documentation or the
@@ -303,7 +325,11 @@ The paper does not claim:
   the same knowledge can;
 - that the hollow step shows tools are worthless: empty tools can mislead.
 
-## Experiment 5d (running; decided 2026-10-23)
+## Experiment 5d (done 2026-10-24; results `ddddb75`, read 2026-11-01)
+
+Results are in storyline item 5 and in FINDINGS, *Tools with the facts
+stated alike*. (41) and (42Q) hold; (41Q) and (42) fail. The design, as
+fixed before the run:
 
 - **What it adds.** `contract_noted` is the governed contract plus the two
   notes, in identical words, after its prompt. It runs together with
@@ -359,7 +385,7 @@ The paper does not claim:
 | "recover most of the gap" | "most on luna; on Qwen all of it with final-paragraph recovery, while on the official view the contract keeps 6 points on the rule-matching tasks; on sol only one fact, 77% over all tasks and 8% on the rule-matching ones" |
 | "165 tasks nobody inspected" | "the second fact's lift on the 165 rule-matching tasks outside the transcript-inspection set" |
 | Representation "about 4 to 6 points" | "the contract's text leads on the rule-matching tasks, +3.7 and +5.5; a package; provisional" with the caveats of storyline item 5 |
-| Lookups "help on some fee families"; Qwen +10.1 | "a registered, knowledge-equal route effect under the original wording"; experiment 5d reported beside it |
+| Lookups "help on some fee families"; Qwen +10.1 | "a registered, knowledge-equal route effect under the original wording, which does not survive the plain wording end-to-end (5d: -2.2), and reverses on the official view (+5.4)" |
 | "a few points", "0 to 10", "an order smaller", "small", "of either sign" | "form positive on the rule-matching tasks; the other contrasts unresolved and model- and task-dependent" |
 | "ties" (LiveSQLBench, (29), 5d) | "no detectable difference" with the counts; "equivalent" only for (37) |
 | "with 53 predictions committed before the results they predict" | "53 earlier predictions and 4 for experiment 5d were fixed in commits before their runs; one, (6), followed two repeats' totals; the repeated panels fixed none" |
@@ -406,7 +432,7 @@ To the extended version only, with one sentence each in PVLDB:
 - **The oracle details.** Section 7 keeps the result and its interval.
 - **The scale engineering.** Section 8 keeps the regime conditions.
 
-## Abstract (draft; the 5d clause is a placeholder)
+## Abstract (draft; the 5d clause filled 2026-11-01)
 
 > Context-layer evaluations compare an analytics agent with and without
 > curated documentation, which confounds what the layer documents with how
@@ -419,8 +445,10 @@ To the extended version only, with one sentence each in PVLDB:
 > prose, they recover most of the lead on GPT-6 luna and all of it on Qwen
 > 3.8; the second lifts accuracy by 19 and 34 points on tasks outside the
 > inspected set. With the facts equal, the contract's representation still
-> leads on rule-matching tasks (+3.7 and +5.5, provisional), and
-> [experiment 5d]. On LiveSQLBench the route makes no detectable difference.
+> leads on rule-matching tasks (+3.7 and +5.5, provisional). Looking the
+> contract up shows no advantage end-to-end once both arms state the two
+> facts, though on Qwen's official scoring it leads; on LiveSQLBench the
+> route makes no detectable difference.
 > Lookup also works where pasting the contract would not fit, and logs what
 > was consulted.
 
@@ -443,8 +471,9 @@ is posted.
 
 1. Add the shape-clustered intervals to `analysis/governed_noted.py`
    before reading the 5d rows.
-2. Experiment 5d completes; copy down, verify, commit; analysis and
-   FINDINGS. Fill the abstract's and thesis's 5d clause from what it shows.
+2. ~~Experiment 5d completes; copy down, verify, commit; analysis and
+   FINDINGS. Fill the abstract's and thesis's 5d clause from what it
+   shows.~~ Done 2026-11-01.
 3. The exact-match sensitivity for form and route, both Qwen variants.
 4. The claims table applied across sections 1 and 5 to 10, appendices C,
    I, J and K, the captions and the figure labels.

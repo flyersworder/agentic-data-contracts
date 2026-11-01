@@ -1781,8 +1781,10 @@ shows the tools ahead once both arms state the facts alike:
 - Qwen: -2.2 on the rule-matching tasks, +1.5 over all 401 (58 tasks to 53,
   p = 0.7).
 
-Qwen's +10.1 for the tools in experiment 5 was the original wording, not
-the route.
+Qwen's +10.1 for the tools in experiment 5, under the original wording,
+does not survive stating the facts plainly in both arms, end-to-end. This
+does not prove that the +10.1 was the wording: the route's effect on Qwen
+depends on the wording and on the scoring view (below).
 
 The other comparisons:
 - **`contract` against `contract_text_noted`.** It is what experiment 5's
@@ -1815,8 +1817,9 @@ The other comparisons:
 
 Record: (41) and (42Q) hold; (41Q) and (42) fail. Both failures point the
 same way as the thesis. Stating the two facts plainly helps both models'
-governed arm. Once that is done, the route adds nothing detectable on
-either model, and on Qwen it may cost about 2 points end-to-end.
+governed arm. Once that is done, the route shows no advantage end-to-end
+on either model, and on Qwen it may cost about 2 points. On Qwen's official
+view, it leads by 5.4.
 
 ### Gaps the documentation leaves open: predictions (32)-(36)
 

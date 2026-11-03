@@ -1,0 +1,27 @@
+[
+ {
+  "id": "stockindex-1",
+  "cls": "data-discoverable",
+  "text": "The Exchange field in indexinfo_database holds full exchange names (e.g. \"Tokyo Stock Exchange\"), while the Index field in indextrade_database holds index symbols (e.g. \"N225\", \"HSI\", \"000001.SS\")."
+ },
+ {
+  "id": "stockindex-2",
+  "cls": "guidance",
+  "text": "Joining the two needs each exchange matched to its major index symbol (e.g. Tokyo Stock Exchange to N225, Hong Kong Stock Exchange to HSI)."
+ },
+ {
+  "id": "stockindex-3",
+  "cls": "world",
+  "text": "An exchange's region (Asia, Europe, North America) is not stored and must be inferred from geography (e.g. N225 is in Asia)."
+ },
+ {
+  "id": "stockindex-4",
+  "cls": "definition",
+  "text": "An up day is a trading day whose close is above its open; a down day one whose close is below its open."
+ },
+ {
+  "id": "stockindex-5",
+  "cls": "definition",
+  "text": "Average intraday volatility is (High - Low) / Open per day, averaged over the period."
+ }
+]

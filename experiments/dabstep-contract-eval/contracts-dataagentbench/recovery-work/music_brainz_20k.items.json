@@ -1,0 +1,22 @@
+[
+ {
+  "id": "music_brainz_20k-1",
+  "cls": "described",
+  "text": "The tracks table has duplicates: different track_ids can be the same real-world track."
+ },
+ {
+  "id": "music_brainz_20k-2",
+  "cls": "guidance",
+  "text": "Duplicate tracks need not match exactly (e.g. different year formats or small attribute differences), so they are resolved by comparing title, artist, album, year and so on."
+ },
+ {
+  "id": "music_brainz_20k-3",
+  "cls": "data-discoverable",
+  "text": "The sales table records sales in five countries: USA, UK, Canada, Germany and France."
+ },
+ {
+  "id": "music_brainz_20k-4",
+  "cls": "data-discoverable",
+  "text": "Sales occur on five platforms or stores: iTunes, Spotify, Apple Music, Amazon Music and Google Play."
+ }
+]

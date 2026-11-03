@@ -1,0 +1,22 @@
+[
+ {
+  "id": "bookreview-1",
+  "cls": "described",
+  "text": "In books_info, \"description\", \"categories\" and \"features\" look like lists or dictionaries but are stored as strings."
+ },
+ {
+  "id": "bookreview-2",
+  "cls": "described",
+  "text": "\"book_id\" in books_info and \"purchase_id\" in review refer to the same books, although the field names differ."
+ },
+ {
+  "id": "bookreview-3",
+  "cls": "data-discoverable",
+  "text": "Joining books_info.book_id to review.purchase_id needs a fuzzy join: the values do not match exactly."
+ },
+ {
+  "id": "bookreview-4",
+  "cls": "guidance",
+  "text": "Some queries need information from the \"categories\" or \"details\" columns of books_info."
+ }
+]

@@ -1,0 +1,12 @@
+[
+ {
+  "id": "googlelocal-1",
+  "cls": "described",
+  "text": "The two databases join on the gmap_id field, combining reviews with business metadata."
+ },
+ {
+  "id": "googlelocal-2",
+  "cls": "guidance",
+  "text": "Needed information can be in the \"description\" column of business_database."
+ }
+]

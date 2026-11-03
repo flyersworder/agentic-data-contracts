@@ -507,3 +507,67 @@ is posted.
      premise.
 8. A review round on the paper, then copy edits; the AI disclosure goes in
    then.
+
+## Review round 3 (2026-11-03): decisions
+
+Five reviews of the PVLDB build at 907a805: gpt-6.1-sol and gemini-4-argon
+(Copilot, sandboxed, paper and FINDINGS only), a methods reviewer, a
+practitioner reviewer, a citation check. All five: major revision. Reports in
+`~/.cache/rating-sandbox/review3/` and the session scratchpad.
+
+**New runs (the user chose, 2026-11-03):** experiment 5e (the two facts
+written into the contract, looked up or pasted, with `manual_summed` and
+`contract` co-run), and the prose KB at 22x on Qwen
+(`docs/superpowers/specs/2026-11-03-experiment-5e-facts-in-the-contract-design.md`).
+
+**Accepted, text and existing rows:**
+1. Front matter: the two-fact attribution is luna's and Qwen's, not sol's;
+   the second fact is a convention the gold uses, which neither the manual
+   nor the data settles; "most of the lead" on luna gets its 401-task figure.
+2. Route: "no detectable difference", with shape intervals; equivalence not
+   shown. Qwen's official-view lead: task-level only, not robust to
+   clustering; out of the abstract.
+3. Form: a package (format, SQL, repetition), with the exact-match and
+   clustering caveats in the same sentence wherever it is claimed.
+4. Labels: every unregistered test marked (expl.); the 57 counted as
+   registered, everything else exploratory.
+5. Held-out: report the 105 tasks in unread shapes (+4.1 luna, +10.8 Qwen);
+   lead with (28Q), registered on a model whose transcripts nobody read;
+   say (28)'s comparator rows selected the 34.
+6. Registered ties: read as equivalent / inconclusive / different by shape
+   (the 5e rule), next to the registered verdict; "not rejected" in the
+   text.
+7. Bonferroni stated at the task level; the shape-level verdicts of the
+   headline predictions given.
+8. Threats in the PVLDB build: the rule-matching subset was chosen after
+   (18) failed; the 401 tasks were reused adaptively across the series.
+9. sol's one fact: the rule-matching 8% leads, not the 77%.
+10. LiveSQLBench determinacy: both scales (+13 points, equal on log-odds).
+11. Corruption: per model, Qwen the only informative one; the harness's
+    connection-per-call design provokes it.
+12. Readability: one name per concept (fact, not "semantic"; note; form;
+    route); "end-to-end", "official", "hard" defined at first use; the two
+    notes verbatim; a headline table (manual, +1f, +2f, contract); the Q
+    suffix and prediction ids defined; pre-computed metrics stated as not
+    isolated (the agent always writes SQL).
+13. Related work: vendor semantic layers for agents, classic text-to-SQL
+    pipelines, answering queries using views / OBDA, context engineering.
+    Each citation checked before it goes in.
+14. Citation claim fixes: `semantic-paired` compares schema with a markdown
+    document; the overfitting sentence; the leaderboard band and 113 shapes
+    sourced; product links.
+15. Temperature and harness asymmetries (run A's COUNT(*) bug, the 100-row
+    preview) in the threats.
+16. Cuts to make room: the LiveSQLBench ceiling and oracle detail, the
+    writes section to two sentences, run-order bookkeeping; to the
+    extended version.
+
+**Declined, with the reason given in the paper or the response:**
+- A RAG arm over the manual: out of scope (2026-10-28).
+- sol reruns, a luna hollow arm: cost; the knowledge step stands on six
+  models.
+- Official grading of the later runs: the leaderboard no longer grades.
+- A validator ablation, NL2SQL pipeline baselines, an agent-on-views arm:
+  outside the question; the paper says what was not isolated.
+- Human calibration of the raters: the user's, pending; two reviewers ask
+  for it, so it should land before submission.

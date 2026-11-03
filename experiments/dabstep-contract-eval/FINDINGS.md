@@ -1821,6 +1821,64 @@ governed arm. Once that is done, the route shows no advantage end-to-end
 on either model, and on Qwen it may cost about 2 points. On Qwen's official
 view, it leads by 5.4.
 
+### A second benchmark, DataAgentBench: predictions (43)-(48)
+
+Experiment 7 asks whether a contract an author writes from the data recovers
+the knowledge DataAgentBench's builders wrote down as hints, and whether it
+does the hints' work for an agent. Design:
+`docs/superpowers/specs/2026-11-01-experiment-7-dataagentbench-design.md`.
+Nine datasets, 40 queries (the leaderboard's set without MongoDB and
+PATENTS), DAB pinned at bcc2e1b; its data, golds and validators are not
+committed.
+
+Offline, already scored (`contracts-dataagentbench/RECOVERY.md`, recovery
+commit 898373b, before any agent run): **(43) fails** (draw A recovers 12 of
+36 data-discoverable item-draws), **(43c) holds**, **(43w) fails** pooled.
+
+Five arms run together in each repeat, gpt-6-luna and qwen3.8-27b, k=5,
+`--retry-pass`: `dab_desc` (description only), `dab_hints` (plus DAB's hints),
+`dab_contract` (plus the governed contract, draw A1), `dab_contract_text`
+(draw A1's files in the prompt, plain tools) and `dab_hints_contract` (hints
+plus the governed contract, draw B, corrected). Primary measure: DAB's own
+`validate.py` on the harness's final answer. Analysis:
+`analysis/dataagentbench.py`.
+
+- **(44)** `dab_hints` beats `dab_desc` (manipulation check).
+- **(45)** `dab_contract` beats `dab_desc`.
+- **(46)** The recovered share, (`dab_contract` - `dab_desc`) / (`dab_hints`
+  - `dab_desc`), is at least 0.5; falsified if its 95% interval (bootstrap
+  over datasets) lies below 0.5; spanning 0.5 with the point below is
+  inconclusive.
+- **(47)** `dab_contract` and `dab_contract_text` show no detectable
+  difference: within 5 points and two-sided p >= 0.10.
+- **(48)** `dab_hints_contract` beats `dab_hints`.
+
+Each directional test is a one-sided task-level sign test over the 40
+queries on each query's pass rate over the five repeats, p < 0.05, and holds
+only if the direction also holds on a majority of the datasets where the
+arms differ. Every test is reported leaving out one dataset at a time; the
+leaderboard form (mean of per-dataset pass rates) beside it, untested.
+Leniency: overlong passes (an answer more than 200 characters longer than
+the gold) per arm; arms more than 5 points apart in them are also compared
+without those rows.
+
+Fixed before the run, how the outcomes read: (44) failing means the hints do
+not bite in this harness on this subset, and (45)-(48) are reported but not
+read as support. (43) failing and (45) holding would mean the contract helps
+through what the rubric scored partial or stated. (43c) holding means
+recovery comes from the data, not from memory of DAB.
+
+The pilot gate (`prep/dataagentbench/PILOT.md`, bd3ade4) ran before this
+commit: neither floor rule fires, no dataset is left out, and on luna's one
+repeat `dab_hints` did not lead `dab_desc` (23 against 25 of 40). Its rows
+enter no test.
+
+Departure from the design, decided before any row: the runs are local, not
+on the cluster (the cluster's scratch space is held by experiment 5e for
+some days). Same harness and data as the pilot; three workers per model;
+rows `~/data/dce-held-results/exp7/runs/exp7-<model>-r<i>.jsonl`, copied into
+`results/dataagentbench/` with the results commit.
+
 ### The two facts written into the contract: predictions (49)-(53)
 
 Experiment 5d pasted the two notes into both arms' prompts, so it tested

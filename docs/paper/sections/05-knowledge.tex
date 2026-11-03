@@ -1,4 +1,4 @@
-\section{Knowledge and the Two Semantics}
+\section{Knowledge and the Two Facts}
 \label{sec:results}
 \label{sec:knowledge}
 
@@ -79,7 +79,7 @@ advantage: the rule one lookup away, against the rule somewhere in a long
 prompt. The rest of this section shows that on \mLuna{} and \mQwen{} it is
 mostly two pieces of data semantics the manual omits.
 
-\subsection{The first semantic: a wildcard stored as an empty list}
+\subsection{The first fact: a wildcard stored as an empty list}
 \label{sec:one-fact}
 \label{sec:interpretation}
 
@@ -87,23 +87,51 @@ The manual says a null fee field ``applies to all possible values''. The
 fee data never uses null for its three list-typed fields; it stores ``all''
 as an empty list, on 720 of 1{,}000 rules for \texttt{account\_type}. The
 contract's author took that from the data and built it into the matching
-predicate. \armMw{} is \armM{} plus that one fact, stated once in words and
-without SQL; its plan and the reading of each outcome were committed before
-its first run. Over all 401 tasks it recovers 77\% of the gap between
-manual and contract on \mSol{} (\armM{} 65.1\%, \armMw{} 77.3\%, \armC{}
-81.0\%; 90 tasks to 28 over \armM{}; over shapes 0.16 to 1.01), 41\% on
-\mQwen{} and 38\% on \mLuna{}. The shares' intervals overlap widely, so
-their order across models is not established.
+predicate. \armMw{} is \armM{} plus that one fact as a note, stated once in words
+and without SQL; its plan and the reading of each outcome were committed
+before its first run. The note reads, in full: \emph{``In the
+\texttt{fees} table, the list-typed fields \texttt{account\_type},
+\texttt{aci} and \texttt{merchant\_category\_code} are never null. A rule
+that applies to all values of such a field stores an empty list instead.
+Treat an empty list the way the manual treats null: the rule applies to
+all values of that field.''}
 
-The fact acts where it should. On \mSol{} it recovers 112\% of the gap on
-the 202 tasks outside rule matching, and 8\% on the 199 rule-matching
-tasks, those that match each payment against the table of fee rules
-(68.5\% to 69.3\%, against the contract's 79.4\%). On the three families
-that need only the right set of fee rules it reaches the contract (180 of
-180 task-runs, against 42 for \armM{}); on the three total-fee families it
-does nothing.
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{\mLuna{}} & \multicolumn{2}{c}{\mQwen{}, e2e} & \multicolumn{2}{c}{\mSol{}} \\
+\tabhead{Arm} & RM & all & RM & all & RM & all \\
+\midrule
+\armM{} & 43.6 & 45.3 & 45.1$^\dagger$ & 48.2$^\dagger$ & 68.5 & 65.1 \\
+\armMw{} (+1 fact) & 52.6 & 58.8 & 43.4 & 56.7 & 69.3$^\dagger$ & 77.3$^\dagger$ \\
+\armMws{} (+2 facts) & 82.4$^\dagger$ & 74.8$^\dagger$ & 86.1 & 80.0 & -- & -- \\
+\armC{} & 82.2 & 81.1 & 79.6 & 67.7 & 79.4 & 81.0 \\
+\bottomrule
+\end{tabular}
+\caption{The manual, the manual with one and with both facts as notes, and
+the contract: accuracy (\%) on the 199 rule-matching tasks (RM) and all 401,
+$k{=}3$. Each column is one co-run block except the cells marked $\dagger$,
+which come from a separate run of the same model. \mQwen{} end-to-end; its
+official view is in the text. \mSol{} was not given the second fact.}
+\label{tab:facts}
+\end{table}
 
-\subsection{The second semantic: matching fees add up}
+\textbf{The fact acts where it should, and only there.} On \mSol{} it
+recovers 8\% of the manual-to-contract gap on the 199 rule-matching tasks,
+those that match each payment against the table of fee rules (68.5\% to
+69.3\%, against the contract's 79.4\%), and 112\% on the other 202 (expl.:
+the subset was defined after this run). Over all 401 tasks that is 77\% of
+the gap (90 tasks to 28 over \armM{}; over shapes 0.16 to 1.01), against
+41\% on \mQwen{} and 38\% on \mLuna{}; the shares' intervals overlap
+widely, so their order across models is not established. On the three
+families that need only the right set of fee rules \armMw{} reaches the
+contract (180 of 180 task-runs, against 42 for \armM{}); on the three
+total-fee families it does nothing.
+
+\subsection{The second fact: matching fees add up}
 \label{sec:second-fact}
 
 On \mLuna{}'s rule-matching tasks, \armMw{} still trailed the contract by
@@ -111,36 +139,43 @@ On \mLuna{}'s rule-matching tasks, \armMw{} still trailed the contract by
 solved and \armMw{} missed in both of the first two repeats. All 34 add up
 the fees of many transactions, and about 30 turn on what happens when
 several fee rules match one transaction, which the manual never says. The
-contract's total-fee definition sums over every matched pair, the gold's
-convention, without marking it as a choice
-(Section~\ref{sec:authoring-paths}). The prose arm saw the overlap and
-invented a one-rule policy; twice it computed the gold and rejected it as
-double counting.
+contract's total-fee definition sums over every matched pair. That is the
+gold's convention, and neither the manual nor the data settles it: it is a
+choice the contract's author made without marking it as one, and it
+agrees with the grader (Section~\ref{sec:authoring-paths}). The prose arm
+saw the overlap and invented a one-rule policy; twice it computed the gold
+and rejected it as double counting.
 
-\armMws{} adds that convention to \armMw{} as a second note. On \mQwen{},
-none of whose transcripts was read, it lifts the prose on the
-rule-matching tasks by 42.7 points (112 tasks to 4), as registered in
-(28Q). On \mLuna{} the registered lift (28) is 28.5 points (95 tasks to
-4). Because the 34 inspected tasks were chosen from \mLuna{}'s runs, the
-lift is also measured on the 165 rule-matching tasks outside that set:
+\armMws{} adds that convention to \armMw{} as a second note:
+\emph{``Several fee rules can match the same transaction; when they do,
+each of them applies. Total fees over a set of transactions are the fees
+summed over every matching (transaction, rule) pair. A transaction that no
+rule matches adds nothing.''} The cleanest
+test is \mQwen{}'s, registered as (28Q) on a model none of whose
+transcripts was read: it lifts the prose on the rule-matching tasks by 42.7
+points (112 tasks to 4; over shapes 20 to 0). On \mLuna{} the registered
+lift (28) is 28.5 points (95 tasks to 4), but it reuses the runs that chose
+the 34 tasks; on the third repeat alone, which played no part in choosing
+them, it is $+28.6$. On the 165 rule-matching tasks not read, the lift is
 $+19.2$ points on \mLuna{} (64 tasks to 4) and $+33.9$ on \mQwen{} (78 to
-4), with shape intervals $+8.5$ to $+31.9$ and $+17.7$ to $+53.6$, under
-every rater family. Excluding the 34 removes tasks the comparator failed
-twice, so the selection biases this lift down; the third repeat alone,
-which played no part in choosing them, gives $+20.6$ on the 165.
+4); those tasks are held out by task, not by question shape, and on the
+105 in shapes no read task belongs to it is $+4.1$ (14 to 4) and $+10.8$
+(23 to 3) (expl.). The fact acts mostly in the summing shapes, as it
+should.
 
-\textbf{Stated in prose, the two semantics recover most of the contract's
-lead on \mLuna{}, and on \mQwen{} all of it end-to-end.} On \mLuna{}'s
-rule-matching tasks \armMws{} reaches 84.1\% against the contract's
-82.6\% (separate runs). On \mQwen{}, in one run, the prose with both
-facts \emph{outscores} the governed contract end-to-end: 86.1\% against
-79.6\% on the rule-matching tasks and 80.0\% against 67.7\% over all 401.
-On the official view the contract keeps a lead on the rule-matching tasks,
-51.6\% against 45.6\%, and trails over all 401, 51.0\% against 54.4\%.
-\mSol{} was given only the first fact, so its rule-matching gap, where the
-second acts, is untested.
+\textbf{Stated in prose, the two facts recover most of the contract's
+lead on \mLuna{}, and on \mQwen{} all of it end-to-end}
+(Table~\ref{tab:facts}). On \mLuna{}'s rule-matching tasks \armMws{}
+reaches 82.4\% against the contract's 82.2\% (separate runs; 84.1\% in a
+later run); over all 401 it recovers 82\% of the lead (74.8\% against 45.3\% and
+81.1\%, across runs). On \mQwen{}, in one co-run block, the
+prose with both facts \emph{outscores} the governed contract end-to-end:
+86.1\% against 79.6\% on the rule-matching tasks and 80.0\% against 67.7\%
+over all 401. On the official view the contract keeps a lead on the
+rule-matching tasks, 51.6\% against 45.6\%, and trails over all 401,
+51.0\% against 54.4\%.
 
-\subsection{How plainly the semantics are stated}
+\subsection{How plainly the facts are stated}
 \label{sec:plain}
 
 On \mQwen{} the prose with both notes beats the contract's own text by
@@ -154,8 +189,10 @@ comes 28{,}000 characters after a matching rule that mentions null only.
 count finds single-rule reasoning in 103 of its 199 rule-matching runs on
 the contract's text, against 37 on \mLuna{}. Adding the two notes to the
 contract's text lifts it by 18.9 points end-to-end (15.7 official; (31Q)).
-\textbf{Whether a semantic is stated is not enough; how plainly it is
-stated moves accuracy by as much as the semantic itself.}
+\textbf{On \mQwen{}, whether a fact is stated is not enough; how plainly
+it is stated moves accuracy by as much as the fact itself.} On \mLuna{}
+the prose and the contract's text do not differ detectably (registered
+tie (29), not rejected).
 
 \subsection{What a pre-computed layer would add}
 \label{sec:ceiling}

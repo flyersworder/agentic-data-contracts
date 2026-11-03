@@ -12,12 +12,13 @@ difficulty is semantic rather than syntactic: the hard split turns on the
 fee-matching rule, in which a missing value in a rule means \emph{applies
 to every value}, and an agent that reads only the schema returns a clean,
 wrong number. Its golds are withheld and grading is centralised, which
-raises the cost of the overfitting that makes many text-to-SQL results
-hard to trust~\cite{ladder,leaderboard-illusion}. Its question space is
-small: 450 test tasks expand 113 question shapes, 12 of which cover half
+raises the cost of the adaptive overfitting a public test set
+invites~\cite{ladder,leaderboard-illusion}. Its question space is small:
+by our grouping of its templates, 450 test tasks expand 113 question shapes, 12 of which cover half
 the benchmark, and 294 of our 332 hard tasks concern fees. The benchmark's
 paper reports its strongest agent at 14.55\% on the hard split; credible
-named leaderboard entries since cluster around 20 to 26\%.
+named leaderboard entries since cluster around 20 to
+26\%~\cite{dabstep-leaderboard}.
 
 LiveSQLBench~\cite{livesqlbench} supplies, for each of its 22 databases, a
 knowledge base of metric, class and convention definitions written for the
@@ -29,23 +30,31 @@ the gold requires is something we found by running both, by model raters
 (Section~\ref{sec:lsb-knowledge}). BIRD-Interact builds on
 LiveSQLBench by masking knowledge on purpose~\cite{bird-interact}; we ask
 how much of it the released KB leaves open without masking. Enterprise
-benchmarks whose schemas exceed a context window~\cite{spider2,beaver} are
-outside our scope: both of ours fit.
+benchmarks whose schemas exceed a context window~\cite{spider2,beaver} and
+data-agent benchmarks spanning several database systems~\cite{dab-berkeley}
+are outside our scope: both of ours fit one DuckDB session.
 
 \subsection{Three kinds of layer}
 \label{sec:layers}
 
 Three families of approach are routinely conflated. \emph{Semantic layers}
-(dbt metrics, Cube, LookML) define metrics as executable artifacts, so the
-agent calls a metric rather than deriving it. \emph{Context layers} store
+(MetricFlow~\cite{metricflow}, Cube~\cite{cube},
+LookML~\cite{lookml}; for agents, Cortex Analyst's semantic
+models~\cite{cortex-analyst} and Genie~\cite{genie}) define metrics as
+executable artifacts, so the agent calls a metric rather than deriving it;
+their database precedents are answering queries using
+views~\cite{halevy-views} and ontology-based data access, which maps a
+domain vocabulary onto a schema~\cite{obda-survey}. \emph{Context layers} store
 natural-language documentation next to the data and retrieve it at query
 time; MotherDuck Guides~\cite{motherduck-guides} is the best-documented
 instance. \emph{Data contracts} come from governance: a declarative
 artifact stating what a dataset contains and what may be done with it,
 with the Open Data Contract Standard~\cite{odcs} the emerging
 specification\ifextended, in a line of dataset documentation from
-datasheets~\cite{datasheets} to Croissant~\cite{croissant}\fi. The artifact under test is of the third kind: one YAML supplies the
-semantics the agent reads and the rules its tools enforce.
+datasheets~\cite{datasheets} to Croissant~\cite{croissant}\fi. The artifact under test is of the third kind, and closest to a semantic
+model with an access policy: one YAML supplies metrics as SQL with their
+descriptions, which the agent reads and composes rather than calls, and
+the rules its tools enforce.
 
 \subsection{What has been measured}
 \label{sec:prior}
@@ -66,8 +75,12 @@ do not travel~\cite{evoontology}.
 human-written evidence, worth 20 points to GPT-4~\cite{bird}; KaggleDBQA
 finds database documentation doubles parser accuracy~\cite{kaggledbqa};
 an ontology over an enterprise schema moves GPT-4 from 16\% to
-54\%~\cite{sequeda-kg}; semantic-layer benchmarks compare a curated metric
-layer with text-to-SQL~\cite{dbt-benchmark,semantic-paired}. Evidence can
+54\%~\cite{sequeda-kg}; a semantic-layer benchmark compares a curated metric
+layer with text-to-SQL~\cite{dbt-benchmark}, and another a schema with and
+without a semantic document~\cite{semantic-paired}. Text-to-SQL pipelines
+add decomposition, schema linking and self-correction around the
+model~\cite{din-sql,mac-sql,chess,dail-sql}; we hold the agent loop fixed
+and vary what it is told. Evidence can
 also be generated, by a model trained for it or from the
 data~\cite{knowledge-to-sql,seed}, the precedent for our compiled and
 authored contracts. These measure the value of the content. None removes it
@@ -84,8 +97,10 @@ robust to the extra material~\cite{chung-long-context}, and schema linking stops
 once the schema fits~\cite{death-schema-linking}; in general, long context
 matches or beats retrieval in accuracy while retrieval is far
 cheaper~\cite{rag-or-long-context}, retrieval helps long-context models
-too~\cite{retrieval-meets-long-context}, and loading
-tool descriptions on demand cuts prompt size~\cite{rag-mcp}. Long prompts
+too~\cite{retrieval-meets-long-context}, loading
+tool descriptions on demand cuts prompt size~\cite{rag-mcp}, and
+practitioner guidance favours loading context just in time over preloading
+it~\cite{anthropic-context}. Long prompts
 do lose accuracy where the needle shares no words with the question, where
 distractors resemble it, as tasks grow harder~\cite{nolima,context-rot,ruler},
 and even from length alone with retrieval

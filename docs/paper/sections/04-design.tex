@@ -259,14 +259,19 @@ into 22 databases, and the constructed questions into six pieces of
 knowledge (five gap clusters in the gaps experiment). Every effect is
 therefore given in points with a 95\% bootstrap interval over those
 clusters, and where a task-level test and its cluster-level counterpart
-disagree, the text says so. On DABStep the primary clustering is the 38
-question shapes; fee families are reported beside it. In-text $p$-values are two-sided and quoted no
+disagree, the text says so. On DABStep the primary clustering is the
+question shapes (38 over the hard tasks, 25 over the rule-matching ones, of
+very unequal size); fee families, mostly single tasks, are reported beside
+it and are close to task-level. In-text $p$-values are two-sided and quoted no
 smaller than $10^{-10}$. A test fixed before its run carries its
-prediction number, as in \emph{(28)}; any other test is exploratory and is
+prediction number, as in \emph{(28)}, with a Q suffix for the same test on
+\mQwen{}; numbers repeat between the DABStep and LiveSQLBench series, so a
+number is read with its experiment. Any other test is exploratory and is
 marked \emph{(expl.)}. The index records each registered verdict at its
 registered sidedness, one-sided where a direction was predicted. A
 registered tie holds when the gap is within 5 points and the sign test
-gives $p \geq 0.10$; a registered equivalence when the interval of the
+gives $p \geq 0.10$; we call that \emph{not rejected}, which does not show
+equivalence. A registered equivalence holds when the interval of the
 difference lies within $\pm$5 points. Accuracy is \emph{strict}: a run
 that ends in an error or at the turn limit counts as wrong. There is no multiplicity correction; Section~\ref{sec:threats} says which results would not survive one.
 

@@ -137,25 +137,18 @@ enforced by the tools' static checks. In the four single runs, where every
 submitted statement was read, the arms without the contract's rules
 submitted 166 mutating statements over 26 tasks and the governed arms
 none. Every DABStep run since was checked by the harness's integrity test
-on its own working copy of the database. On the seven models it found
-\textbf{no corrupted copy in 36{,}574 runs whose prompt stated the
-forbidden operations, against 50 in 21{,}790 whose prompt did not}
-(0.23\%). The first group includes 9{,}624 runs of the contract's text over
-the plain tools, where nothing enforced the rules. 44 of the 50 are
-\mQwen{}'s, 42 of them in \armM{} and \armMw{}: 44 of its 8{,}421 runs
-without the rules, none of its 12{,}030 with them, and none of its 4{,}812
-runs of the contract's text, which stated the rules without enforcing
-them ($p{=}3{\times}10^{-9}$); on the other models the counts are too small
-to compare. One
-escalation in the single runs shows the hazard: an agent lost a temporary
-table to the plain tool's per-call connection, diagnosed it, and switched
-to persistent tables (\appref{app:escalations}). The validator never had
-to block a write, so this is not enforcement. Nor is it a clean test of
-stating the rules: the arms that state them also hold the contract's
-knowledge and workflow, which may leave less reason for a scratch table,
-so it is an association that a rules-only arm would settle; and the later runs bound
-writes that succeeded, not attempts. The plain tools here open a writable
-connection, so the hazard is real, but a read-only role removes it
-outright and remains the baseline; the stated rules matter where a
-deployment cannot or does not grant one, and enforcement was never
-exercised.
+on its own working copy of the database: \textbf{no corrupted copy in
+36{,}574 runs whose prompt stated the forbidden operations, against 50 in
+21{,}790 whose prompt did not}. Only \mQwen{} has events enough to compare:
+44 of its 8{,}421 runs without the rules, none of its 12{,}030 with them,
+and none of its 4{,}812 runs of the contract's text, which stated the rules
+over the plain tools with nothing enforcing them ($p{=}3{\times}10^{-9}$,
+expl.);
+the other six models had 0 to 3 events each. The harness provokes the
+hazard: the plain tool opens a writable connection per call, which drops
+temporary tables, and agents that keep scratch results in them turned to
+persistent tables (\appref{app:escalations}). The validator never had to
+block a write, so this is not enforcement, and the arms that state the
+rules also hold the contract's knowledge and workflow, so it is an
+association that a rules-only arm would settle. A read-only role removes
+the hazard outright and remains the baseline.

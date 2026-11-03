@@ -27,7 +27,7 @@ compile's checks against the data found the empty-list wildcard of
 Section~\ref{sec:one-fact}: its notes record that the data stores ``all''
 as an empty list.
 
-\textbf{Provenance of the second semantic.} The same compile noted that
+\textbf{Provenance of the second fact.} The same compile noted that
 several fee rules can match one payment, and its fee definition returns one
 row per matching pair, but it left open how their fees combine. The
 original contract sums them, which is the gold's convention and also the
@@ -109,7 +109,7 @@ the compiled contract behind the governed tools, and \mQwen{} 37.7\% and
 37.7\% (Section~\ref{sec:tools-add}). The agent reads what it is given,
 looking a metric up in 86 to 93\% of compiled-contract runs.
 
-The ceiling is low. Two gold-aware model raters (Section~\ref{sec:threats}),
+Observed accuracy is low. Two gold-aware model raters (Section~\ref{sec:threats}),
 each blind to every run and contract, read each task's question, gold SQL
 and result and the KB entries the gold uses, and judged whether the
 question and the KB settle every choice that changes the result. They
@@ -118,9 +118,12 @@ result-changing choice open on 132 of the 302 tasks; across the four rater
 pairings of two families the count ranges from 112 to 146. No human checked
 the labels. The knowledge arms solve about 60\% of the tasks the KB
 settles and 14\% of those it leaves open (53 to 62\% and 8 to 14\% under
-the other rater families), but the bare schema differs as much (39\%
-against 6\%, and alike under each family), so the labels locate
-where accuracy is, not a different effect of knowledge there. The open
+the other rater families), but the bare schema differs too (39\% against
+6\%). The knowledge's own gain is larger where the KB settles the gold in
+points (expl.), $+20.8$ against $+7.6$ (difference $+13.2$, over databases $+4.8$ to
+$+22.4$), and equal in log-odds ($+0.84$ against $+0.89$): from baselines
+of 39\% and 6\%, a larger effect of knowledge cannot be separated from the
+floor. The open
 choices were most often how a \texttt{NULL} or an unlisted category is
 scored, which fields a formula averages, and which of two columns holds a
 quantity.
@@ -131,8 +134,9 @@ an author session that read the whole KB and explored the data showed a
 detectable gain over the first compile: $+1.8$ points ($-3.0$ to $+7.3$)
 and $-1.8$ ($-9.1$ to $+5.5$). Corrections written from the golds of half
 of each database's tasks, as general facts about KB entries, lift those
-tasks by about 21 points and do not transfer to the held-out half: the
-intervals exclude a transfer above about 10 points.
+tasks by about 21 points; on the held-out half no comparable transfer was
+observed (the manual $+3.6$ points, interval 0 to $+9.5$, on 28 tasks of
+three databases).
 \ifextended
 Each database's primary tasks were split in half before anything was
 written. From the gold of the 27 training tasks only, 35 corrections were

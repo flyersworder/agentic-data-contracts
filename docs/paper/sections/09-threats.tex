@@ -36,16 +36,30 @@ distinct names: the regime in which long prompts are known to hold up
 (Section~\ref{sec:scale}).
 \fi
 
-\ifextended
-\paragraph{Selection.} The second fact was found by reading 34 tasks'
-transcripts, and \mLuna{}'s registered test of it reuses the runs that
-picked those tasks; on the third repeat alone the lift is the same, and
-\mQwen{}'s test, on transcripts nobody read, and the 165 held-out tasks
-carry the claim as well (Section~\ref{sec:second-fact}). The
-rule-matching subset itself was chosen after a load prediction failed, so
-effects measured on it are enriched for the fee procedure and do not
-describe DABStep as a whole.
-\fi
+\paragraph{Selection and adaptive reuse.} The second fact was found by
+reading 34 tasks' transcripts, and \mLuna{}'s registered test of it reuses
+the runs that picked those tasks. \mQwen{}'s registered test, on
+transcripts nobody read, and \mLuna{}'s third repeat alone carry the claim
+without that reuse. The 165 tasks not read are held out by task, not by
+question shape: on the 105 in shapes no inspected task belongs to, the
+lift is $+4.1$ points on \mLuna{} and $+10.8$ on \mQwen{} (expl.;
+Section~\ref{sec:second-fact}). The rule-matching subset was chosen after a
+load prediction failed, so effects measured on it are enriched for the fee
+procedure and do not describe DABStep as a whole. More broadly, the 401
+tasks were reused across the series: each experiment was designed from
+what the one before found, and the notes were written from transcripts of
+this test set. A prediction fixes its test before its run, not the
+sequence of questions asked, so the series is adaptive in the sense
+of~\cite{ladder}, and its later contrasts are conditional on the earlier
+findings.
+
+\paragraph{Sampling and harness.} Temperature is 0 for \mGLM{}, \mDS{}
+and \mQwen{} and the provider's default for the GPT models and \mSON{},
+whose routes reject it; repeats differ even at 0 (below). In \mGLM{}'s
+single run the validator wrongly rejected \texttt{COUNT(*)} 79 times, a
+defect fixed before the later runs that handicapped only that run's
+governed arms; and governed previews returned up to 100 rows where the
+plain tools return 50, on 31 calls, in the governed arms' favour.
 
 \paragraph{Provenance of the original contract.} The golds existed an
 hour before its first freeze, in the same working tree
@@ -111,9 +125,10 @@ benchmarks' schemas fit in a context window; where they do not, retrieval
 is needed and the delivery result may not
 transfer~\cite{death-schema-linking,spider2}. No arm puts the original
 documentation behind a retrieval tool, the alternative a practitioner
-would also consider. The two-semantics attribution and the delivery
+would also consider. The two-fact attribution and the delivery
 experiments ran on \mLuna{} and \mQwen{} only; \mSol{} was given only the
-first semantic. Each delivery contrast is read within one co-run block
+first fact. No arm calls a pre-computed metric: every arm writes SQL, so
+what an executable semantic layer adds is not measured here. Each delivery contrast is read within one co-run block
 (Table~\ref{tab:ladder}), and comparisons across blocks are not paired.
 
 \paragraph{Our interest.} We wrote the library we evaluate, and report

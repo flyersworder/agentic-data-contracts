@@ -82,6 +82,15 @@ other classes. Run every SQL you record and check the counts. Use the class
 as given; a doubt about it goes in `notes`. Then stop and report: one line
 per item, and anything you could not settle.
 
+## Rulings, fixed before any draw is opened
+
+- **A join is built when the contract makes it executable**: a declared
+  relationship or join with its keys (and any transformation of them), or a
+  metric's SQL that performs it. A join named only in prose is stated, not
+  built. For a data-discoverable join item, the records are scored on the
+  join so specified: run it, and compare what each record joins to with the
+  reference.
+
 ## Phase 2: scoring
 
 Only after you are told the references are committed. Do not change the

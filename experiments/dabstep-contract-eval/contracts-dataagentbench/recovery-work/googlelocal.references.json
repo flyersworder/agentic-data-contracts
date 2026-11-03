@@ -1,0 +1,27 @@
+{
+ "dataset": "googlelocal",
+ "items": [
+  {
+   "id": "googlelocal-1",
+   "cls": "described",
+   "text": "The two databases join on the gmap_id field, combining reviews with business metadata.",
+   "kind": "statement",
+   "equivalent": "The contract states that review_database.review and business_database.business_description join on gmap_id (review.gmap_id = business_description.gmap_id), so that each review is combined with the metadata of the business it reviews (many reviews to one business). Any wording, or a declared relationship/join on gmap_id, is equivalent; a join on another column (e.g. name, which is the reviewer's name in review and the business name in business_description) is not.",
+   "computation": true,
+   "reference_sql": "SELECT (SELECT count(*) FROM review_database.review) AS reviews, (SELECT count(*) FROM review_database.review r JOIN business_database.business_description b ON r.gmap_id = b.gmap_id) AS joined_rows, (SELECT count(*) FROM review_database.review r WHERE NOT EXISTS (SELECT 1 FROM business_database.business_description b WHERE b.gmap_id = r.gmap_id)) AS unmatched_reviews, (SELECT count(*) FROM business_database.business_description) AS businesses, (SELECT count(DISTINCT gmap_id) FROM business_database.business_description) AS distinct_business_ids, (SELECT count(*) FROM business_database.business_description b WHERE NOT EXISTS (SELECT 1 FROM review_database.review r WHERE r.gmap_id = b.gmap_id)) AS businesses_without_reviews",
+   "reference_value": "reviews 2000; inner join on gmap_id 2000 rows; unmatched reviews 0; businesses 79; distinct business gmap_id 79 (unique, so the join is many-to-one and adds no rows); businesses without reviews 0. A metric or from_sql that joins the two tables agrees when it joins on gmap_id equality: every review reaches exactly one business.",
+   "notes": "Class 'described' kept: db_description.txt gives business_description.gmap_id as 'Google Maps business identifier (links to review_database)'. Computation read as the join itself; it is checked by running any contract SQL that combines the two tables and comparing its join (key and row count) with the reference. Contrast: joining on name instead gives 1 row (SELECT count(*) FROM review_database.review r JOIN business_database.business_description b ON r.name = b.name). No contract metric needs to join for the text to count; if the item is stated but no SQL joins the tables, it is 'stated, not built' under the rubric's computation rule."
+  },
+  {
+   "id": "googlelocal-2",
+   "cls": "guidance",
+   "text": "Needed information can be in the \"description\" column of business_database.",
+   "kind": "statement",
+   "equivalent": "The contract states that business_database.business_description.description carries information not held in any other column and should be read for it: in this data, the business's location (city, state, ZIP code, e.g. 'Los Angeles, CA 90023') and what kind of business it is, written as free text. A statement that description holds the location (or that location is to be extracted from description) is equivalent; describing description only as a generic 'business description' without saying that it is where such facts (location) live is partial at most.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "Guidance only: it points to a column and implies no fixed computation, so no reference computation. Supporting characterization (run on the built file): SELECT count(*) AS businesses, count(*) FILTER (WHERE regexp_matches(description, ', [A-Z]{2} [0-9]{5}')) AS with_city_state_zip, count(DISTINCT nullif(regexp_extract(description, '([A-Z][a-z]+(?: [A-Z][a-z]+)*), [A-Z]{2} ([0-9]{5})', 1), '')) AS distinct_cities, count(DISTINCT nullif(regexp_extract(description, ', [A-Z]{2} ([0-9]{5})', 1), '')) AS distinct_zips, count(*) FILTER (WHERE regexp_matches(coalesce(name,'') || coalesce(hours,'') || coalesce(MISC,'') || coalesce(state,''), '[0-9]{5}|, CA')) AS other_columns_with_location FROM business_database.business_description -> businesses 79; descriptions with 'City, ST ZIP' 78 (all state CA; the one other reads '... practitioners in .' with the location blank); distinct cities 53; distinct ZIPs 65; rows where name, hours, MISC or state carry a ZIP or ', CA' 0. So description is the only place the location lives; there is no address, city or category column. Most descriptions (76/79) begin with a leading space. A draw that builds a metric or dimension extracting city/ZIP from description is recorded as the SQL reading; it is not required for 'recovered'. Doubt on class: the item is close to data-discoverable (the location in description is visible in the data), but it names no records or reading, so 'guidance' is kept."
+  }
+ ]
+}

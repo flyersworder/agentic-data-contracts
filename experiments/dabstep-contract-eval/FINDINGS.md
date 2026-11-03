@@ -1873,11 +1873,15 @@ commit: neither floor rule fires, no dataset is left out, and on luna's one
 repeat `dab_hints` did not lead `dab_desc` (23 against 25 of 40). Its rows
 enter no test.
 
-Departure from the design, decided before any row: the runs are local, not
-on the cluster (the cluster's scratch space is held by experiment 5e for
-some days). Same harness and data as the pilot; three workers per model;
-rows `~/data/dce-held-results/exp7/runs/exp7-<model>-r<i>.jsonl`, copied into
-`results/dataagentbench/` with the results commit.
+The runs are on the cluster, as designed, after experiment 5e frees the
+namespace's scratch space. A local start at c6544a0 was stopped after 35
+rows (25 luna, 10 Qwen, all repeat 1): about a row a minute, too slow for
+the laptop. Those rows are kept apart (`~/data/dce-held-results/exp7/
+aborted-local/`) and enter no test. To fit the 5 GiB scratch quota, the job
+builds one dataset at a time (each checked against the committed content
+digest, its raw source deleted once built) and runs one dataset at a time
+with two workers, clearing the per-worker working copies between datasets.
+The harness is unchanged. Rows `results/dataagentbench/exp7-<model>-r<i>.jsonl`.
 
 ### The two facts written into the contract: predictions (49)-(53)
 

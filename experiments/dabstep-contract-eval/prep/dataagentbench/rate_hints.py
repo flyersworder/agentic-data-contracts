@@ -10,6 +10,10 @@ applies. An item takes a class when both raters give it; a split goes to the
 later class in `CLASSES` (`resolve`). This rule is committed before any
 rating is read.
 
+Round 1 (`hint-ratings-round1.json`) ran 0 to 5 queries a session and was
+committed unread; round 2 refuses a data-discoverable label until the
+session has run a query successfully, and is the round read by the rule.
+
     set -a; . ./.env; set +a
     UV_FROZEN=1 uv run python prep/dataagentbench/rate_hints.py --max-spend 20
 
@@ -116,6 +120,10 @@ def check_ratings(ratings, ids: list[str]) -> list[str]:
     return problems
 
 
+def _claims_data(ratings: dict) -> bool:
+    return any(r.get("class") == "data-discoverable" for r in ratings.values())
+
+
 def rate_one(
     dataset: str, items: list[dict], model: str, driver, data: Path
 ) -> tuple[dict | None, dict]:
@@ -142,6 +150,12 @@ def rate_one(
                 return "No submissions left. Stop."
             state["submissions"] += 1
             problems = check_ratings(ratings, ids)
+            ran = any(not q["error"] for q in state["queries"])
+            if not problems and not ran and _claims_data(ratings):
+                problems = [
+                    "an item is data-discoverable only after a query that checks "
+                    "it: run_sql has not yet run a query successfully"
+                ]
             if not problems:
                 state["ratings"] = ratings
                 return "Accepted."

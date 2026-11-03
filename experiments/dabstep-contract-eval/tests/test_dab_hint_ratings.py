@@ -156,3 +156,26 @@ def test_the_report_applies_the_rule_per_item():
         "bookreview-1: data-discoverable (a: described; b: data-discoverable)" in text
     )
     assert json.dumps(resolved)  # serialisable for the commit
+
+
+def test_data_discoverable_is_refused_until_a_query_has_run(data):
+    replies: list[str] = []
+    ratings = {
+        "bookreview-1": {"class": "data-discoverable", "evidence": "SELECT ..."},
+        "bookreview-2": {"class": "guidance", "evidence": "g"},
+    }
+
+    def driver(*, system_prompt, user_prompt, tools):
+        run_sql, submit = tools
+        replies.append(submit(ratings))
+        run_sql("SELECT nonsense_column FROM books_database.books_info")
+        replies.append(submit(ratings))
+        run_sql("SELECT book_id FROM books_database.books_info")
+        replies.append(submit(ratings))
+        return DriverResult(messages=[], usage={})
+
+    got, _ = rate_hints.rate_one("bookreview", ITEMS, "m", driver, data)
+    assert replies[0].startswith("ERROR") and "run_sql" in replies[0]
+    assert replies[1].startswith("ERROR"), "a failed query does not count"
+    assert replies[2] == "Accepted."
+    assert got is not None

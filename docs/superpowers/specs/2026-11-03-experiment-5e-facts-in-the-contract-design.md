@@ -182,8 +182,12 @@ subset; a larger drift is reported and the arm's cross-run comparisons are
 not made.
 
 Why these: 5d showed no route difference with the notes pasted in both arms
-(−1.8 luna, 90% interval about [−9.0, +4.8]; −2.2 Qwen, [−6.1, +1.2]) and a
-notes lift (+4.0 luna, p = 0.062; +7.0 Qwen, p = 0.018, under this engine).
+(−1.8 luna, 90% interval by inversion [−9.1, +5.6]; −2.2 Qwen, [−6.3, +1.7])
+and a notes lift (+4.0 luna, p = 0.062; +7.0 Qwen, p = 0.019, under this
+engine; `analysis/reread.py`). Said in advance: a repeat of 5d's luna spread
+(8 of 25 shapes non-zero) would leave (49)'s upper end above +5, so (49) is
+expected to read inconclusive unless 5e's spread is smaller; that outcome
+supports no claim of no route effect on luna.
 
 ## Analysis
 

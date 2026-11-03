@@ -1821,6 +1821,74 @@ governed arm. Once that is done, the route shows no advantage end-to-end
 on either model, and on Qwen it may cost about 2 points. On Qwen's official
 view, it leads by 5.4.
 
+### The two facts written into the contract: predictions (49)-(53)
+
+Experiment 5d pasted the two notes into both arms' prompts, so it tested
+governed delivery of the rest of the contract, not whether lookup delivers
+the deciding facts better. Experiment 5e writes the facts into the contract
+itself, at the point where each is used, in the notes' exact words, and puts
+them in no prompt (`dce.plain`, the derived contract in `contract_plain/`;
+`contract/` is unchanged). The governed arm's system prompt is identical to
+`contract`'s, so it reaches the facts only by lookup: one
+`lookup_domain("fees")` returns both.
+
+Six arms run together in each repeat, gpt-6-luna then Qwen 3.8, k=3,
+`--retry-pass`: `contract`, `contract_text`, `contract_plain`,
+`contract_plain_text` (a 2x2 of route by wording), `contract_noted` (5d) and
+`manual_summed` (5b). A scale block on Qwen, k=3, runs `manual_scaled_all`
+(the prose KB at all 22 databases), `contract_scaled_all`,
+`manual_scaled_1x` and `contract_scaled_1x` on experiment 6's 60 questions.
+Design: `docs/superpowers/specs/2026-11-03-experiment-5e-facts-in-the-contract-design.md`.
+Analysis: `analysis/facts_placed.py`.
+
+Inference, one registered engine (`dce.inference`): the task scored as its
+mean over the three repeats; the task-weighted mean difference; a two-sided
+sign-flip test over the per-shape sums of the 25 rule-matching shapes
+(enumerated when 16 or fewer shapes are non-zero, else 100,000 flips, fixed
+seed); 90% and 95% intervals by inverting the same test. The shape bootstrap
+and the task-level sign test are reported beside and decide nothing. Holm
+over the four confirmatory predictions. Primary view: end-to-end on the 199
+rule-matching tasks; all 401 and the official and exact views are
+exploratory.
+
+- **(49)** gpt-6-luna and **(49Q)** Qwen 3.8: with the facts in place, the
+  governed route (`contract_plain`) does not lead the pasted contract
+  (`contract_plain_text`) by 5 points or more: the 90% interval's upper end
+  is below +5.
+- **(50Q)** Qwen 3.8: `contract_plain` beats `contract`: shape-level
+  p < 0.05 and a positive estimate.
+- **(51)** gpt-6-luna: `manual_summed` is not worse than `contract` by 5
+  points or more: the 90% interval's lower end is above -5.
+- Estimates, no verdict: (50) luna, `contract_plain` - `contract`; (51Q)
+  Qwen, `manual_summed` - `contract`.
+- **(52)** Qwen 3.8: `manual_scaled_all` loses no more than 5 points against
+  `manual_scaled_1x`: the exact 95% upper bound on runs lost, widened by the
+  design effect over the six knowledge pieces, is below 5%. Run health
+  first: a `manual_scaled_all` run that overflows the context or truncates
+  a request is reported and counted wrong.
+- **(53)** Qwen 3.8: `contract_scaled_all` uses fewer input tokens per run
+  (fresh plus cached) than `manual_scaled_all`: one-sided sign test over the
+  60 questions' mean input tokens, p < 0.05.
+- **Drift check:** `contract` and `contract_noted` against 5d,
+  `contract_text` and `manual_summed` against 5c, each within 3 points on
+  every subset; a larger drift is reported and that arm's cross-run
+  comparisons are not made.
+
+Fixed before the run, how the outcomes read:
+- An interval reaching past +5 or -5 is inconclusive and supports no claim
+  of no effect. Said in advance: under this engine 5d's luna route interval
+  was [-9.1, +5.6] (8 of 25 shapes non-zero), so a repeat of that spread
+  leaves (49) inconclusive; that outcome is reported as such.
+- (49Q) failing with the governed arm ahead means lookup delivers the
+  deciding facts better than paste on Qwen, the effect 5d could not test.
+- (50Q) holding means the plain wording repairs the governed arm without any
+  prompt note; set beside `contract_plain` - `contract_noted`, it says
+  whether the facts work as well placed in the contract as pasted in the
+  prompt.
+- (51) holding puts the prose manual with the two facts level with the
+  contract on luna within one run, the comparison the paper so far made
+  across runs.
+
 ### Exact-match sensitivity of the form and route effects
 
 The small effects rest on DABStep's scorer, which tolerates format

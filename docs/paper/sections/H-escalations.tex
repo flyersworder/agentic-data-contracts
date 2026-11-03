@@ -45,8 +45,6 @@ so nothing real was harmed.
 The idiom is a property of the model family as much as of its capability.
 \mGPT{} uses common table expressions on 59\%/55\% of its ungoverned traces
 (\armS{}/\armM{}), against 32\%/30\% on \mGLM{}, 26\%/27\% on \mDS{} and
-32\%/37\% on \mSON{}. \texttt{CREATE TEMP} appears in 22 of \mGLM{}'s
-ungoverned traces, 3 of \mDS{}'s, 8 of \mSON{}'s and none of \mGPT{}'s; on
-\mGLM{} it accounts for every mutating statement submitted, on \mDS{} for 4
-of 25. We cannot separate any of this from a trained disposition against
+32\%/37\% on \mSON{}. \texttt{CREATE TEMP} is attempted 22 times on \mGLM{}, 3 on \mDS{}, 8 on
+\mSON{} and never on \mGPT{}. We cannot separate any of this from a trained disposition against
 writing to a warehouse.

@@ -1654,7 +1654,7 @@ drift check (`analysis/contract_noted.py --model luna|qwen`).
   every subset (largest: luna's `contract_text` on the rule-matching tasks,
   -2.8 points, 8 tasks to 22), so experiments 5 and 5b stand.
 - **On the other 202 tasks the models part.** Luna's noted text leads the
-  prose by 9.5 points (51 tasks to 14), most of it in the average-fee
+  prose by 9.6 points (51 tasks to 14), most of it in the average-fee
   families. Qwen's is behind by 5.3 points, not significantly (37 to 47,
   p = 0.33): it wins the credit family (35 of 57 task-runs against 3) and
   loses `fee_ids_by_at_aci` (17 of 60 against 60). There Qwen, reading the
@@ -4015,7 +4015,7 @@ to `manual_prompt` and compare against what Adyen actually returned:
 The contract row is circular — it is the calibration. **The `manual_prompt`
 row is not**, and the point estimates agree. Do not read 0.1 pp as precision:
 on 18 flags the realised conversion (10/18) carries a Wilson 95% interval of
-roughly [0.34, 0.76], so a measured bias anywhere between ~1.8 and ~4.1 pp
+roughly [0.34, 0.75], so a measured bias anywhere between ~1.8 and ~4.1 pp
 would have been equally consistent. The assumption survives its first test; it
 is not confirmed by it. So the estimator is no longer a sensitivity analysis standing in
 for a measurement; on the one cross-arm transfer available it is a validated

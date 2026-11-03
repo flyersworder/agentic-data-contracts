@@ -14,6 +14,7 @@ listed.
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.95}
 \begin{tabular}{@{}L{2.7cm}L{1.5cm}L{9.0cm}ll@{}}
 \toprule
 \tabhead{Experiment} & \tabhead{No.} & \tabhead{Prediction (abridged)} & \tabhead{Fixed in} & \tabhead{Outcome} \\
@@ -81,20 +82,22 @@ DABStep 5d, governed with notes & (41) & \armCws{} and \armTws{} tie on rule-mat
  & (42) & \armCws{} and \armC{} tie, \mLuna{} & \texttt{9cb3643} & fails (notes ahead) \\
 \bottomrule
 \end{tabular}
-\caption{57 predictions in 16 commits, 53 before experiment~5d and 4 for
-it: 31 held (24 directional, 7 registered ties, which hold by not
-rejecting), 3 held in part (``mostly holds'' is counted here), 22 failed,
-and one was read as equivalent, which its commit registered as a separate
-outcome. LiveSQLBench's (6) was fixed after \mQwen{}'s per-arm totals for
-two repeats were seen, before the statistic it predicts. Rows listing
-several numbers count each. Experiment 4b's predictions were first written in its design
-(\texttt{d76d21e}) and re-specified in \texttt{a7ee6b4}, before any
-contract was authored. Grades are as made at the time; two notes from
-review: $^a$the compiled contract's 45.6\% and the manual's 45.3\% come
-from different runs, so ``between'' is not established; $^b$the test is
-over questions, which come from five gaps, and over gaps it is four to
-none with one tie, one-sided $p{=}0.06$; $^c$(32) holds with 12 of 15
-gap-draws, crediting three wildcard draws that never compute
-specificity; scored partial, recovery is 9 of 15 and (32) fails.}
+\caption{The prediction index; totals and notes $a$--$c$ follow the table.}
 \label{tab:predictions}
 \end{table*}
+
+The table holds 57 predictions in 16 commits, 53 before experiment~5d and 4
+for it: 31 held (24 directional, 7 registered ties, which hold by not
+rejecting), 3 held in part (``mostly holds'' is counted here), 22 failed,
+and one was read as equivalent, which its commit registered as a separate
+outcome. Rows listing several numbers count each. LiveSQLBench's (6) was fixed after \mQwen{}'s per-arm totals for two
+repeats were seen, before the statistic it predicts. Experiment 4b's
+predictions were first written in its design (\texttt{d76d21e}) and
+re-specified in \texttt{a7ee6b4}, before any contract was authored. Grades
+are as made at the time; three notes from review: $^a$the compiled
+contract's 45.6\% and the manual's 45.3\% come from different runs, so
+``between'' is not established; $^b$the test is over questions, which come
+from five gaps, and over gaps it is four to none with one tie, one-sided
+$p{=}0.06$; $^c$(32) holds with 12 of 15 gap-draws, crediting three
+wildcard draws that never compute specificity; scored partial, recovery is
+9 of 15 and (32) fails.

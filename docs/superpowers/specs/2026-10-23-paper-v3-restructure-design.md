@@ -215,8 +215,8 @@ These apply to every sentence of both builds.
      302 primary tasks; the count ranges from 112 to 146 across the four
      rater pairings. No human checked them.
      - **Accuracy split:** knowledge arms solve about 60% of the tasks the
-       KB settles and 14% of those it leaves open, under every rater
-       family. Schema-only accuracy differs as well (38% against 4%), so
+       KB settles and 14% of those it leaves open on the Opus labels
+       (53-62% and 8-14% under the other families). Schema-only accuracy differs as well (39% against 6%), so
        this locates where accuracy is, not a differential effect of
        knowledge.
      - **Knowledge still helps there:** +15.6 on luna and +14.1 on Qwen,

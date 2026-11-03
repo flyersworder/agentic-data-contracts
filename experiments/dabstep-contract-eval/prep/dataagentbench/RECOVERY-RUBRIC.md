@@ -1,4 +1,4 @@
-# Experiment 7: recovery rubric (draft)
+# Experiment 7: recovery rubric
 
 Fixed before the first author draw (design: "Authoring"), on the model of
 experiment 4b's (`prep/procedures4b/RUBRIC.md`). Applied to every draw, per

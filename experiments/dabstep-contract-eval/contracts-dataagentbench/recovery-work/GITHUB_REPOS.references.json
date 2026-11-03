@@ -1,0 +1,60 @@
+{
+ "dataset": "GITHUB_REPOS",
+ "items": [
+  {
+   "id": "GITHUB_REPOS-1",
+   "cls": "guidance",
+   "text": "Tables are joined on identifiers such as \"id\" or \"repo_name\".",
+   "kind": "statement",
+   "equivalent": "The contract names the join keys: repo_name joins the metadata tables (languages, licenses, repos) to each other and to artifacts_database.commits and .files; contents joins on sample_repo_name = repo_name; contents.id = files.id joins a file blob to its file metadata. Keys are used as stored (no transformation). Recovered needs both the repo_name joins (with contents.sample_repo_name) and the id join built; one family alone is partial.",
+   "computation": true,
+   "reference_sql": "select 'repos.repo_name = languages.repo_name' as join_spec,\n  (select count(*) from metadata_database.repos x where exists (select 1 from metadata_database.languages y where y.repo_name = x.repo_name)) as left_rows_matched,\n  (select count(*) from metadata_database.repos) as left_rows\nunion all select 'repos.repo_name = licenses.repo_name',\n  (select count(*) from metadata_database.repos x where exists (select 1 from metadata_database.licenses y where y.repo_name = x.repo_name)),\n  (select count(*) from metadata_database.repos)\nunion all select 'licenses.repo_name = languages.repo_name',\n  (select count(*) from metadata_database.licenses x where exists (select 1 from metadata_database.languages y where y.repo_name = x.repo_name)),\n  (select count(*) from metadata_database.licenses)\nunion all select 'commits.repo_name = repos.repo_name',\n  (select count(*) from artifacts_database.commits x where exists (select 1 from metadata_database.repos y where y.repo_name = x.repo_name)),\n  (select count(*) from artifacts_database.commits)\nunion all select 'files.repo_name = repos.repo_name',\n  (select count(*) from artifacts_database.files x where exists (select 1 from metadata_database.repos y where y.repo_name = x.repo_name)),\n  (select count(*) from artifacts_database.files)\nunion all select 'contents.sample_repo_name = repos.repo_name',\n  (select count(*) from artifacts_database.contents x where exists (select 1 from metadata_database.repos y where y.repo_name = x.sample_repo_name)),\n  (select count(*) from artifacts_database.contents)\nunion all select 'contents.sample_repo_name = languages.repo_name',\n  (select count(*) from artifacts_database.contents x where exists (select 1 from metadata_database.languages y where y.repo_name = x.sample_repo_name)),\n  (select count(*) from artifacts_database.contents)\nunion all select 'contents.id = files.id',\n  (select count(*) from artifacts_database.contents x where exists (select 1 from artifacts_database.files y where y.id = x.id)),\n  (select count(*) from artifacts_database.contents)",
+   "reference_value": "Match counts on the built file (left rows matched / left rows): repos->languages 165,429/400,000; repos->licenses 165,429/400,000; licenses->languages 3,325,634/3,325,634; commits->repos 17,976/17,976; files->repos 524,077/524,077; contents.sample_repo_name->repos 24,286/24,286; contents.sample_repo_name->languages 20,384/24,286; contents.id->files.id 362/24,286.",
+   "notes": "Computation read as the joins themselves, under the brief's ruling: a join is built when a declared relationship or join with its keys, or a metric's SQL, makes it executable; prose alone is stated, not built. repo_name is unique in languages, licenses and repos (3,325,634 / 3,325,634 / 400,000 rows); commits covers 6 repos, files 59,686, contents 12,837. Lower-casing repo names adds no matches. 'id' in the hint can only be contents.id / files.id (commits has 'commit', not 'id'); files.id is not unique (450,413 distinct over 524,077 rows), and only 155 contents rows match files on (id, repo, path). No class doubt."
+  },
+  {
+   "id": "GITHUB_REPOS-2",
+   "cls": "described",
+   "text": "The languages table's language_description field may list several programming languages for one repository.",
+   "kind": "statement",
+   "equivalent": "The contract states that one repository's language_description can name more than one language (each with its byte count), so a repository is not tied to a single language by that field.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "Supporting facts, checked with the parse CTE of GITHUB_REPOS-3's reference_sql followed by 'select count(*), count(*) filter (where n > 1), max(n), sum(n) from (select repo_name, count(*) as n from pairs group by repo_name)': of 3,325,634 repos, 368,341 read 'No language information available.'; 2,957,293 name at least one language, 1,753,925 name several (up to 216); 7,839,289 (repo, language) pairs; 502 distinct languages. A contract that parses the field into (repo, language, bytes) rows is credited for that computation under GITHUB_REPOS-3; here only the statement is scored. No class doubt (db_description already says 'Programming language(s) used in the repository, represented in natural language format')."
+  },
+  {
+   "id": "GITHUB_REPOS-3",
+   "cls": "definition",
+   "text": "A repository's primary language is the one with the most bytes.",
+   "kind": "statement",
+   "equivalent": "The contract defines a repository's primary language as its language with the largest byte count in language_description.",
+   "computation": true,
+   "reference_sql": "with norm as (\n  select repo_name,\n    regexp_replace(regexp_replace(\n      case when language_description like 'Nearly all of the code is in %'\n           then regexp_replace(language_description, '^Nearly all of the code is in (.+), totaling ([0-9,]+) bytes\\.$', '\\1 (\\2 bytes)')\n           else language_description end,\n      '^(This repository is mainly written in |The codebase includes: |While most of the project is built in |The majority of the code is in |This project is built entirely in )', ''),\n      ', (with additional code in |it also incorporates |followed by )', ', ', 'g') as s\n  from metadata_database.languages\n  where language_description <> 'No language information available.'\n), ex as (\n  select repo_name,\n    regexp_extract_all(s, '(?:^|, )([^,]+?) \\(([0-9,]+) bytes', 1) as langs,\n    regexp_extract_all(s, '(?:^|, )([^,]+?) \\(([0-9,]+) bytes', 2) as bts\n  from norm\n), pairs as (\n  select repo_name, unnest(langs) as language,\n    cast(replace(unnest(bts), ',', '') as bigint) as bytes,\n    unnest(range(1, len(langs) + 1)) as pos\n  from ex\n), ranked as (\n  select repo_name, language, bytes,\n    row_number() over (partition by repo_name order by bytes desc, pos) as rk,\n    count(*) over (partition by repo_name) as n_languages,\n    count(*) filter (where true) over (partition by repo_name, bytes) as same_bytes\n  from pairs\n)\nselect l.repo_name, r.language as primary_language, r.bytes as primary_bytes,\n  coalesce(r.n_languages, 0) as n_languages, coalesce(r.same_bytes > 1, false) as tied_at_max\nfrom metadata_database.languages l\nleft join ranked r on r.repo_name = l.repo_name and r.rk = 1",
+   "reference_value": "One row per languages row (3,325,634); 2,957,293 repos have a primary language, 368,341 ('No language information available.') have none; 424 distinct primary languages; 196 repos tie at the maximum (tie resolved by listing order); 764 repos' primary has 0 bytes. Most common primaries: JavaScript 611,112, Python 341,105, Java 297,586, PHP 237,274, Ruby 194,276.",
+   "notes": "Held per-repo reference: ~/data/dce-held-results/exp7/recovery/GITHUB_REPOS/GITHUB_REPOS-3.csv.gz (repo_name, primary_language, primary_bytes, n_languages, tied_at_max). language_description has 7 phrasings (5 list prefixes with 3 list connectors, plus 'Nearly all of the code is in X, totaling N bytes.' and 'No language information available.'); every description parses, the parsed pair count equals the number of 'N bytes' in each description. On the built file every list is in descending byte order, so the first-listed ('mainly written in ...') language is always a max-byte language: a metric that takes the first-listed language agrees on every repo, ties included, and agrees with argmax-bytes everywhere except possibly on the 196 tied repos if it breaks ties another way; a tie broken differently is not a disagreement with the item. No class doubt."
+  },
+  {
+   "id": "GITHUB_REPOS-4",
+   "cls": "described",
+   "text": "The contents table's repo_data_description field is natural-language metadata derived from file attributes (size, binary, copies, mode).",
+   "kind": "statement",
+   "equivalent": "The contract states that contents.repo_data_description is natural-language text giving the file's size (bytes), whether it is binary, how many copies it has, and its mode.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "Supporting facts: all 24,286 contents rows have a description; 12 phrasings (6 sentence templates x binary/non-binary), each with exactly three numbers (size, copies, mode). Extracting the attributes is the computation of GITHUB_REPOS-5 and is credited there. No class doubt."
+  },
+  {
+   "id": "GITHUB_REPOS-5",
+   "cls": "guidance",
+   "text": "Some queries rely on the attributes in repo_data_description for filtering or interpretation.",
+   "kind": "statement",
+   "equivalent": "The contract states that the attributes in repo_data_description (size, binary or not, copies, mode) are to be read out of the text for filtering or interpreting files, and a metric or column definition extracts them.",
+   "computation": true,
+   "reference_sql": "select id, sample_repo_name, sample_path,\n  cast(regexp_extract(repo_data_description, '([0-9]+)(?: bytes|-byte)', 1) as bigint) as size_bytes,\n  not regexp_matches(repo_data_description, '[Nn]on-binary') as is_binary,\n  cast(regexp_extract(repo_data_description, '([0-9]+) times', 1) as bigint) as copies,\n  cast(regexp_extract(repo_data_description, 'mode(?: code|:)? ([0-9]+)', 1) as bigint) as mode\nfrom artifacts_database.contents",
+   "reference_value": "24,286 rows, every attribute extracted on every row: 3,786 binary / 20,500 non-binary; 16,043 with copies > 1 (copies 1 to 16,898, median 3); size 3 to 65,937,671 bytes (median 2,103.5); mode 33188 on 22,916, 33261 on 1,367, 40960 on 3.",
+   "notes": "Held per-row reference: ~/data/dce-held-results/exp7/recovery/GITHUB_REPOS/GITHUB_REPOS-5.csv (id, sample_repo_name, sample_path, size_bytes, is_binary, copies, mode). Binary is read as the text not containing 'non-binary' (case-insensitive N); every description says 'binary' or 'non-binary'. The extracted numbers equal the description's three numbers on every row. Checks: content is null on all 3,786 binary rows and 42 non-binary rows; on the 155 rows matching files on (id, repo, path), the extracted mode equals files.mode. Scoring partial when only some attributes are extracted (record which). Class doubt, mild: the item is vague ('some queries rely on'); its checkable content is the extraction, which overlaps GITHUB_REPOS-4's statement."
+  }
+ ]
+}

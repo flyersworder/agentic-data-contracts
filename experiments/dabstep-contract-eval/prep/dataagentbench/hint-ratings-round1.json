@@ -1,0 +1,334 @@
+{
+  "bookreview|gpt-6-sol": {
+    "bookreview-1": {
+      "class": "described",
+      "evidence": "The description labels features, description, and categories as “str” and says each is “stored as string representation of list/dict.”"
+    },
+    "bookreview-2": {
+      "class": "described",
+      "evidence": "The description calls purchase_id a “Unique identifier linking to book_id in books_info table in books_database.”"
+    },
+    "bookreview-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT (SELECT count(*) FROM books_database.books_info b JOIN review_database.review r ON b.book_id = r.purchase_id) AS exact_matches, (SELECT count(*) FROM books_database.books_info b JOIN review_database.review r ON regexp_extract(b.book_id, '[0-9]+$') = regexp_extract(r.purchase_id, '[0-9]+$') AND regexp_extract(b.book_id, '[0-9]+$') <> '') AS numeric_suffix_matches; it returned 0 exact matches and 1,833 numeric-suffix matches, supporting that raw identifiers do not match exactly. This shows a deterministic suffix transformation works, rather than establishing that a fuzzy join is needed."
+    },
+    "bookreview-4": {
+      "class": "guidance",
+      "evidence": "This points to the books_info categories or details columns as places a query may need to look, without stating a specific property of their values."
+    }
+  },
+  "bookreview|claudeopus5.5": {
+    "bookreview-1": {
+      "class": "described",
+      "evidence": "The description lists features, description and categories as \"(stored as string representation of list/dict)\"."
+    },
+    "bookreview-2": {
+      "class": "described",
+      "evidence": "The description says purchase_id is a \"Unique identifier linking to book_id in books_info table in books_database\"."
+    },
+    "bookreview-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: count review rows joined on purchase_id=book_id, then joined after stripping the 'purchaseid_' and 'bookid_' prefixes. It returned 0 exact matches and 1833 of 1833 matches after stripping, which bears the item out: the values only join after the prefixes are normalised."
+    },
+    "bookreview-4": {
+      "class": "guidance",
+      "evidence": "This points to the columns some queries will need. It does not state a property of the data."
+    }
+  },
+  "crmarenapro|gpt-6-sol": {
+    "crmarenapro-1": {
+      "class": "data-discoverable",
+      "evidence": "Query: WITH v AS (SELECT Id AS x FROM core_crm.Account UNION ALL SELECT AccountId FROM core_crm.Contact) SELECT count(x) n, count(*) FILTER (WHERE starts_with(x,'#')) prefixed FROM v; returned 253 prefixed of 987 (25.6%), bearing out about 25% in these ID fields."
+    },
+    "crmarenapro-2": {
+      "class": "data-discoverable",
+      "evidence": "Query: WITH v AS (SELECT Name AS x FROM core_crm.Account UNION ALL SELECT Email FROM core_crm.Contact) SELECT count(x) n, count(*) FILTER (WHERE length(x)>length(rtrim(x))) trailing FROM v; returned 205 of 987 (20.8%), bearing out about 20% in these text fields."
+    },
+    "crmarenapro-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: WITH v(f,x) AS (SELECT 'Id',Id FROM core_crm.Account UNION ALL SELECT 'AccountId',AccountId FROM core_crm.Contact UNION ALL SELECT 'ContactId',ContactId FROM sales_pipeline.Opportunity UNION ALL SELECT 'Name',Name FROM core_crm.Account UNION ALL SELECT 'FirstName',FirstName FROM core_crm.Contact UNION ALL SELECT 'LastName',LastName FROM core_crm.Contact UNION ALL SELECT 'Email',Email FROM core_crm.Contact UNION ALL SELECT 'Subject',Subject FROM activities.Task UNION ALL SELECT 'Status',Status FROM sales_pipeline.Contract) SELECT f,count(*) FILTER (WHERE starts_with(x,'#') OR length(x)>length(rtrim(x))) affected FROM v GROUP BY f; returned nonzero affected counts for all nine fields (Id 29, AccountId 224, ContactId 302, Name 16, FirstName 187, LastName 203, Email 189, Subject 1015, Status 40), bearing out the item."
+    },
+    "crmarenapro-4": {
+      "class": "guidance",
+      "evidence": "This advises normalizing corrupted keys when joining tables, rather than stating a value or defining a metric."
+    },
+    "crmarenapro-5": {
+      "class": "guidance",
+      "evidence": "This is a statement about the knowledge required to work with the dataset, not a data value, business definition, or generally settled fact about a CRM code."
+    }
+  },
+  "crmarenapro|claudeopus5.5": {
+    "crmarenapro-1": {
+      "class": "data-discoverable",
+      "evidence": "I measured the share of values starting with '#': Account.Id 28.7%, Contact.Id 21.8%, Opportunity.AccountId 24.4%, and none in Account.Phone. That fits roughly 25% of ID fields having a leading #."
+    },
+    "crmarenapro-2": {
+      "class": "data-discoverable",
+      "evidence": "I compared values with rtrim(value): trailing whitespace shows up in 15.8% of Account.Name, 21.3% of Contact.Email, 22.2% of Event.Subject, 24.5% of Contract.Status and 19.7% of Lead.FirstName. That fits roughly 20%."
+    },
+    "crmarenapro-3": {
+      "class": "data-discoverable",
+      "evidence": "The queries found '#' prefixes in Id, AccountId and ContactId (Opportunity.ContactId 25.8%). They found trailing spaces in Name, FirstName, LastName (Lead 22.2%), Email, Subject (Case 17.0%) and Status. All the listed fields are affected, and other ID fields such as OwnerId and WhatId also carry '#'."
+    },
+    "crmarenapro-4": {
+      "class": "data-discoverable",
+      "evidence": "Joining Opportunity.AccountId to Account.Id on the raw values matched 728 rows. After stripping '#' with ltrim(...,'#') on both sides it matched 1170 rows. So the corruption has to be handled for joins to be complete."
+    },
+    "crmarenapro-5": {
+      "class": "guidance",
+      "evidence": "This is advice about what a solver needs to bring, not a property of the data or a definition. The description only says the data is 'from Salesforce CRMArena'."
+    }
+  },
+  "DEPS_DEV_V1|gpt-6-sol": {
+    "DEPS_DEV_V1-1": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT p.System,p.Name,p.Version, COUNT(i.Name) AS matching_package_rows FROM (SELECT System,Name,Version FROM project_database.project_packageversion LIMIT 5) p LEFT JOIN package_database.packageinfo i ON p.System=i.System AND p.Name=i.Name AND p.Version=i.Version GROUP BY p.System,p.Name,p.Version. All five sampled triples returned 2 matching package rows, supporting the stated match keys."
+    },
+    "DEPS_DEV_V1-2": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT p.ProjectName, i.Project_Information FROM (SELECT DISTINCT ProjectName FROM project_database.project_packageversion LIMIT 10) p JOIN project_database.project_info i ON i.Project_Information LIKE 'The project ' || p.ProjectName || ' %' LIMIT 10. It returned matching text for ljharb/define-properties, mikeal/forever-agent, and stefanpenner/get-caller-file, supporting a lookup by project name embedded in Project_Information."
+    },
+    "DEPS_DEV_V1-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT Project_Information FROM project_database.project_info WHERE Project_Information LIKE '%stars%' AND Project_Information LIKE '%forks%' LIMIT 3. It returned project names with metrics such as leaflet/leaflet's 38715 stars and 5782 forks, alongside descriptive prose, supporting the claim."
+    }
+  },
+  "DEPS_DEV_V1|claudeopus5.5": {
+    "DEPS_DEV_V1-1": {
+      "class": "data-discoverable",
+      "evidence": "I joined project_packageversion (597,602 rows) to packageinfo USING (System, Name, Version) and got 1,449,908 joined rows. So the records do match on those three keys, which bears the item out, though some keys appear more than once."
+    },
+    "DEPS_DEV_V1-2": {
+      "class": "data-discoverable",
+      "evidence": "project_info has no ProjectName column, so I matched on text: 11,955 project_packageversion rows have a project_info record whose Project_Information contains 'project ' || ProjectName || ' '. The lookup works this way, which bears the item out."
+    },
+    "DEPS_DEV_V1-3": {
+      "class": "data-discoverable",
+      "evidence": "The description only says 'may include name, owner, and general purpose' and does not mention metrics. A query found 648 of 770 project_info rows whose Project_Information mentions both 'stars' and 'forks'. A sample row reads 'The project leaflet/leaflet ... has 521 open issues, 38715 stars, and 5782 forks', which bears the item out."
+    }
+  },
+  "GITHUB_REPOS|gpt-6-sol": {
+    "GITHUB_REPOS-1": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT 'id' AS key, COUNT(*) AS matches FROM artifacts_database.files f JOIN artifacts_database.contents c ON f.id=c.id UNION ALL SELECT 'repo_name', COUNT(*) FROM metadata_database.languages l JOIN metadata_database.repos r ON l.repo_name=r.repo_name. It returned 417 id matches and 165429 repo_name matches, bearing out that these identifiers can join tables."
+    },
+    "GITHUB_REPOS-2": {
+      "class": "described",
+      "evidence": "The description says language_description is \"Programming language(s) used in the repository, represented in natural language format,\" explicitly allowing several languages."
+    },
+    "GITHUB_REPOS-3": {
+      "class": "definition",
+      "evidence": "This defines how to select a repository's primary language from language byte totals, rather than asserting a data value."
+    },
+    "GITHUB_REPOS-4": {
+      "class": "described",
+      "evidence": "The description calls repo_data_description a \"Natural language description summarizing the file’s metadata (derived from original size, binary, copies, and mode fields).\""
+    },
+    "GITHUB_REPOS-5": {
+      "class": "guidance",
+      "evidence": "This advises that queries may need to use attributes in repo_data_description for filtering or interpretation, rather than stating a particular value or definition."
+    }
+  },
+  "GITHUB_REPOS|claudeopus5.5": {
+    "GITHUB_REPOS-1": {
+      "class": "guidance",
+      "evidence": "This tells you which keys to join on when writing queries. It does not state a property of the data, so it is guidance."
+    },
+    "GITHUB_REPOS-2": {
+      "class": "described",
+      "evidence": "The description gives language_description as \"Programming language(s) used in the repository, represented in natural language format.\""
+    },
+    "GITHUB_REPOS-3": {
+      "class": "definition",
+      "evidence": "This is a business definition of the term 'primary language' (the language with the most bytes). The data can show byte counts but cannot set that rule."
+    },
+    "GITHUB_REPOS-4": {
+      "class": "described",
+      "evidence": "The description says repo_data_description is a \"Natural language description summarizing the file’s metadata (derived from original size, binary, copies, and mode fields).\""
+    },
+    "GITHUB_REPOS-5": {
+      "class": "guidance",
+      "evidence": "This says which field queries may need for filtering or interpretation. It is advice on where to look, not a property of the data."
+    }
+  },
+  "PANCANCER_ATLAS|gpt-6-sol": {
+    "PANCANCER_ATLAS-1": {
+      "class": "definition",
+      "evidence": "This specifies the formula for the average log10-transformed expression value: mean of log10(normalized_count + 1) across samples; the dataset provides normalized_count values, not this definition."
+    },
+    "PANCANCER_ATLAS-2": {
+      "class": "data-discoverable",
+      "evidence": "Query: WITH c AS (SELECT Patient_description, regexp_extract(Patient_description, 'TCGA-[A-Za-z0-9]+-[A-Za-z0-9]+') AS barcode FROM clinical_database.clinical_info), m AS (SELECT ParticipantBarcode FROM molecular_database.Mutation_Data UNION SELECT ParticipantBarcode FROM molecular_database.RNASeq_Expression) SELECT count(*) AS clinical_rows, count(*) FILTER (WHERE barcode <> '') AS clinical_with_barcode, count(*) FILTER (WHERE m.ParticipantBarcode IS NOT NULL) AS matched_molecular_participants FROM c LEFT JOIN m ON c.barcode = m.ParticipantBarcode. It returned 10,761 clinical rows, 10,761 with a barcode in Patient_description, and 10,467 matching molecular participant barcodes, supporting this way to match records (not universal coverage)."
+    },
+    "PANCANCER_ATLAS-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT count(*) AS total, count(*) FILTER (WHERE regexp_matches(Patient_description, '(?i)uuid')) AS mentions_uuid, count(*) FILTER (WHERE regexp_matches(Patient_description, 'TCGA-[A-Za-z0-9]+-[A-Za-z0-9]+')) AS mentions_barcode, count(*) FILTER (WHERE regexp_matches(Patient_description, '(?i)(female|male)')) AS mentions_gender, count(*) FILTER (WHERE regexp_matches(Patient_description, '(?i)(vital status|alive|dead)')) AS mentions_vital_status FROM clinical_database.clinical_info. It returned total 10,761; uuid 6,748; barcode 10,761; gender 10,761; vital status 10,761, supporting that the descriptions hold such details, though UUID is not mentioned in every row."
+    },
+    "PANCANCER_ATLAS-4": {
+      "class": "definition",
+      "evidence": "This is the mathematical definition of the chi-square statistic and its expected cell counts, not a dataset property."
+    },
+    "PANCANCER_ATLAS-5": {
+      "class": "world",
+      "evidence": "Expansions of the cancer acronyms LGG and BRCA are general domain knowledge; the supplied description does not define either acronym."
+    }
+  },
+  "PANCANCER_ATLAS|claudeopus5.5": {
+    "PANCANCER_ATLAS-1": {
+      "class": "definition",
+      "evidence": "This is a formula for computing the average log10 expression from normalized_count. It states how the quantity is defined, which data values cannot show."
+    },
+    "PANCANCER_ATLAS-2": {
+      "class": "data-discoverable",
+      "evidence": "Query: I pulled the barcode out of Patient_description with regexp_extract 'TCGA-\\w\\w-\\w{4}' and joined it to Mutation_Data.ParticipantBarcode. All 10761 descriptions contain a barcode, and 1965 of the 2000 sampled participants matched, so the item holds."
+    },
+    "PANCANCER_ATLAS-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: regex counts over Patient_description. All 10761 rows have a TCGA barcode and a gender (MALE/FEMALE), 10756 have Alive/Dead, and 5531 match a lowercase UUID pattern, so the descriptions do carry these details."
+    },
+    "PANCANCER_ATLAS-4": {
+      "class": "definition",
+      "evidence": "This is the standard formula for the chi-square statistic and its expected counts. It is a definition, not a property of the data."
+    },
+    "PANCANCER_ATLAS-5": {
+      "class": "world",
+      "evidence": "These are standard TCGA cancer-type abbreviations. The description does not list them, so general knowledge settles them."
+    }
+  },
+  "googlelocal|gpt-6-sol": {
+    "googlelocal-1": {
+      "class": "described",
+      "evidence": "The description calls review.gmap_id a “Google Maps business identifier” and business_description.gmap_id a “Google Maps business identifier (links to review_database).” It describes reviews in one database and business metadata in the other."
+    },
+    "googlelocal-2": {
+      "class": "guidance",
+      "evidence": "This points to the business_description.description column as a place to look for needed information, rather than asserting a specific property of its values."
+    }
+  },
+  "googlelocal|claudeopus5.5": {
+    "googlelocal-1": {
+      "class": "described",
+      "evidence": "The description lists for business_description \"gmap_id (str): Google Maps business identifier (links to review_database)\", and review also has \"gmap_id (str): Google Maps business identifier\"."
+    },
+    "googlelocal-2": {
+      "class": "guidance",
+      "evidence": "This tells you where to look for information that a query needs. It does not state a property of the data or a definition."
+    }
+  },
+  "music_brainz_20k|gpt-6-sol": {
+    "music_brainz_20k-1": {
+      "class": "described",
+      "evidence": "The description says the tracks table contains “potential duplicates generated from different sources” and that each record has a “unique track_id.”"
+    },
+    "music_brainz_20k-2": {
+      "class": "guidance",
+      "evidence": "The advice to resolve duplicates by comparing title, artist, album, year, and other attributes describes how to approach matching records, not an established matching rule in the description. For example, records sharing title, artist, and album can have different year strings, but the data does not specify how to resolve them."
+    },
+    "music_brainz_20k-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: `SELECT COUNT(DISTINCT country) AS n_countries, list_sort(list(DISTINCT country)) AS countries FROM sales_database.sales;` Returned 5: Canada, France, Germany, UK, USA; this bears out the item."
+    },
+    "music_brainz_20k-4": {
+      "class": "data-discoverable",
+      "evidence": "Query: `SELECT COUNT(DISTINCT store) AS n_stores, list_sort(list(DISTINCT store)) AS stores FROM sales_database.sales;` Returned 5: Amazon Music, Apple Music, Google Play, Spotify, iTunes; this bears out the item."
+    }
+  },
+  "music_brainz_20k|claudeopus5.5": {
+    "music_brainz_20k-1": {
+      "class": "described",
+      "evidence": "The description says the tracks table \"contains all the tracks, including potential duplicates generated from different sources.\""
+    },
+    "music_brainz_20k-2": {
+      "class": "guidance",
+      "evidence": "This is advice on how to resolve duplicates, by fuzzy comparison of title, artist, album and year. It is a method for queries to follow, not a stated property of the data."
+    },
+    "music_brainz_20k-3": {
+      "class": "data-discoverable",
+      "evidence": "I ran SELECT country, count(*) FROM sales_database.sales GROUP BY country. It returned exactly five countries: Germany, USA, Canada, UK and France, each with about 11.5k rows. This bears the item out."
+    },
+    "music_brainz_20k-4": {
+      "class": "data-discoverable",
+      "evidence": "I ran SELECT store, count(*) FROM sales_database.sales GROUP BY store. It returned exactly five stores: Apple Music, Spotify, Google Play, Amazon Music and iTunes. This bears the item out."
+    }
+  },
+  "stockindex|gpt-6-sol": {
+    "stockindex-1": {
+      "class": "described",
+      "evidence": "The description calls Exchange the “Full name of the stock exchange” and Index the “Abbreviated index symbol”."
+    },
+    "stockindex-2": {
+      "class": "guidance",
+      "evidence": "This tells the reader how to approach a join between exchange names and index symbols, rather than giving a stored join key or an established mapping for every exchange."
+    },
+    "stockindex-3": {
+      "class": "data-discoverable",
+      "evidence": "Query: SELECT table_schema, table_name, string_agg(column_name, ', ' ORDER BY ordinal_position) AS columns FROM information_schema.columns WHERE (table_schema = 'indexinfo_database' AND table_name = 'index_info') OR (table_schema = 'indextrade_database' AND table_name = 'index_trade') GROUP BY table_schema, table_name ORDER BY table_schema. It returned index_info columns Exchange, Currency and index_trade columns Index, Date, Open, High, Low, Close, Adj Close, CloseUSD, confirming neither table stores a region field; assigning Asia to N225 requires geographic knowledge not supplied by those columns."
+    },
+    "stockindex-4": {
+      "class": "definition",
+      "evidence": "This defines up and down days by comparing the daily Close and Open values; observed prices alone do not establish that definition."
+    },
+    "stockindex-5": {
+      "class": "definition",
+      "evidence": "This specifies the computation of average intraday volatility as the period average of daily (High - Low) / Open."
+    }
+  },
+  "stockindex|claudeopus5.5": {
+    "stockindex-1": {
+      "class": "data-discoverable",
+      "evidence": "I listed the distinct values of both fields. Exchange holds full names such as 'Tokyo Stock Exchange' and 'Hong Kong Stock Exchange', and Index holds symbols such as N225, HSI and 000001.SS, so the item holds."
+    },
+    "stockindex-2": {
+      "class": "guidance",
+      "evidence": "This says what a cross-database join will need, a mapping from each exchange to its index symbol. It does not state a property of the data."
+    },
+    "stockindex-3": {
+      "class": "data-discoverable",
+      "evidence": "I queried information_schema.columns for both schemas. The only columns are Exchange, Currency, Index, Date, Open, High, Low, Close, Adj Close and CloseUSD, so there is no region column and the item holds."
+    },
+    "stockindex-4": {
+      "class": "definition",
+      "evidence": "This defines what counts as an up day and a down day by comparing close with open. It is a business definition, not something the data can show."
+    },
+    "stockindex-5": {
+      "class": "definition",
+      "evidence": "This is a formula for average intraday volatility: (High - Low) / Open, averaged over the period."
+    }
+  },
+  "stockmarket|gpt-6-sol": {
+    "stockmarket-1": {
+      "class": "world",
+      "evidence": "This states what listing-exchange codes mean. The description identifies the field but does not provide the code-to-exchange mappings, and observed code values cannot establish their meanings."
+    },
+    "stockmarket-2": {
+      "class": "world",
+      "evidence": "This states what financial-status codes mean. The description mentions financial status but does not define its individual codes; seeing codes in the data would not establish these meanings."
+    },
+    "stockmarket-3": {
+      "class": "definition",
+      "evidence": "This defines the business term “financially troubled” by specifying which conditions qualify."
+    },
+    "stockmarket-4": {
+      "class": "world",
+      "evidence": "This states what market-category codes mean. The description identifies the market-category field but does not spell out these mappings, which cannot be inferred from code values alone."
+    }
+  },
+  "stockmarket|claudeopus5.5": {
+    "stockmarket-1": {
+      "class": "world",
+      "evidence": "The description only says \"Exchange where stock is listed\" and never decodes the letters. What A, N, P, Z, V and Q stand for comes from the NASDAQ symbol directory conventions, which is general knowledge."
+    },
+    "stockmarket-2": {
+      "class": "world",
+      "evidence": "The description says only \"Financial status (delinquent, deficient, etc.)\" and does not map the letter codes. The letter meanings are standard NASDAQ symbol directory codes, which is outside knowledge."
+    },
+    "stockmarket-3": {
+      "class": "definition",
+      "evidence": "This is a business definition of the term \"financially troubled\" as being deficient, delinquent or both. The data can show code values but cannot establish a definition."
+    },
+    "stockmarket-4": {
+      "class": "world",
+      "evidence": "The description gives only \"Market category classification\" without decoding Q, G and S. Those meanings are standard NASDAQ market tier codes, which is general knowledge."
+    }
+  }
+}

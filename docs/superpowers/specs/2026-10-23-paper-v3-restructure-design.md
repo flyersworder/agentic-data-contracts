@@ -497,7 +497,11 @@ is posted.
    - sections 6 and 7;
    - the moves.
 6. Abstract and intro last.
-7. Both builds, the PVLDB content ending by page 12.
+7. ~~Both builds, the PVLDB content ending by page 12.~~ Done 2026-11-03
+   (907a805): three reviewers, about 950 numbers; appendix J's withdrawn
+   clause table replaced. Open: the four external figures in section 2
+   (DABStep's 14.55%, BIRD, KaggleDBQA, Sequeda) are checked in the review
+   round.
    - Check every number touched against FINDINGS or the rows.
    - Check every remaining pointer to the extended version for a missing
      premise.

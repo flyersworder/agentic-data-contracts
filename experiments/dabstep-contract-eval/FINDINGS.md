@@ -4301,6 +4301,12 @@ whether the rules are stated, not whether they are enforced.** Only Qwen
 supports the contrast on its own; the other models' unstated cells hold 0
 to 3 events.
 
+**Update (2026-11-03), with experiment 5d.** 5d's three arms all state the
+rules, which adds 7,218 stated runs with no corruption: 0 of 36,574 stated
+against 50 of 21,790 unstated (`analysis/corruption.py`). The TEXT arms are
+now 9,624 runs (4,812 per model); Qwen's 0 of 4,812 against its 44 of 8,421
+gives p = 3e-9.
+
 ### Operating numbers, the k=3 runs
 
 `analysis/cost_decomposition.py --operating` gives the mean run over every

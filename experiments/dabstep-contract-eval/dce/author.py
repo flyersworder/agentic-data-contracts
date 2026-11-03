@@ -16,6 +16,11 @@ every declared join passes the library's gate, every table is allowed, the
 standard operations stay forbidden, and every KB entry is mapped to where
 the contract holds it -- so the arm cannot know less than the manual. Output
 goes to `<out>/livesqlbench/<db>/`, with a gzipped log of the session.
+
+Inputs with a free-text `description` in place of KB entries
+(DataAgentBench, experiment 7; `dce.benchmarks.dab_author`) get
+`DAB_SYSTEM_PROMPT` and `DAB_USER_PROMPT`: 4b's prompt with mechanical changes
+only, no coverage map, and every table of `inputs.schemas` to allow.
 """
 
 from __future__ import annotations
@@ -124,6 +129,61 @@ Write the contract for the database `{db}`.
 """
 
 
+#: DataAgentBench's version of the system prompt (experiment 7): 4b's with
+#: mechanical changes only, each (4b's text, DAB's). The documentation is a
+#: free-text description the agent also reads, not numbered KB entries the
+#: agent never sees; there is no coverage map; the tables sit in several
+#: schemas, and `tables: ["*"]` allows a schema of many (stockmarket's
+#: 2,753), listed table by table when the contract is written. The content
+#: guidance is untouched (tested).
+DAB_PROMPT_CHANGES: tuple[tuple[str, str], ...] = (
+    (
+        "The agent sees the database schema, the column meanings and your "
+        "contract, and nothing else: the documentation below reaches it only "
+        "through what you write.",
+        "The agent sees the database schema, the documentation below and your "
+        "contract, and nothing else.",
+    ),
+    ("tables written main.<table>", "tables written <schema>.<table>"),
+    (
+        "- Allow every table in schema main,",
+        '- Allow every table in every schema (tables: ["*"] allows all of a '
+        "schema's tables),",
+    ),
+    (
+        "Submit with submit_contract(contract_yml, semantic_yml, kb_coverage). "
+        "kb_coverage maps every documentation entry id to where the contract "
+        'holds it: "metric:<name>", "table:<table>", "column:<table>.<column>" '
+        'or "domain:<name>". ',
+        "Submit with submit_contract(contract_yml, semantic_yml). ",
+    ),
+)
+
+
+def _changed(template: str, changes: tuple[tuple[str, str], ...]) -> str:
+    for old, new in changes:
+        assert template.count(old) == 1, old
+        template = template.replace(old, new)
+    return template
+
+
+DAB_SYSTEM_PROMPT = _changed(SYSTEM_PROMPT, DAB_PROMPT_CHANGES)
+
+#: DataAgentBench's user prompt: the schema text (`dab_schema.schema_text`),
+#: then the description as free text, in place of the column meanings and the
+#: numbered entries.
+DAB_USER_PROMPT = """\
+Write the contract for the database `{db}`.
+
+## Database schema
+
+{ddl}
+
+## Documentation
+
+{description}
+"""
+
 #: The bullet that sends the author to the data. The no-data control
 #: (experiment 4b) has no run_sql, so its prompt drops this bullet only.
 DATA_BULLET = """\
@@ -131,6 +191,8 @@ DATA_BULLET = """\
 written (how values are stored, units, NULLs, JSON paths, formats) and say \
 what you found in the description.
 """
+#: Missing tables named one by one, per schema; the rest are counted.
+MISSING_SHOWN = 10
 _SAMPLE_ROWS = re.compile(r"\n*First 3 rows:\n.*?\n\.\.\.\n?", flags=re.DOTALL)
 
 
@@ -140,7 +202,7 @@ def strip_sample_rows(ddl: str) -> str:
 
 
 def system_prompt(inputs: CompileInputs, *, no_data: bool = False) -> str:
-    template = SYSTEM_PROMPT
+    template = SYSTEM_PROMPT if inputs.description is None else DAB_SYSTEM_PROMPT
     if no_data:
         assert DATA_BULLET in template
         template = template.replace(DATA_BULLET, "")
@@ -154,6 +216,17 @@ def system_prompt(inputs: CompileInputs, *, no_data: bool = False) -> str:
 
 
 def user_prompt(inputs: CompileInputs, *, no_data: bool = False) -> str:
+    if inputs.description is not None:
+        # DataAgentBench's schema text is built without sample rows for the
+        # no-data control (`dab_schema.schema_text(rows=0)`).
+        assert not (no_data and "\n-- first " in inputs.ddl), (
+            "the no-data control's schema must have no sample rows"
+        )
+        return DAB_USER_PROMPT.format(
+            db=inputs.db_name,
+            ddl=inputs.ddl.strip(),
+            description=inputs.description.strip(),
+        )
     return USER_PROMPT.format(
         db=inputs.db_name,
         ddl=strip_sample_rows(inputs.ddl) if no_data else inputs.ddl,
@@ -165,16 +238,38 @@ def user_prompt(inputs: CompileInputs, *, no_data: bool = False) -> str:
     )
 
 
+def expand_wildcards(semantic: dict, schemas: dict[str, list[str]]) -> list[str]:
+    """List every table of a schema allowed with `tables: ["*"]`, in place,
+    so the written contract names each table (its digest and its prompt do
+    not depend on a database lookup). Returns the wildcards that name no
+    schema of the database."""
+    by_lower = {s.lower(): s for s in schemas}
+    problems = []
+    for block in semantic.get("allowed_tables") or []:
+        if not isinstance(block, dict) or "*" not in (block.get("tables") or []):
+            continue
+        schema = by_lower.get(str(block.get("schema", "")).lower())
+        if schema is None:
+            problems.append(
+                f"allowed_tables: schema {block.get('schema')!r} is not in this "
+                "database"
+            )
+            continue
+        block["tables"] = list(schemas[schema])
+    return problems
+
+
 def check_submission(
     contract_yml: str,
     semantic_yml: str,
-    kb_coverage: dict,
+    kb_coverage: dict | None,
     *,
     inputs: CompileInputs,
     db: CompileDB,
-    tables: dict[str, list[tuple[str, str]]],
+    schemas: dict[str, list[str]],
 ) -> list[str]:
-    """Why a submission cannot be accepted; empty when it can."""
+    """Why a submission cannot be accepted; empty when it can. `schemas`
+    holds every table the contract must allow, by schema."""
     from agentic_data_contracts import DataContract, contract_digest
     from agentic_data_contracts.semantic.yaml_source import YamlSource
     from agentic_data_contracts.validation import (
@@ -194,14 +289,22 @@ def check_submission(
         return ["semantic.yml must be a mapping"]
     contract["semantic"]["source"] = {"type": "yaml", "path": "./semantic.yml"}
 
+    problems += expand_wildcards(contract["semantic"], schemas)
     allowed = {
-        t.lower()
+        (str(block.get("schema", "")).lower(), str(t).lower())
         for block in contract["semantic"].get("allowed_tables") or []
-        if str(block.get("schema", "")).lower() == "main"
+        if isinstance(block, dict)
         for t in block.get("tables") or []
     }
-    for table in sorted(t for t in tables if t.lower() not in allowed):
-        problems.append(f"allowed_tables must include main.{table}")
+    for schema, names in schemas.items():
+        missing = sorted(t for t in names if (schema.lower(), t.lower()) not in allowed)
+        for table in missing[:MISSING_SHOWN]:
+            problems.append(f"allowed_tables must include {schema}.{table}")
+        if len(missing) > MISSING_SHOWN:
+            problems.append(
+                f"allowed_tables must include {len(missing) - MISSING_SHOWN} more "
+                f"tables of schema {schema}"
+            )
     forbidden = {
         str(op).upper() for op in contract["semantic"].get("forbidden_operations") or []
     }
@@ -265,15 +368,45 @@ def check_submission(
 
 class _Session:
     def __init__(
-        self, inputs: CompileInputs, db: CompileDB, tables, *, no_data: bool = False
+        self,
+        inputs: CompileInputs,
+        db: CompileDB,
+        schemas: dict[str, list[str]],
+        *,
+        no_data: bool = False,
     ) -> None:
-        self.inputs, self.db, self.tables = inputs, db, tables
+        self.inputs, self.db, self.schemas = inputs, db, schemas
         self.no_data = no_data
         self.submissions = 0
         self.accepted: tuple[str, str] | None = None
         self.errors: list[str] = []
         self.queries: list[dict] = []
         self._lock = threading.Lock()
+
+    def _submit(
+        self, contract_yml: str, semantic_yml: str, kb_coverage: dict | None
+    ) -> str:
+        with self._lock:
+            if self.accepted is not None:
+                return "Already accepted."
+            if self.submissions >= MAX_SUBMISSIONS:
+                return "No submissions left. Stop."
+            self.submissions += 1
+            problems = check_submission(
+                contract_yml,
+                semantic_yml,
+                kb_coverage,
+                inputs=self.inputs,
+                db=self.db,
+                schemas=self.schemas,
+            )
+            if not problems:
+                self.accepted = (contract_yml, semantic_yml)
+                return "Accepted."
+            text = "\n".join(f"- {p}" for p in problems)[:ERROR_CHARS]
+            self.errors.append(text)
+            left = MAX_SUBMISSIONS - self.submissions
+            return f"ERROR:\n{text}\nFix these and submit again ({left} left)."
 
     def tools(self) -> list[Callable]:
         def run_sql(sql: str) -> str:
@@ -289,29 +422,20 @@ class _Session:
             text, and kb_coverage mapping every documentation entry id to
             "metric:<name>", "table:<table>", "column:<table>.<column>" or
             "domain:<name>"."""
-            with self._lock:
-                if self.accepted is not None:
-                    return "Already accepted."
-                if self.submissions >= MAX_SUBMISSIONS:
-                    return "No submissions left. Stop."
-                self.submissions += 1
-                problems = check_submission(
-                    contract_yml,
-                    semantic_yml,
-                    kb_coverage,
-                    inputs=self.inputs,
-                    db=self.db,
-                    tables=self.tables,
-                )
-                if not problems:
-                    self.accepted = (contract_yml, semantic_yml)
-                    return "Accepted."
-                text = "\n".join(f"- {p}" for p in problems)[:ERROR_CHARS]
-                self.errors.append(text)
-                left = MAX_SUBMISSIONS - self.submissions
-                return f"ERROR:\n{text}\nFix these and submit again ({left} left)."
+            return self._submit(contract_yml, semantic_yml, kb_coverage)
 
-        return [submit_contract] if self.no_data else [run_sql, submit_contract]
+        def submit_described(contract_yml: str, semantic_yml: str) -> str:
+            """Submit the whole contract: contract.yml and semantic.yml as YAML
+            text."""
+            return self._submit(contract_yml, semantic_yml, None)
+
+        # Free-text documentation has no entry ids to map: the same tool,
+        # without kb_coverage.
+        submit = submit_contract
+        if self.inputs.description is not None:
+            submit = submit_described
+            submit.__name__ = submit.__qualname__ = "submit_contract"
+        return [submit] if self.no_data else [run_sql, submit]
 
 
 def _header(inputs: CompileInputs, model: str, *, no_data: bool = False) -> dict:
@@ -360,8 +484,9 @@ def author_database(
         return "capped", spent
     db = CompileDB(inputs.db_path, init_sql=inputs.init_sql)
     try:
-        tables = db.tables()
-        session = _Session(inputs, db, tables, no_data=no_data)
+        session = _Session(
+            inputs, db, db.schema_tables(inputs.schemas), no_data=no_data
+        )
         result: DriverResult = driver(
             system_prompt=system_prompt(inputs, no_data=no_data),
             user_prompt=user_prompt(inputs, no_data=no_data),
@@ -381,6 +506,7 @@ def author_database(
         contract_yml, semantic_yml = session.accepted
         contract = yaml.safe_load(contract_yml)
         contract["semantic"]["source"] = {"type": "yaml", "path": "./semantic.yml"}
+        expand_wildcards(contract["semantic"], session.schemas)
         dump = {"sort_keys": False, "allow_unicode": True, "width": 100}
         (out_dir / "contract.yml").write_text(
             head + yaml.safe_dump(contract, **dump), encoding="utf-8"

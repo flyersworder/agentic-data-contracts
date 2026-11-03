@@ -33,3 +33,8 @@ class CompileInputs:
     joins: bool = False
     #: The model that compiles; the log and the contract header record it.
     model: str = COMPILER_MODEL
+    #: The documentation as free text, in place of `entries` (DataAgentBench's
+    #: description, for `dce.author`); None when the documentation is a KB.
+    description: str | None = None
+    #: The schemas whose every table the contract must allow.
+    schemas: tuple[str, ...] = ("main",)

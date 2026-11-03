@@ -1,0 +1,49 @@
+{
+ "dataset": "stockmarket",
+ "items": [
+  {
+   "id": "stockmarket-1",
+   "cls": "world",
+   "text": "Listing exchange codes: A = NYSE MKT, N = NYSE, P = NYSE ARCA, Z = BATS, V = IEXG, Q = NASDAQ Global Select Market.",
+   "kind": "statement",
+   "equivalent": "The contract states what the stockinfo column \"Listing Exchange\" codes mean, with the same meaning for each code it covers: A = NYSE MKT (NYSE American), N = NYSE, P = NYSE ARCA, Z = BATS (Cboe BZX), V = IEX (IEXG), Q = NASDAQ. The five codes present in the built file (A, N, P, Q, Z) are the ones that can matter; V is absent. Wording may differ (e.g. 'NYSE American' for NYSE MKT, 'Cboe BZX' for BATS); a code mapped to a different exchange is not equivalent.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "A lookup, not a computation: no number to check. A metric or from_sql that decodes or filters by exchange (e.g. NYSE-listed = 'N') is checked against this mapping in phase 2. Built file, stockinfo (2,752 rows): Listing Exchange A 28, N 234, P 1,444, Q 710, Z 336; no V. Every Q row has Market Category G, Q or S (451/173/86) and every non-Q row has 'Not applicable or not NASDAQ-listed', so Q here is NASDAQ as a whole, not only its Global Select tier: the hint's 'Q = NASDAQ Global Select Market' conflates the listing-exchange code with market category Q. Reading for scoring: a contract that says Listing Exchange Q = NASDAQ is equivalent on Q; one that says Q = NASDAQ Global Select restricted to Global Select rows is the hint's wording but is wrong on the data (only 173 of 710 Q rows are Global Select). Class doubt: none (world knowledge of exchange codes)."
+  },
+  {
+   "id": "stockmarket-2",
+   "cls": "world",
+   "text": "Financial status codes: D = deficient, E = delinquent, Q = bankrupt, N = normal, G = deficient and bankrupt, H = deficient and delinquent, J = delinquent and bankrupt, K = deficient, delinquent and bankrupt.",
+   "kind": "statement",
+   "equivalent": "The contract states what the stockinfo column \"Financial Status\" codes mean, the same for each code it covers: D = deficient, E = delinquent, Q = bankrupt, N = normal, G = deficient and bankrupt, H = deficient and delinquent, J = delinquent and bankrupt, K = deficient, delinquent and bankrupt. The codes present in the built file are D, H and N (plus NULL); a contract stating D, H and N correctly (and nothing wrong elsewhere) is equivalent on the data; one stating fewer than these three is partial.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "A lookup, not a computation. Built file: Financial Status NULL 2,042, D 24, H 1, N 685; codes E, Q, G, J, K absent. NULL rows are exactly the non-NASDAQ-listed rows (Listing Exchange not Q); the field is populated only for NASDAQ listings. A contract that gives the full eight-code list states all of the item; one that gives only D/H/N gives what the data can show; partial if a present code is missing or any code is mapped wrongly. Class doubt: none."
+  },
+  {
+   "id": "stockmarket-3",
+   "cls": "definition",
+   "text": "A company is financially troubled if it is deficient, delinquent, or both.",
+   "kind": "statement",
+   "equivalent": "The contract defines financially troubled (or an equivalent name: distressed, in trouble, non-compliant) as a Financial Status of deficient, delinquent, or both: codes D, E and H. Including G, J, K (deficient/delinquent combined with bankrupt) is also equivalent, since each is deficient or delinquent. Not equivalent: N, NULL, or bankrupt-only Q counted as troubled; or D alone (or E alone) as the whole definition (partial).",
+   "computation": true,
+   "reference_sql": "SELECT \"Symbol\", \"Financial Status\", \"ETF\" FROM stockinfo_database.stockinfo WHERE \"Financial Status\" IN ('D', 'E', 'H') ORDER BY \"Symbol\"",
+   "reference_value": "25 symbols: 24 with D, 1 with H (none with E). By ETF flag: 24 non-ETF, 1 ETF (a D). The broad reading D,E,H,G,J,K gives the same 25, so both readings agree on the built file. Record list held at ~/data/dce-held-results/exp7/recovery/stockmarket/stockmarket-3.csv.",
+   "notes": "The computation is the predicate: which stockinfo rows are troubled. A metric or filter is checked by running it and comparing its symbol set (or count, 25) with the reference. Counts by Financial Status and ETF: D/non-ETF 23, D/ETF 1, H/non-ETF 1. 'A company' might exclude ETFs; the item does not say so, and the reference keeps all 25; a metric that also filters ETF = 'N' (24) is read as the definition plus an extra filter, recorded but not counted against the definition. All 25 symbols have a price table in stocktrade_database (every stockinfo Symbol matches one table; one table, CARR#, has no stockinfo row). Class doubt: none; it relies on item 2's codes."
+  },
+  {
+   "id": "stockmarket-4",
+   "cls": "world",
+   "text": "Market category codes: Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market.",
+   "kind": "statement",
+   "equivalent": "The contract states what the stockinfo column \"Market Category\" codes mean: Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market. All three codes occur in the built file; stating fewer is partial; mapping any to a different tier is not equivalent.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "A lookup, not a computation. Built file: Market Category G 451, Q 173, S 86, and the literal string 'Not applicable or not NASDAQ-listed' on 2,042 rows (the non-NASDAQ listings). A metric or from_sql that filters by tier (e.g. Global Select = Market Category 'Q') is checked against this mapping in phase 2; note that Listing Exchange 'Q' (710 rows) is not the same filter. Class doubt: none."
+  }
+ ]
+}

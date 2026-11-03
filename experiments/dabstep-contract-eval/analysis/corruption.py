@@ -5,7 +5,8 @@ to the warehouse*, across every run since. Each run gets its own working copy
 of the database, and the harness checks it afterwards (`db_corrupted`). A
 governed arm is a contract behind the governed tools (`contract`,
 `contract_hollow`, the compiled contracts). The contract's text in the prompt
-(`contract_text*`) runs over the plain tools, so it counts as ungoverned.
+(`contract_text*`, `contract_plain_text`) runs over the plain tools, so it
+counts as ungoverned.
 Smoke files are not runs.
 
 Then the paper's seven models split by model and by whether the arm's prompt
@@ -37,7 +38,9 @@ from dce.stats import load  # noqa: E402
 
 
 def governed(arm: str) -> bool:
-    return arm.startswith("contract") and not arm.startswith("contract_text")
+    """A contract behind the governed tools; the pasted arms
+    (`contract_text*`, `contract_plain_text`) run over the plain ones."""
+    return arm.startswith("contract") and "_text" not in arm
 
 
 def states_rules(arm: str) -> bool:

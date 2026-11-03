@@ -13,6 +13,8 @@ def test_the_governed_arms_are_the_contract_arms_behind_the_governed_tools():
     assert corruption.governed("contract_noted")
     assert not corruption.governed("contract_text")
     assert not corruption.governed("contract_text_noted")
+    assert corruption.governed("contract_plain")
+    assert not corruption.governed("contract_plain_text")
     assert not corruption.governed("manual_prompt")
     assert not corruption.governed("schema_only")
 
@@ -38,7 +40,7 @@ def test_the_rules_are_stated_by_every_contract_arm_and_no_other():
     # all. The schema and manual arms state no rule.
     for arm in ("contract", "contract_hollow", "contract_compiled_opus"):
         assert corruption.states_rules(arm)
-    for arm in ("contract_text", "contract_text_noted"):
+    for arm in ("contract_text", "contract_text_noted", "contract_plain_text"):
         assert corruption.states_rules(arm)
     for arm in ("schema_only", "manual_prompt", "manual_resolved", "manual_summed"):
         assert not corruption.states_rules(arm)

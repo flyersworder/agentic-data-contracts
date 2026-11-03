@@ -66,6 +66,8 @@ def test_the_fifth_arm_is_extra_not_part_of_the_default_ablation():
         "manual_summed",
         "contract_text_noted",
         "contract_noted",
+        "contract_plain",
+        "contract_plain_text",
     )
     assert ALL_ARMS == ARMS + EXTRA_ARMS
     assert not set(EXTRA_ARMS) & set(ARMS)
@@ -177,6 +179,72 @@ def test_contract_text_carries_the_contract_digest():
 
     assert arm_digest("contract_text") == digest()
     assert arm_digest("contract_text_noted") == digest()
+
+
+def test_contract_plain_text_is_contract_text_with_the_plain_files(db):
+    """Experiment 5e: the derived contract's two files, verbatim, in the
+    prompt over the plain tools. Against contract_text only the two edits
+    differ; nothing is appended."""
+    from dce.frozen import CONTRACT_PATH
+    from dce.plain import PLAIN_DIR
+
+    text = build_arm("contract_text", db, DOCS)
+    plain = build_arm("contract_plain_text", db, DOCS)
+    expected = text.system_prompt
+    for name in ("contract.yml", "semantic.yml"):
+        real = (CONTRACT_PATH.parent / name).read_text(encoding="utf-8").strip()
+        derived = (PLAIN_DIR / name).read_text(encoding="utf-8").strip()
+        assert real in expected
+        expected = expected.replace(real, derived)
+    assert plain.system_prompt == expected
+    assert plain.system_prompt != text.system_prompt
+    assert [t.name for t in plain.tools] == [t.name for t in text.tools]
+    assert plain.session is None
+
+
+def test_contract_plain_text_states_both_notes_once_and_appends_none(db):
+    prompt = build_arm("contract_plain_text", db, DOCS).system_prompt
+    for note in (DATA_NOTE, SUM_NOTE):
+        assert " ".join(prompt.split()).count(" ".join(note.split())) == 1
+    assert "## Data note" not in prompt
+    assert "## Fee note" not in prompt
+
+
+def test_contract_plain_has_the_governed_prompt_of_contract(db):
+    """The governed prompt is the index (tables, domain summaries,
+    constraints): no domain text and no metric description, so it is the
+    same as contract's and the facts are reachable only by lookup."""
+    governed = build_arm("contract", db, DOCS)
+    plain = build_arm("contract_plain", db, DOCS)
+    assert plain.system_prompt == governed.system_prompt
+    for note in (DATA_NOTE, SUM_NOTE):
+        assert " ".join(note.split()) not in " ".join(plain.system_prompt.split())
+    assert [t.name for t in plain.tools] == [t.name for t in governed.tools]
+    assert plain.session is not None
+
+
+def test_contract_plain_returns_both_edits_from_one_domain_lookup(db):
+    plain = build_arm("contract_plain", db, DOCS)
+    out = asyncio.run(_tool(plain, "lookup_domain").function(_CTX, name="fees"))
+    flat = " ".join(str(out).split())
+    for note in (DATA_NOTE, SUM_NOTE):
+        assert " ".join(note.split()) in flat
+    governed = build_arm("contract", db, DOCS)
+    before = asyncio.run(_tool(governed, "lookup_domain").function(_CTX, name="fees"))
+    for note in (DATA_NOTE, SUM_NOTE):
+        assert " ".join(note.split()) not in " ".join(str(before).split())
+
+
+def test_the_plain_arms_carry_the_plain_digest():
+    from dce.benchmarks.dabstep import GOVERNED_ARMS, arm_digest
+    from dce.frozen import digest
+    from dce.plain import plain_digest
+
+    assert "contract_plain" in GOVERNED_ARMS
+    assert "contract_plain_text" not in GOVERNED_ARMS
+    assert arm_digest("contract_plain") == plain_digest()
+    assert arm_digest("contract_plain_text") == plain_digest()
+    assert plain_digest() != digest()
 
 
 def test_the_data_note_states_the_fact_and_no_sql():

@@ -28,12 +28,14 @@ on this list column must accept the empty-list wildcard''.
 
 The library, the harness, every contract and compiler, the analysis
 scripts, the blind ratings, the run commits and the raw result rows are
-tracked at \url{https://github.com/flyersworder/agentic-data-contracts}.
+tracked at \url{https://github.com/flyersworder/agentic-data-contracts}
+and archived on Zenodo, \url{https://doi.org/10.5281/zenodo.23598671}.
 Every row records its commit, contract digest, gold-set hash, scorer,
 model, endpoint, token counts, cost and a post-run integrity check of its
 database copy. The transcripts of the DABStep and constructed-question
 runs are attached to the releases tagged \texttt{dabstep-eval-2026-09}
-and \texttt{dabstep-eval-2026-10}, with SHA-256 digests; 208 of the later
+and \texttt{dabstep-eval-2026-10}, with SHA-256 digests, and the later
+ones are archived as \url{https://doi.org/10.5281/zenodo.23598749}; 208 of the later
 runs' 57{,}834 rows have none, because a pod restart lost the transcripts
 written before it, and the release lists them. LiveSQLBench's
 private gold, test cases and task mapping are not redistributed, nor are

@@ -84,3 +84,16 @@ def test_names_that_are_not_plain_words_are_quoted(tmp_path: Path):
     text = dab_schema.schema_text(path)
     assert 'CREATE TABLE s."BRK-A" (' in text
     assert '  "Adj Close" DOUBLE,' in text and "  Volume BIGINT" in text
+
+
+def test_no_rows_gives_the_ddl_without_any_sample(built):
+    # The author's no-data control: the same schema, no sample rows.
+    text = dab_schema.schema_text(built, rows=0)
+    assert "CREATE TABLE books_database.books_info (\n  title VARCHAR," in text
+    assert "  n BIGINT\n);\n\n" in text
+    assert "60 tables with the same columns" in text
+    assert "rows:" not in text and "A,1" not in text and "title,n" not in text
+
+
+def test_schemas_lists_every_database_of_the_file(built):
+    assert dab_schema.schemas(built) == ("books_database", "trade_database")

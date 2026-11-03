@@ -155,6 +155,24 @@ CONTRACT_TEXT_NOTE = (
 )
 
 
+#: DAB's hints, per dataset. Read only by the hint arms and draw B's author.
+HINTS_FILE = "db_description_withhint.txt"
+
+
+def dataset_description(folder: Path) -> str:
+    """The description every arm reads: DAB's, stripped as run_agent.py
+    strips it, then the one-session sentence."""
+    text = (folder / "db_description.txt").read_text(encoding="utf-8")
+    return text.strip() + "\n\n" + SESSION_NOTE
+
+
+def with_hints(description: str, folder: Path) -> str:
+    """The hint arms' description. run_agent.py:
+    `db_description += "\\n\\n" + hints.strip()`."""
+    hints = (folder / HINTS_FILE).read_text(encoding="utf-8")
+    return description + "\n\n" + hints.strip()
+
+
 def system_prompt(governed: bool) -> str:
     tools, examples = (
         (GOVERNED_TOOLS, GOVERNED_EXAMPLES)
@@ -292,17 +310,7 @@ class DataAgentBench:
         return self._folder(task.meta["dataset"]) / f"query{task.meta['query']}"
 
     def _description(self, dataset: str) -> str:
-        """The description every arm reads: DAB's, stripped as run_agent.py
-        strips it, then the one-session sentence."""
-        text = (self._folder(dataset) / "db_description.txt").read_text(
-            encoding="utf-8"
-        )
-        return text.strip() + "\n\n" + SESSION_NOTE
-
-    def _hints(self, dataset: str) -> str:
-        return (self._folder(dataset) / "db_description_withhint.txt").read_text(
-            encoding="utf-8"
-        )
+        return dataset_description(self._folder(dataset))
 
     def tasks(self) -> list[Task]:
         return [
@@ -337,10 +345,7 @@ class DataAgentBench:
         dataset = task.meta["dataset"]
         user_prompt = None
         if arm in HINT_ARMS:
-            # run_agent.py: db_description += "\n\n" + hints.strip()
-            description = (
-                self._description(dataset) + "\n\n" + self._hints(dataset).strip()
-            )
+            description = with_hints(self._description(dataset), self._folder(dataset))
             user_prompt = user_message(self._query_text(task), description)
         if arm in GOVERNED_ARMS:
             setup = governed_arm(system_prompt(True), db, self._contract(arm, dataset))
@@ -372,10 +377,7 @@ class DataAgentBench:
             f"db_description.txt {_sha256(folder / 'db_description.txt')}",
         ]
         if arm in HINT_ARMS:
-            lines.append(
-                f"db_description_withhint.txt "
-                f"{_sha256(folder / 'db_description_withhint.txt')}"
-            )
+            lines.append(f"{HINTS_FILE} {_sha256(folder / HINTS_FILE)}")
         if arm in CONTRACT_DRAWS:
             lines.append(f"contract {contract_digest(self._contract(arm, dataset))}")
         return _sha256_text("\n".join(lines))

@@ -60,6 +60,19 @@ class CompileDB:
             out.setdefault(table, []).append((column, data_type))
         return out
 
+    def schema_tables(self, schemas: tuple[str, ...]) -> dict[str, list[str]]:
+        """Every table of each of `schemas`, by name."""
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT table_schema, table_name FROM information_schema.tables "
+                "WHERE list_contains(?, table_schema) ORDER BY 1, 2",
+                [list(schemas)],
+            ).fetchall()
+        out: dict[str, list[str]] = {s: [] for s in schemas}
+        for schema, table in rows:
+            out[schema].append(table)
+        return out
+
     def ddl(self) -> str:
         return "\n\n".join(
             f"CREATE TABLE {table} (\n"

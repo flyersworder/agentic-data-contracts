@@ -4,7 +4,8 @@ database (a schema of the DuckDB file), each table's columns and first rows.
 A database with more than `many` tables of one shape (stockmarket's 2,753
 tickers) is summarised by the count and `show` of the tables, chosen with a
 fixed seed (spec, "One database session per dataset"); the rest are a query
-on `information_schema.tables` away.
+on `information_schema.tables` away. With `rows=0` there are no sample rows
+(the author's no-data control).
 """
 
 from __future__ import annotations
@@ -61,12 +62,27 @@ def _table(con, schema: str, table: str, columns, rows: int, width: int) -> str:
         + ",\n".join(f"  {_ident(c)} {t}" for c, t in columns)
         + "\n);"
     )
+    if rows == 0:
+        return ddl
     cur = con.execute(f"SELECT * FROM {quote(schema)}.{quote(table)} LIMIT {rows}")
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow([c for c, _ in columns])
     writer.writerows([_cut(v, width) for v in r] for r in cur.fetchall())
     return f"{ddl}\n-- first {rows} rows:\n{buf.getvalue()}"
+
+
+def schemas(path: Path) -> tuple[str, ...]:
+    """The file's databases: every schema with a table, `main` aside."""
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        found = con.execute(
+            "SELECT DISTINCT table_schema FROM information_schema.tables "
+            "WHERE table_schema <> 'main' ORDER BY table_schema"
+        ).fetchall()
+    finally:
+        con.close()
+    return tuple(s for (s,) in found)
 
 
 def schema_text(

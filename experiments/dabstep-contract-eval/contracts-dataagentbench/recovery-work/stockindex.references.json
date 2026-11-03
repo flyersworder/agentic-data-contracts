@@ -1,0 +1,61 @@
+{
+ "dataset": "stockindex",
+ "items": [
+  {
+   "id": "stockindex-1",
+   "cls": "data-discoverable",
+   "text": "The Exchange field in indexinfo_database holds full exchange names (e.g. \"Tokyo Stock Exchange\"), while the Index field in indextrade_database holds index symbols (e.g. \"N225\", \"HSI\", \"000001.SS\").",
+   "kind": "records",
+   "record_query": "SELECT 'index_info.Exchange' AS side, \"Exchange\" AS key FROM indexinfo_database.index_info\nUNION ALL\nSELECT DISTINCT 'index_trade.Index' AS side, \"Index\" AS key FROM indextrade_database.index_trade\nORDER BY side, key",
+   "count": 27,
+   "reading": "Each index_info row's Exchange is a full exchange name, and each distinct index_trade Index value is an index symbol: the two fields never hold the same value (a direct join Exchange = Index matches 0 rows for every record). Read as the join the item implies, each record joins to its counterpart: each exchange to the rows of the index symbol it carries (13 exchanges to one symbol each), each symbol to one exchange; Korea Exchange joins to no index_trade rows (no Korean index is stored). 27 records: 14 exchanges and 13 symbols.",
+   "reference_sql": "WITH m AS (SELECT * FROM (VALUES\n  ('New York Stock Exchange', 'NYA'),\n  ('NASDAQ', 'IXIC'),\n  ('Hong Kong Stock Exchange', 'HSI'),\n  ('Shanghai Stock Exchange', '000001.SS'),\n  ('Tokyo Stock Exchange', 'N225'),\n  ('Euronext', 'N100'),\n  ('Shenzhen Stock Exchange', '399001.SZ'),\n  ('Toronto Stock Exchange', 'GSPTSE'),\n  ('National Stock Exchange of India', 'NSEI'),\n  ('Frankfurt Stock Exchange', 'GDAXI'),\n  ('Korea Exchange', 'KS11'),\n  ('SIX Swiss Exchange', 'SSMI'),\n  ('Taiwan Stock Exchange', 'TWII'),\n  ('Johannesburg Stock Exchange', 'J203.JO')) AS m(exchange, index_symbol)),\nsyms AS (SELECT \"Index\" AS sym, count(*) AS n_rows FROM indextrade_database.index_trade GROUP BY 1),\nex AS (SELECT \"Exchange\" AS ex FROM indexinfo_database.index_info)\nSELECT 'index_info.Exchange' AS side, ex.ex AS key, 'full exchange name' AS value_kind,\n       (SELECT count(*) FROM indextrade_database.index_trade t WHERE t.\"Index\" = ex.ex) AS direct_equal_matches,\n       s.sym AS joins_to, coalesce(s.n_rows, 0) AS joined_rows\nFROM ex LEFT JOIN m ON m.exchange = ex.ex LEFT JOIN syms s ON s.sym = m.index_symbol\nUNION ALL\nSELECT 'index_trade.Index', s.sym, 'index symbol',\n       (SELECT count(*) FROM indexinfo_database.index_info i WHERE i.\"Exchange\" = s.sym),\n       ex.ex, s.n_rows\nFROM syms s LEFT JOIN m ON m.index_symbol = s.sym LEFT JOIN ex ON ex.ex = m.exchange\nORDER BY side, key",
+   "held_file": "~/data/dce-held-results/exp7/recovery/stockindex/stockindex-1.csv",
+   "notes": "Per-record reference columns: value_kind, direct_equal_matches (0 everywhere), joins_to (the counterpart actually present in the data, NULL for Korea Exchange) and joined_rows. Scoring in phase 2: a contract's SQL reads these records when it relates the two fields (a metric, from_sql or declared relationship that joins index_info to index_trade, per the brief's ruling on built joins); each record is compared on what it joins to when that join is run. A join on Exchange = Index disagrees on all 26 records that have a counterpart. A mapping that names a symbol for Korea Exchange (e.g. KS11) still joins it to nothing and agrees. SQL that reads only one table (e.g. groups by Index) does not relate the records and is not a reading of the item; with no such join the item is at best stated, not built. The mapping in the SQL is world knowledge; it was checked on the data: each symbol's Close/CloseUSD ratio is a fixed rate that matches its exchange's Currency (USD 1, JPY 100, CNY 6.25, EUR 0.8197, ...), which leaves only the pairs sharing a currency (NYA/IXIC for NYSE/NASDAQ, 000001.SS/399001.SZ for Shanghai/Shenzhen, N100/GDAXI for Euronext/Frankfurt) to be told apart by the symbols themselves. Overlaps item 2 (guidance), which states the mapping as the way to join."
+  },
+  {
+   "id": "stockindex-2",
+   "cls": "guidance",
+   "text": "Joining the two needs each exchange matched to its major index symbol (e.g. Tokyo Stock Exchange to N225, Hong Kong Stock Exchange to HSI).",
+   "kind": "statement",
+   "equivalent": "The contract states that index_info and index_trade do not join on their columns directly, and that the join goes through a mapping of each exchange (Exchange) to its major index symbol (Index), e.g. Tokyo Stock Exchange to N225, Hong Kong Stock Exchange to HSI.",
+   "computation": true,
+   "reference_sql": "SELECT i.\"Exchange\", i.\"Currency\", t.\"Index\" AS joined_index, count(t.\"Index\") AS joined_rows\nFROM indexinfo_database.index_info i\nLEFT JOIN (VALUES\n  ('New York Stock Exchange', 'NYA'),\n  ('NASDAQ', 'IXIC'),\n  ('Hong Kong Stock Exchange', 'HSI'),\n  ('Shanghai Stock Exchange', '000001.SS'),\n  ('Tokyo Stock Exchange', 'N225'),\n  ('Euronext', 'N100'),\n  ('Shenzhen Stock Exchange', '399001.SZ'),\n  ('Toronto Stock Exchange', 'GSPTSE'),\n  ('National Stock Exchange of India', 'NSEI'),\n  ('Frankfurt Stock Exchange', 'GDAXI'),\n  ('Korea Exchange', 'KS11'),\n  ('SIX Swiss Exchange', 'SSMI'),\n  ('Taiwan Stock Exchange', 'TWII'),\n  ('Johannesburg Stock Exchange', 'J203.JO')) AS m(exchange, index_symbol) ON m.exchange = i.\"Exchange\"\nLEFT JOIN indextrade_database.index_trade t ON t.\"Index\" = m.index_symbol\nGROUP BY ALL ORDER BY 1",
+   "reference_value": "All 104224 index_trade rows join to exactly one exchange; 13 of 14 exchanges join to one index symbol each (e.g. Tokyo Stock Exchange to N225 with 13874 rows, Hong Kong Stock Exchange to HSI with 8492); Korea Exchange joins to none. Per-exchange table in ~/data/dce-held-results/exp7/recovery/stockindex/stockindex-2.csv.",
+   "notes": "Computation taken as true: the mapped join is what the item asks a contract to perform; it is built only when the contract makes it executable (brief's ruling). A metric performing it is checked against the per-exchange joined index and row counts."
+  },
+  {
+   "id": "stockindex-3",
+   "cls": "world",
+   "text": "An exchange's region (Asia, Europe, North America) is not stored and must be inferred from geography (e.g. N225 is in Asia).",
+   "kind": "statement",
+   "equivalent": "The contract states that no region is stored and gives (or tells how to infer) each exchange's or index's region from geography: Asia for N225, HSI, 000001.SS, 399001.SZ, NSEI, TWII (and Korea Exchange); Europe for N100, GDAXI, SSMI; North America for NYA, IXIC, GSPTSE.",
+   "computation": true,
+   "reference_sql": "SELECT r.region, t.\"Index\", count(*) AS n_rows\nFROM indextrade_database.index_trade t JOIN (VALUES\n  ('N225', 'Asia'), ('HSI', 'Asia'), ('000001.SS', 'Asia'), ('399001.SZ', 'Asia'),\n  ('NSEI', 'Asia'), ('TWII', 'Asia'), ('KS11', 'Asia'),\n  ('N100', 'Europe'), ('GDAXI', 'Europe'), ('SSMI', 'Europe'),\n  ('NYA', 'North America'), ('IXIC', 'North America'), ('GSPTSE', 'North America'),\n  ('J203.JO', 'Africa')) AS r(index_symbol, region) ON r.index_symbol = t.\"Index\"\nGROUP BY ALL ORDER BY 1, 2",
+   "reference_value": "Asia: 6 symbols, 43132 rows; Europe: 3 symbols, 21583 rows; North America: 3 symbols, 37163 rows; Africa (J203.JO, Johannesburg): 1 symbol, 2346 rows. Region per symbol in ~/data/dce-held-results/exp7/recovery/stockindex/stockindex-3.csv.",
+   "notes": "Confirmed not stored: index_info holds only Exchange and Currency, index_trade no region column. J203.JO (Johannesburg) lies outside the item's three regions; a contract giving it Africa, or leaving it out of the three, agrees; placing it in Asia, Europe or North America does not. Euronext (N100) is Europe. A computation is implied when a metric or dimension assigns regions; the reference is the symbol-to-region assignment above, compared symbol by symbol (13 symbols)."
+  },
+  {
+   "id": "stockindex-4",
+   "cls": "definition",
+   "text": "An up day is a trading day whose close is above its open; a down day one whose close is below its open.",
+   "kind": "statement",
+   "equivalent": "The contract defines an up day as a row (trading day) with Close > Open and a down day as one with Close < Open, per index.",
+   "computation": true,
+   "reference_sql": "SELECT \"Index\",\n       count(*) FILTER (WHERE \"Close\" > \"Open\") AS up_days,\n       count(*) FILTER (WHERE \"Close\" < \"Open\") AS down_days,\n       count(*) FILTER (WHERE \"Close\" = \"Open\") AS neither,\n       count(*) AS n_days\nFROM indextrade_database.index_trade GROUP BY 1 ORDER BY 1",
+   "reference_value": "Over all rows: 42820 up days, 40313 down days, 21091 neither (Close = Open), of 104224. Per-index counts in ~/data/dce-held-results/exp7/recovery/stockindex/stockindex-4.csv (e.g. N225 is one of the indices with many Close = Open rows).",
+   "notes": "Close = Open rows (21091) are neither up nor down under the item; a definition that counts them as down (Close <= Open) or up (>=) disagrees on those rows. Most of them are rows with Open = High = Low = Close (no intraday range stored), concentrated in NYA, N225, IXIC, GDAXI and HSI. Comparing Close with the previous day's Close, or using Adj Close, is a different definition. (Adj Close differs from Close only in 399001.SZ, GSPTSE and TWII.)"
+  },
+  {
+   "id": "stockindex-5",
+   "cls": "definition",
+   "text": "Average intraday volatility is (High - Low) / Open per day, averaged over the period.",
+   "kind": "statement",
+   "equivalent": "The contract defines intraday volatility per day as (High - Low) / Open and the average intraday volatility as its mean over the days of the period (per index).",
+   "computation": true,
+   "reference_sql": "SELECT \"Index\", avg((\"High\" - \"Low\") / \"Open\") AS avg_intraday_volatility, count(*) AS n_days\nFROM indextrade_database.index_trade GROUP BY 1 ORDER BY 1",
+   "reference_value": "Over all rows of all indices: 0.011197. Per index over its full history in ~/data/dce-held-results/exp7/recovery/stockindex/stockindex-5.csv (e.g. N225 0.008462, HSI 0.013712).",
+   "notes": "No row has Open null or 0. Dividing by Close or Low, averaging High/Low ratios, or taking (avg High - avg Low) / avg Open is a different computation. A metric restricted to a period is checked with the same filter applied to the reference. Date is a string in three formats ('DD Mon YYYY, HH:MM', 'YYYY-MM-DD HH:MM:SS', 'Month DD, YYYY at HH:MM AM'); all 104224 parse with coalesce(try_strptime(\"Date\", '%d %b %Y, %H:%M'), try_strptime(\"Date\", '%Y-%m-%d %H:%M:%S'), try_strptime(\"Date\", '%B %d, %Y at %I:%M %p'))::DATE ; (Index, parsed date) is unique."
+  }
+ ]
+}

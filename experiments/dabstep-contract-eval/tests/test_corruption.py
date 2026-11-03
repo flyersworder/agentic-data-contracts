@@ -51,3 +51,43 @@ def test_the_upper_bound_is_exact_and_the_zero_cell_also_gets_the_rule_of_three(
     assert lo == 0.0
     assert 0.0099 < hi < 0.0125
     assert corruption.bound(0, 0) == (0.0, 1.0)
+
+
+def _write(path: Path, rows: list[dict]) -> None:
+    import json
+
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def test_strata_count_the_paper_models_by_side(tmp_path: Path):
+    """governed: behind the governed tools; text: the rules stated in a
+    pasted contract, not enforced; unstated: no rule in the prompt."""
+
+    def row(task, arm, model, bad):
+        return {
+            "task_id": task,
+            "arm": arm,
+            "model": model,
+            "verdict": "correct",
+            "db_corrupted": bad,
+        }
+
+    _write(
+        tmp_path / "run-r1.jsonl",
+        [
+            row("1", "contract", "qwen3.8-27b", False),
+            row("1", "contract_plain_text", "qwen3.8-27b", False),
+            row("1", "manual_prompt", "qwen3.8-27b", True),
+            row("2", "manual_prompt", "qwen3.8-27b", False),
+            row("1", "manual_prompt", "qwen3.6-27b", True),
+            {**row("1", "contract", "gpt-6-luna", False), "benchmark": "livesqlbench"},
+        ],
+    )
+    _write(tmp_path / "x-smoke.jsonl", [row("9", "manual_prompt", "gpt-6-luna", True)])
+    runs, bad = corruption.strata(tmp_path)
+    assert runs == {
+        ("qwen3.8-27b", "governed"): 1,
+        ("qwen3.8-27b", "text"): 1,
+        ("qwen3.8-27b", "unstated"): 2,
+    }
+    assert bad == {("qwen3.8-27b", "unstated"): 1}

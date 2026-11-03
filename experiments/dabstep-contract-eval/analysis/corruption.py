@@ -75,6 +75,36 @@ def in_paper(model: str) -> bool:
     return model.startswith(PAPER_MODELS)
 
 
+def side(arm: str) -> str:
+    """governed: the contract behind the governed tools; text: the rules
+    stated in a pasted contract, not enforced; unstated: no rule stated."""
+    if governed(arm):
+        return "governed"
+    return "text" if states_rules(arm) else "unstated"
+
+
+def strata(results: Path) -> tuple[Counter, Counter]:
+    """(model, side) -> runs, and -> corrupted copies, over every DABStep
+    run of the paper's seven models: the counts the stratified tests read."""
+    runs: Counter = Counter()
+    bad: Counter = Counter()
+    for path in sorted(results.glob("*.jsonl")):
+        if not is_run(path.stem):
+            continue
+        try:
+            rows = load(path)
+        except KeyError:  # a score export, not a run file
+            continue
+        for r in rows:
+            if r.get("benchmark", "dabstep") != "dabstep" or not in_paper(r["model"]):
+                continue
+            cell = (r["model"], side(r["arm"]))
+            runs[cell] += 1
+            if r.get("db_corrupted"):
+                bad[cell] += 1
+    return runs, bad
+
+
 def main() -> None:
     runs: Counter = Counter()
     bad: Counter = Counter()

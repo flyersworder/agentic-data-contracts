@@ -33,6 +33,7 @@ from dce.frozen import (
     uninterpreted_digest,
 )
 from dce.golds import PLURALITY_THRESHOLD, VERIFIED_WRONG_GOLDS, golds_sha256
+from dce.plain import PLAIN_DIR, load_plain_contract, plain_digest
 from dce.tools import ArmSetup, _ungoverned_tools, governed_arm
 
 #: Where `dce.prepare` puts the vendor's context files; relative to the
@@ -87,6 +88,13 @@ ARMS: tuple[str, ...] = (
 #: after its prompt (experiment 5d). Against `contract_text_noted` it states
 #: the same facts in the same words and differs only in the contract's route:
 #: looked up through the governed tools, or pasted as text.
+#:
+#: `contract_plain` and `contract_plain_text` carry the contract with the two
+#: facts written into it, in the notes' words, at the point where each is
+#: used (`dce.plain`), and no note in any prompt (experiment 5e): the
+#: governed arm reaches them only by lookup, the text arm reads them in the
+#: pasted files. With `contract` and `contract_text` they make a 2x2 of
+#: route by wording.
 COMPILED_ARMS: tuple[str, ...] = (
     "contract_compiled",
     "contract_compiled_opus",
@@ -100,6 +108,8 @@ EXTRA_ARMS: tuple[str, ...] = (
     "manual_summed",
     "contract_text_noted",
     "contract_noted",
+    "contract_plain",
+    "contract_plain_text",
 )
 ALL_ARMS: tuple[str, ...] = ARMS + EXTRA_ARMS
 
@@ -153,6 +163,7 @@ GOVERNED_ARMS: frozenset[str] = frozenset(
         "contract_hollow",
         "contract_uninterpreted",
         "contract_noted",
+        "contract_plain",
         *COMPILED_ARMS,
     }
 )
@@ -163,6 +174,16 @@ BASE_PROMPT = (
     "Your final message must be the answer alone, formatted exactly as the "
     "question's guidelines require. Do not show working in the final message."
 )
+
+
+def contract_text_prompt(directory: Path) -> str:
+    """`BASE_PROMPT` and a contract directory's two files, verbatim: the
+    pasted arms' prompt before any note."""
+    files = "\n\n".join(
+        f"### {path.name}\n\n```yaml\n{path.read_text(encoding='utf-8').strip()}\n```"
+        for path in (directory / "contract.yml", directory / "semantic.yml")
+    )
+    return f"{BASE_PROMPT}\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
 
 
 def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
@@ -180,13 +201,9 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
             prompt += f"\n\n## Fee note\n\n{SUM_NOTE}"
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
 
-    if arm in ("contract_text", "contract_text_noted"):
-        files = "\n\n".join(
-            f"### {path.name}\n\n```yaml\n"
-            f"{path.read_text(encoding='utf-8').strip()}\n```"
-            for path in (CONTRACT_PATH, CONTRACT_PATH.parent / "semantic.yml")
-        )
-        prompt = f"{BASE_PROMPT}\n\n## Data contract\n\n{CONTRACT_TEXT_NOTE}\n\n{files}"
+    if arm in ("contract_text", "contract_text_noted", "contract_plain_text"):
+        directory = PLAIN_DIR if arm == "contract_plain_text" else CONTRACT_PATH.parent
+        prompt = contract_text_prompt(directory)
         if arm == "contract_text_noted":
             prompt += NOTES_TAIL
         return ArmSetup(prompt, _ungoverned_tools(db_path), None)
@@ -210,6 +227,7 @@ def build_arm(arm: str, db_path: Path, docs: dict[str, str]) -> ArmSetup:
                 "contract": load_contract,
                 "contract_hollow": load_hollow_contract,
                 "contract_uninterpreted": load_uninterpreted_contract,
+                "contract_plain": load_plain_contract,
             }[arm]()
         return governed_arm(BASE_PROMPT, db_path, contract)
 
@@ -223,9 +241,11 @@ def arm_digest(arm: str) -> str:
     rows must be pinned to `hollow_digest()`. Stamping `digest()` on every row
     regardless -- which this harness did for runs A, B and C -- leaves arm D's
     rows carrying tamper-evidence for a file that arm never read, which is the
-    one provenance claim the stamp exists to support. The ungoverned arms load
-    no contract at all and keep the real digest as a record of which frozen
-    experiment they belong to.
+    one provenance claim the stamp exists to support. The plain arms, governed
+    and pasted, both read the derived contract of `dce.plain` and carry its
+    digest. The other ungoverned arms load no contract (or paste the frozen
+    one) and keep the real digest as a record of which frozen experiment they
+    belong to.
     """
     if arm == "contract_hollow":
         return hollow_digest()
@@ -233,6 +253,8 @@ def arm_digest(arm: str) -> str:
         return uninterpreted_digest()
     if arm in COMPILED_ARMS:
         return compiled_digest(arm)
+    if arm in ("contract_plain", "contract_plain_text"):
+        return plain_digest()
     return digest()
 
 

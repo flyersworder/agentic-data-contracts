@@ -128,6 +128,12 @@ choices were most often how a \texttt{NULL} or an unlisted category is
 scored, which fields a formula averages, and which of two columns holds a
 quantity.
 
+\ifextended\else
+On 55 tasks of three databases, neither a stronger compile, nor an author
+that explored the data, nor corrections written from half the golds
+showed a detectable gain on held-out tasks (extended version).
+\fi
+\ifextended
 \textbf{Better authors and oracle corrections.} On 55 tasks of three
 databases, on \mLuna{}, neither a stronger compile with declared joins nor
 an author session that read the whole KB and explored the data showed a
@@ -137,7 +143,6 @@ of each database's tasks, as general facts about KB entries, lift those
 tasks by about 21 points; on the held-out half no comparable transfer was
 observed (the manual $+3.6$ points, interval 0 to $+9.5$, on 28 tasks of
 three databases).
-\ifextended
 Each database's primary tasks were split in half before anything was
 written. From the gold of the 27 training tasks only, 35 corrections were
 written as general facts about KB entries (a scale, a threshold, how a

@@ -231,21 +231,16 @@ limiting and is reported on its 279-task complete-case set
 \label{sec:prereg}
 
 From the one-fact experiment on, every experiment committed its arms,
-endpoints and how each outcome would be read before its sweep, and most
-also fixed numbered predictions; every result row stamps the commit it ran
-on. Most commits came before any run or after a smoke run only. One,
-LiveSQLBench's (6), came after Qwen's per-arm totals for two repeats were
-seen, but before the subgroup statistic it predicts; its commit says so. The four single
-runs had a pre-registered design and primary model but no numbered
-predictions, and neither panel fixed any. In all, 57 predictions were
-fixed in 16 commits, 53 before experiment~5d and 4 for it. Of the 57, 24
-directional predictions held, 7 registered ties were not rejected, one
-was read as equivalent (an outcome its commit registered in advance), 3
-held in part, and 22 failed (\appref{app:predictions}). Analyses chosen
-after a result was seen are labelled exploratory. Neither panel fixed
-numbered predictions, so the headline decomposition of
-Section~\ref{sec:decomposition} is a pre-specified design without
-registered outcomes.
+endpoints and readings before its sweep, and most fixed numbered
+predictions; every result row stamps the commit it ran on. One commit,
+LiveSQLBench's (6), came after two repeats' per-arm totals were seen but
+before the statistic it predicts, and says so. The single runs and the
+panels fixed a design but no predictions, so the headline decomposition
+(Section~\ref{sec:decomposition}) has no registered outcome. Of the 57
+predictions, fixed in 16 commits, 24 directional ones held, 7 ties were
+not rejected, one was read as equivalent as its commit allowed, 3 held in
+part and 22 failed (\appref{app:predictions}). Analyses chosen after a
+result was seen are exploratory.
 
 The unit is the task. With $k$ repeats a task scores 0 to $k$ for each
 arm, its number of correct runs, and a comparison between two arms counts
@@ -291,9 +286,9 @@ tasks, so the official grader confirms the contract's lead over the
 manual, $+33.1$ points (137 tasks to 12). Against the withheld golds our
 reconstructed golds are 3.0 to 5.7 points lenient on the hard split, on
 both submitted arms (\appref{app:leniency}). The golds were reconstructed
-at 10:34 on 2026-08-30, after a 09:56 design rule barring any question,
-gold or score from the contract's authoring, and before the contract's
-first freeze at 11:37 (\appref{app:golds}). Answers are graded by
+after a design rule barred every question, gold and score from the
+contract's authoring, and before the contract was first frozen
+(\appref{app:golds}). Answers are graded by
 DABStep's own scorer, vendored verbatim. \mQwen{} often states its working
 and then the answer as its last paragraph, which the scorer marks wrong;
 the \emph{end-to-end} view, defined as official plus final-paragraph
@@ -302,11 +297,9 @@ downgrades, and is reported beside the official verdicts on \mQwen{}. On
 the GPT-6 models the two views agree. LiveSQLBench answers
 are SQL, graded by the benchmark's Soft-EX rules, which compare the
 answer's result table with the gold's after normalising decimals, rounding
-and \texttt{DISTINCT}. Our DuckDB port departs from them in three
-documented ways, all fixed when the task set was frozen: JSON text is
-parsed, nested dates are normalised, and numbers match within one
-two-place rounding step (floats also within $10^{-5}$ relative), so that
-every frozen gold grades as correct against itself. Matching one database
+and \texttt{DISTINCT}; our DuckDB port adds three documented
+normalisations, fixed with the task set, so that every frozen gold grades
+as correct against itself. Matching one database
 instance is not semantic equivalence~\cite{test-suites}; both benchmarks
 grade that way.
 
@@ -314,11 +307,9 @@ grade that way.
 \label{sec:fixed}
 
 Within a run everything but the arm is fixed: the row limit (50 rows per
-result), the request limit, the token budget, the model and its settings,
-the endpoint, the task set, the golds and the scorer. In most repeated
-experiments the arms ran together within each repeat; where an arm ran
-separately (\armMw{} on \mSol{}, \armMws{} on \mLuna{}), it pairs by task
-and repeat. An agent that exhausts its budget is forced to a final answer
-rather than discarded, and a retry pass reruns transient errors once.
-Harness defects found along the way are recorded with the rows they
-affected (\appref{app:harness}).
+result), the request and token budgets, the model, its settings and
+endpoint, the tasks, golds and scorer. Arms ran together within each
+repeat, except \armMw{} on \mSol{} and \armMws{} on \mLuna{}, which pair by
+task and repeat. An agent that exhausts its budget is forced to a final
+answer, a retry pass reruns transient errors once, and harness defects are
+recorded with the rows they affected (\appref{app:harness}).

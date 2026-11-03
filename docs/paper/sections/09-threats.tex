@@ -114,11 +114,18 @@ A near-replicate of the \mGLM{} contract arm at temperature~0 disagreed
 with the original on 94 of 401 tasks, symmetrically; the four single runs
 are therefore read only through paired tests, and differences between
 those models are directional. No multiplicity correction is applied across
-the 57 predictions. Of the registered directional predictions that held,
-all survive a Bonferroni correction over the 57 except (19), marginally,
-and (35) at the cluster level; seven registered ties held, and a tie holds
-by not rejecting. Exploratory $p$-values between 0.001 and 0.05 would
-not survive a correction and are hypotheses.
+the 57 predictions. At the task level, the unit of their registered tests,
+every registered directional prediction that held survives a Bonferroni
+correction over the 57 except (19), marginally, and (35) at the cluster
+level. At the shape level, under the one engine registered for
+experiment~5e and applied to the earlier contrasts afterwards (expl.), the
+held-out lift (28Q) gives $p{=}3{\times}10^{-5}$ over the 165 unread
+tasks, which survives that correction, but $p{=}0.004$ over the 105 in
+unread shapes, and \mQwen{}'s route gain (27) $p{=}0.02$, which do not. Read by shape with the same engine, the eight
+registered ties are one equivalent within $\pm$5 points, one different and
+six inconclusive; a tie that held did so by not rejecting. Exploratory
+$p$-values between 0.001 and 0.05 would not survive a correction and are
+hypotheses.
 
 \paragraph{Scope.} One harness, the authors', runs every arm, and both
 benchmarks' schemas fit in a context window; where they do not, retrieval

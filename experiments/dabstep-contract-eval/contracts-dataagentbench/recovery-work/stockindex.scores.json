@@ -1,0 +1,655 @@
+{
+ "dataset": "stockindex",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockindex-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "There is NO join key between index_info and index_trade. ... The metric `index_exchange` encodes this mapping; `index_currency` joins on it.",
+      "where": "contract.yml domains.exchanges.description; semantic.yml tables index_info.Exchange 'Full name of the stock exchange', index_trade.Index 'Abbreviated index symbol'"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_currency.from_sql; metrics.index_exchange.sql_expression",
+      "summary": "index_currency LEFT JOINs index_info to index_trade on i.Exchange = CASE t.Index (13 symbols mapped to exchange names); index_exchange is the same CASE. Run on the built file, each of the 27 records joins to the reference counterpart with the reference row count, through both metrics; Korea Exchange joins nothing."
+     },
+     "agree": 27,
+     "total": 27,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Per-record comparison in ~/data/dce-held-results/exp7/recovery/stockindex/scores-draw-a1-stockindex-1-*.csv."
+    },
+    {
+     "id": "stockindex-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "INTERPRETATION (not in the documentation; standard market knowledge of the symbols): NYA = New York Stock Exchange; ... N225 = Tokyo Stock Exchange; ... HSI = Hong Kong Stock Exchange",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_currency.from_sql",
+      "summary": "Mapped join built (CASE on Index to Exchange names)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "index_currency's join run on the built file: all 14 exchanges join the reference index with the reference row count (13 one symbol each, Korea Exchange none); 104224 trade rows each join one exchange. Agrees.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-3",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric assigns a region."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Nothing on regions beyond the documentation's 'across various countries and regions'; no region mapping or metric."
+    },
+    {
+     "id": "stockindex-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.intraday_change_pct",
+      "summary": "(Close - Open) / Open * 100 per day; no up/down day count or flag."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Text states no up/down day definition; intraday_change_pct's sign would give it but is never named as such."
+    },
+    {
+     "id": "stockindex-5",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.intraday_range",
+      "summary": "High - Low per day, local currency; no division by Open, no average."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The metric intraday_range computes High - Low, the numerator, but no text names intraday volatility or divides by Open; scored missed because the text states no equivalent (see report)."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Date is VARCHAR in three mixed formats ... always parse with the metric `trade_date` (parses 100% of rows). Parsed range 1965-01-05 to 2021-06-03.",
+     "where": "contract.yml domains.index_prices.description; semantic.yml metrics.trade_date",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "104,224 rows, 13 index symbols ...; (Index, Date) is unique; no NULLs in any price column.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "CloseUSD equals Close times a constant per-index conversion factor (e.g. 1.0 for NYA and IXIC, ~0.13 for HSI, ~0.01 for N225)",
+     "where": "contract.yml domains.index_prices.description; semantic.yml metrics.usd_conversion_factor",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Prices are in the index's local currency; to compare across indices use CloseUSD.",
+     "where": "contract.yml domains.index_prices.description; rules.use_usd_for_cross_index_comparison",
+     "confirmed": "yes (each index's Close/CloseUSD rate matches its exchange's Currency)"
+    },
+    {
+     "quote": "\"Adj Close\" differs from Close only for GSPTSE, TWII and 399001.SZ.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "index_info lists 14 exchanges with their trading currency: New York Stock Exchange USD, ...",
+     "where": "contract.yml domains.exchanges.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "index_currency: Trading currency of the index's exchange, via the index_exchange mapping joined to index_info.",
+     "where": "semantic.yml metrics.index_currency",
+     "confirmed": "yes (every row gets a currency matching its fixed USD rate)"
+    },
+    {
+     "quote": "daily_return: Close-to-close return versus the previous trading day of the same index, ordered by the parsed trade_date. Fraction, not percent.",
+     "where": "semantic.yml metrics.daily_return",
+     "confirmed": "cannot be checked (a convention; the SQL runs, NULL on each index's first day)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockindex-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "There is no key column linking index_info to index_trade: the link from an index symbol to its exchange is given by the metric `index_exchange`",
+      "where": "contract.yml domains.exchanges.description; semantic.yml tables index_info.Exchange 'Full name of the stock exchange (14 rows, unique)', index_trade.Index 'Abbreviated index symbol'"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_currency.from_sql; metrics.index_exchange.sql_expression",
+      "summary": "index_currency LEFT JOINs index_info to index_trade on i.Exchange = CASE t.Index (13 symbols mapped to exchange names); index_exchange is the same CASE. Run on the built file, each of the 27 records joins to the reference counterpart with the reference row count, through both metrics; Korea Exchange joins nothing."
+     },
+     "agree": 27,
+     "total": 27,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Per-record comparison in ~/data/dce-held-results/exp7/recovery/stockindex/scores-draw-a2-stockindex-1-*.csv."
+    },
+    {
+     "id": "stockindex-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "the link from an index symbol to its exchange is given by the metric `index_exchange` (standard symbol-to-exchange mapping: NYA NYSE, IXIC NASDAQ, HSI Hong Kong, ... N225 Tokyo, ...)",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_currency.from_sql",
+      "summary": "Mapped join built (CASE on Index to Exchange names)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "index_currency's join run on the built file: all 14 exchanges join the reference index with the reference row count (13 one symbol each, Korea Exchange none); 104224 trade rows each join one exchange. Agrees.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-3",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric assigns a region."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Nothing on regions beyond the documentation's 'across various countries and regions'; no region mapping or metric."
+    },
+    {
+     "id": "stockindex-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric compares Close with Open."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Text states no up/down day definition."
+    },
+    {
+     "id": "stockindex-5",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.intraday_range",
+      "summary": "High - Low per day, local currency; no division by Open, no average."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The metric intraday_range computes High - Low, the numerator, but no text names intraday volatility or divides by Open; scored missed because the text states no equivalent (see report)."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Date is VARCHAR in three mixed formats ... always parse with the metric `trade_date` (all rows parse; range 1965-01-05 to 2021-06-03).",
+     "where": "contract.yml domains.index_prices.description; semantic.yml metrics.trade_date",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "104,224 rows, 13 index symbols ... No NULLs in any price column; High >= Low on every row. No duplicate (Index, date) pairs once dates are parsed.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "\"Adj Close\" differs from Close on 13,046 rows.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "CloseUSD / Close is a constant factor per index (e.g. HSI 0.13, N225 0.01, GDAXI 1.22, IXIC and NYA 1.0) - a fixed conversion rate, not a daily FX rate.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Open/High/Low/Close/Adj Close are in the index's local currency (the trading currency of its exchange); only CloseUSD is in USD",
+     "where": "contract.yml domains.index_prices.description; rules.usd_for_cross_index_comparison",
+     "confirmed": "yes (each index's Close/CloseUSD rate matches its exchange's Currency)"
+    },
+    {
+     "quote": "index_info lists 14 exchanges with their trading currency: New York Stock Exchange USD, ...",
+     "where": "contract.yml domains.exchanges.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "index_currency: Trading currency of the exchange an index tracks ..., via the `index_exchange` mapping joined to index_info.",
+     "where": "semantic.yml metrics.index_currency",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockindex-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Exchange is the full name of the stock exchange ... There is no shared key between index_info and index_trade. INTERPRETATION: index symbols are mapped to exchanges by their standard meaning, encoded in the metric `index_exchange`",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_currency.from_sql; metrics.index_exchange.sql_expression",
+      "summary": "index_currency LEFT JOINs index_info on i.Exchange = CASE t.\"Index\" (13 symbols plus KS11 -> Korea Exchange); index_exchange is the same CASE. Run on the built file, all 27 records join the reference counterpart with the reference row count; KS11 has no rows, so Korea Exchange joins nothing, as in the reference."
+     },
+     "agree": 27,
+     "total": 27,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Per-record comparison in ~/data/dce-held-results/exp7/recovery/stockindex/scores-draw-a3-stockindex-1-*.csv."
+    },
+    {
+     "id": "stockindex-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "index symbols are mapped to exchanges by their standard meaning, encoded in the metric `index_exchange`: NYA -> New York Stock Exchange, ... HSI -> Hong Kong Stock Exchange, ... N225 -> Tokyo Stock Exchange, ...",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_currency.from_sql",
+      "summary": "Mapped join built (CASE on Index to Exchange names)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "index_currency's join run on the built file: all 14 exchanges join the reference index with the reference row count (13 one symbol each, Korea Exchange none); 104224 trade rows each join one exchange. Agrees.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-3",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric assigns a region."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Nothing on regions beyond the documentation's 'across various countries and regions'; no region mapping or metric."
+    },
+    {
+     "id": "stockindex-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.intraday_change; metrics.intraday_return_pct",
+      "summary": "Close - Open and (Close - Open) / Open * 100 per day; no up/down day count or flag."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "intraday_change's description says 'positive = closed above open', the sign the item's definition uses, but no up or down day is named or counted, and Close = Open is not addressed; read as stating no equivalent."
+    },
+    {
+     "id": "stockindex-5",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.intraday_range",
+      "summary": "High - Low per day, in index points; no division by Open, no average."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The metric intraday_range computes High - Low, the numerator, but no text names intraday volatility or divides by Open; scored missed because the text states no equivalent (see report)."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Date is a VARCHAR stored in THREE mixed formats ... always parse it with the metric `trade_date`, which parses every row. After parsing, (Index, date) is unique; dates range 1965-01-05 to 2021-06-03.",
+     "where": "contract.yml domains.index_prices.description; semantic.yml metrics.trade_date",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "104,224 rows, 13 index symbols ... No NULLs in any price column.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "CloseUSD equals Close times a constant per-index conversion factor (1.0 for NYA and IXIC, 0.13 HSI, 0.16 000001.SS/399001.SZ, 0.01 N225/NSEI, 1.22 N100/GDAXI, 0.83 GSPTSE, 1.11 SSMI, 0.04 TWII, 0.07 J203.JO).",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "\"Adj Close\" differs from Close on about 13k rows.",
+     "where": "contract.yml domains.index_prices.description",
+     "confirmed": "yes (13,046)"
+    },
+    {
+     "quote": "Korea Exchange (KS11) has no price rows in index_trade.",
+     "where": "contract.yml domains.exchanges.description",
+     "confirmed": "yes (no Korean symbol is stored; KS11 as its symbol cannot be checked)"
+    },
+    {
+     "quote": "index_currency: Trading currency of the exchange an index tracks (index_info.Currency), joined via the index_exchange mapping.",
+     "where": "semantic.yml metrics.index_currency",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "daily_return_pct: Close-to-close percent change versus the index's previous trading day, ordered by the parsed trade_date",
+     "where": "semantic.yml metrics.daily_return_pct",
+     "confirmed": "cannot be checked (a convention; the SQL runs)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockindex-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "index_info.Exchange holds full exchange names (e.g. \"Tokyo Stock Exchange\", \"New York Stock Exchange\"); index_trade.Index holds abbreviated index symbols (e.g. \"N225\", \"HSI\", \"000001.SS\"). There is no shared key",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_region.from_sql (and average_intraday_volatility_by_region.from_sql, the same join)",
+      "summary": "index_trade JOIN a VALUES map (symbol, exchange, region) ON symbol, LEFT JOIN index_info ON exchange. Run on the built file, all 27 records join the reference counterpart with the reference row count; KS11 is in the map but has no rows, so Korea Exchange joins nothing, as in the reference."
+     },
+     "agree": 27,
+     "total": 27,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Per-record comparison in ~/data/dce-held-results/exp7/recovery/stockindex/scores-draw-b-stockindex-1-index_region.csv."
+    },
+    {
+     "id": "stockindex-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "There is no shared key: to join, match each exchange name with its corresponding major index symbol. The documentation's examples: \"Tokyo Stock Exchange\" = N225 (Nikkei 225), \"Hong Kong Stock Exchange\" = HSI",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_region.from_sql",
+      "summary": "Mapped join built (VALUES map symbol -> exchange)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "index_region's join run on the built file: all 14 exchanges join the reference index with the reference row count (Korea Exchange none). Agrees.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-3",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The region (Asia, Europe, North America, ...) is not stored anywhere; it is inferred from geography (e.g. N225 is Asia because it tracks the Tokyo Stock Exchange in Japan).",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.index_region",
+      "summary": "m.region from the VALUES map: North America NYA/IXIC/GSPTSE; Asia HSI, 000001.SS, 399001.SZ, N225, NSEI, KS11, TWII; Europe N100, GDAXI, SSMI; Africa J203.JO."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Region per symbol agrees with the reference on 13/13 symbols (J203.JO as Africa, outside the three, as the reference allows); average_intraday_volatility_by_region agrees with the reference formula grouped by those regions on 4/4.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-4",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "UP DAYS are trading days where the closing price is higher than the opening price (Close > Open). DOWN DAYS are trading days where the closing price is lower than the opening price (Close < Open). Days with Close = Open ... are neither up nor down.",
+      "where": "contract.yml domains.daily_prices.description; semantic.yml metrics.is_up_day, is_down_day"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.up_days, down_days, is_up_day, is_down_day",
+      "summary": "COUNT(*) FILTER (WHERE Close > Open) / (Close < Open); per-row flags."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "up_days and down_days grouped by Index agree with the reference on 13/13 indices (42820 up, 40313 down overall); is_up_day and is_down_day agree on all 104224 rows.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-5",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "AVERAGE INTRADAY VOLATILITY is the average relative fluctuation of an index within each trading day: (High - Low) / Open computed per day, then averaged across the given time period.",
+      "where": "contract.yml domains.daily_prices.description; semantic.yml metrics.average_intraday_volatility"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.daily_intraday_volatility, average_intraday_volatility",
+      "summary": "(High - Low) / Open per row; AVG of it."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "average_intraday_volatility grouped by Index agrees with the reference on 13/13 indices within 1e-6; daily_intraday_volatility agrees on all 104224 rows.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Date is VARCHAR in three mixed formats ... parse it with the metric trade_date (all 104,224 rows parse; range 1965-01-05 to 2021-06-03).",
+     "where": "contract.yml domains.daily_prices.description; semantic.yml metrics.trade_date",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "One row of index_trade = one index on one trading day (verified: no duplicate (Index, date) pairs after parsing).",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Days with Close = Open (about 21k rows, many with High = Low = Open = Close)",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes (21,091)"
+    },
+    {
+     "quote": "Open is never NULL or 0 in the data; no price column has NULLs; High >= Low always.",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Prices are in each index's local currency except CloseUSD, which is the closing price converted to USD",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes (each index's Close/CloseUSD rate matches its exchange's Currency)"
+    },
+    {
+     "quote": "\"Adj Close\" ... Differs from Close on ~13k rows.",
+     "where": "semantic.yml tables index_trade.Adj Close",
+     "confirmed": "yes (13,046)"
+    },
+    {
+     "quote": "Korea Exchange -> KS11 (KOSPI), Asia - NOTE: KS11 has NO rows in index_trade",
+     "where": "contract.yml domains.exchanges.description",
+     "confirmed": "yes (no Korean symbol stored; the KS11 name cannot be checked)"
+    },
+    {
+     "quote": "Index names: NYA (NYSE Composite), IXIC (NASDAQ Composite), GSPTSE (S&P/TSX Composite), N100 (Euronext 100), GDAXI (DAX), ...",
+     "where": "contract.yml domains.exchanges.description",
+     "confirmed": "cannot be checked"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockindex-1",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "Exchange (str), the full name of the stock exchange ... The table has no index-symbol column. The documentation states no key linking an exchange to an abbreviated index symbol in indextrade_database.index_trade",
+      "where": "contract.yml domains.exchanges.description; domains.index_prices.description 'Index (str), the abbreviated index symbol'"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric relates index_info to index_trade (exchange_count reads index_info alone)."
+     },
+     "agree": null,
+     "total": 27,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "The text's reading comes from the documentation's field descriptions, which already say 'full name' and 'abbreviated index symbol'; the no-data draw could not check the values. Scored on the class as given.",
+     "notes": "Text gives names vs symbols and no linking key; it gives no counterpart for any record. No join built, so no records are compared (agree null)."
+    },
+    {
+     "id": "stockindex-2",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "The documentation states no key linking an exchange to an abbreviated index symbol ..., so any mapping from Exchange to Index is outside the documentation. If you use one, say that it is your own assumption.",
+      "where": "contract.yml domains.exchanges.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric performs the join."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "No metric performs the mapped join; nothing to run.",
+     "right_part": "States that the two tables do not share a key and that linking them takes a mapping from Exchange to Index; does not say each exchange maps to its major index symbol nor give any pair, and builds no join.",
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "stockindex-3",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics",
+      "summary": "No metric assigns a region."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Nothing on regions beyond the documentation's 'across various countries and regions'; no region mapping or metric."
+    },
+    {
+     "id": "stockindex-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.daily_open_to_close_change",
+      "summary": "Close - Open per day; no up/down day count or flag."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Text states no up/down day definition; the metric's description says it is 'not a stated definition'."
+    },
+    {
+     "id": "stockindex-5",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml metrics.intraday_range",
+      "summary": "High - Low per day, local currency; no division by Open, no average."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The metric intraday_range computes High - Low, the numerator, but no text names intraday volatility or divides by Open; scored missed because the text states no equivalent (see report)."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Date (str), the trading date, stored as text (cast it with TRY_CAST(\"Date\" AS DATE) before doing date arithmetic or filtering by year)",
+     "where": "contract.yml domains.index_prices.description; rules.cast_date_text; semantic.yml metrics.trading_date",
+     "confirmed": "no (TRY_CAST parses 34,705 of 104,224 rows; the other two formats become NULL)"
+    },
+    {
+     "quote": "Open, High, Low, Close and Adj Close are in the index's own trading currency. Only CloseUSD is in USD",
+     "where": "contract.yml domains.index_prices.description; rules.compare_across_indices_in_usd",
+     "confirmed": "yes (each index's Close/CloseUSD rate matches its exchange's Currency)"
+    },
+    {
+     "quote": "Described as stored in SQLite, but queried here as a schema of the one DuckDB database",
+     "where": "contract.yml allowed_tables indexinfo_database.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "Date is parsed with TRY_CAST(\"Date\" AS DATE), which reads only the 'YYYY-MM-DD HH:MM:SS' format; the 'DD Mon YYYY, HH:MM' and 'Month DD, YYYY at HH:MM AM' rows (69,519 of 104,224) become NULL, so any date filter, ordering or year extraction drops two thirds of the rows. Date parsing is in no hint item.",
+     "where": "semantic.yml metrics.trading_date.sql_expression; contract.yml rules.cast_date_text and domains.index_prices.description; semantic.yml tables index_trade.Date",
+     "smallest_fix": "sql_expression: CAST(COALESCE(try_strptime(\"Date\", '%Y-%m-%d %H:%M:%S'), try_strptime(\"Date\", '%d %b %Y, %H:%M'), try_strptime(\"Date\", '%B %d, %Y at %I:%M %p')) AS DATE), and point the rule and descriptions at trading_date. (No-data is not corrected; named only.)"
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,380 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: GITHUB_REPOS, author: claudeopus5.5
+metrics:
+- name: language_names_list
+  description: 'Ordered list of language names parsed from languages.language_description (descending
+    bytes). Empty list for "No language information available.". Normalises all templates (see languages
+    domain) then extracts "Name (N bytes)" items; verified the extracted count equals the number of byte
+    counts in every row.
+
+    '
+  sql_expression: 'regexp_extract_all(regexp_replace(regexp_replace(regexp_replace(regexp_replace(language_description,
+    ''^(The codebase includes: |This repository is mainly written in |While most of the project is built
+    in |The majority of the code is in |This project is built entirely in |Nearly all of the code is in
+    )'', ''''), '', (followed by|it also incorporates|with additional code in) '', '', '', ''g''), ''^(.+),
+    totaling ([0-9,]+) bytes\.$'', ''\1 (\2 bytes).''), '' bytes of code\)'', '' bytes)''), ''(?:^|, )([^,]+?)
+    \(([0-9,]+) bytes\)'', 1)'
+  source_model: metadata_database.languages
+  domains:
+  - languages
+- name: language_bytes_list
+  description: 'Byte counts (BIGINT, commas removed) aligned position by position with language_names_list.
+
+    '
+  sql_expression: 'list_transform(regexp_extract_all(regexp_replace(regexp_replace(regexp_replace(regexp_replace(language_description,
+    ''^(The codebase includes: |This repository is mainly written in |While most of the project is built
+    in |The majority of the code is in |This project is built entirely in |Nearly all of the code is in
+    )'', ''''), '', (followed by|it also incorporates|with additional code in) '', '', '', ''g''), ''^(.+),
+    totaling ([0-9,]+) bytes\.$'', ''\1 (\2 bytes).''), '' bytes of code\)'', '' bytes)''), ''(?:^|, )([^,]+?)
+    \(([0-9,]+) bytes\)'', 2), b -> CAST(replace(b, '','', '''') AS BIGINT))'
+  source_model: metadata_database.languages
+  domains:
+  - languages
+- name: primary_language
+  description: 'The primary (main) language of a repository: the language with the most bytes. Languages
+    are listed in descending byte order (verified: the first always holds the maximum), so this is the
+    first parsed language; on the 196 ties the first listed wins. NULL when no language information is
+    available.
+
+    '
+  sql_expression: 'list_extract(regexp_extract_all(regexp_replace(regexp_replace(regexp_replace(regexp_replace(language_description,
+    ''^(The codebase includes: |This repository is mainly written in |While most of the project is built
+    in |The majority of the code is in |This project is built entirely in |Nearly all of the code is in
+    )'', ''''), '', (followed by|it also incorporates|with additional code in) '', '', '', ''g''), ''^(.+),
+    totaling ([0-9,]+) bytes\.$'', ''\1 (\2 bytes).''), '' bytes of code\)'', '' bytes)''), ''(?:^|, )([^,]+?)
+    \(([0-9,]+) bytes\)'', 1), 1)'
+  source_model: metadata_database.languages
+  domains:
+  - languages
+- name: total_language_bytes
+  description: Sum of bytes over all languages of a repository (NULL when no language info).
+  sql_expression: 'list_sum(list_transform(regexp_extract_all(regexp_replace(regexp_replace(regexp_replace(regexp_replace(language_description,
+    ''^(The codebase includes: |This repository is mainly written in |While most of the project is built
+    in |The majority of the code is in |This project is built entirely in |Nearly all of the code is in
+    )'', ''''), '', (followed by|it also incorporates|with additional code in) '', '', '', ''g''), ''^(.+),
+    totaling ([0-9,]+) bytes\.$'', ''\1 (\2 bytes).''), '' bytes of code\)'', '' bytes)''), ''(?:^|, )([^,]+?)
+    \(([0-9,]+) bytes\)'', 2), b -> CAST(replace(b, '','', '''') AS BIGINT)))'
+  source_model: metadata_database.languages
+  domains:
+  - languages
+- name: language_count
+  description: Number of languages listed for a repository (0 when no language information).
+  sql_expression: len(regexp_extract_all(language_description, '\(([0-9,]+) bytes'))
+  source_model: metadata_database.languages
+  domains:
+  - languages
+- name: language_bytes_by_repo
+  description: 'Bytes of one language in one repository; one row per (repo_name, language) via a lateral
+    unnest of the parsed description. Exposes l.repo_name, u.language, u.bytes. Filter u.language = ''Python''
+    (exact name, case-sensitive) to test whether a repo uses a language; compare against the repo''s max
+    bytes (or primary_language) for "main language". Repos without language info produce no rows.
+
+    '
+  sql_expression: u.bytes
+  source_model: metadata_database.languages
+  from_sql: 'metadata_database.languages l CROSS JOIN LATERAL (SELECT unnest(regexp_extract_all(regexp_replace(regexp_replace(regexp_replace(regexp_replace(l.language_description,
+    ''^(The codebase includes: |This repository is mainly written in |While most of the project is built
+    in |The majority of the code is in |This project is built entirely in |Nearly all of the code is in
+    )'', ''''), '', (followed by|it also incorporates|with additional code in) '', '', '', ''g''), ''^(.+),
+    totaling ([0-9,]+) bytes\.$'', ''\1 (\2 bytes).''), '' bytes of code\)'', '' bytes)''), ''(?:^|, )([^,]+?)
+    \(([0-9,]+) bytes\)'', 1)) AS language, unnest(list_transform(regexp_extract_all(regexp_replace(regexp_replace(regexp_replace(regexp_replace(l.language_description,
+    ''^(The codebase includes: |This repository is mainly written in |While most of the project is built
+    in |The majority of the code is in |This project is built entirely in |Nearly all of the code is in
+    )'', ''''), '', (followed by|it also incorporates|with additional code in) '', '', '', ''g''), ''^(.+),
+    totaling ([0-9,]+) bytes\.$'', ''\1 (\2 bytes).''), '' bytes of code\)'', '' bytes)''), ''(?:^|, )([^,]+?)
+    \(([0-9,]+) bytes\)'', 2), b -> CAST(replace(b, '','', '''') AS BIGINT))) AS bytes) u'
+  grain: one row per (repository, language listed in its language_description)
+  domains:
+  - languages
+- name: total_watch_count
+  description: Sum of watch_count (number of users watching the repository on GitHub).
+  sql_expression: SUM(watch_count)
+  source_model: metadata_database.repos
+  domains:
+  - repositories
+- name: watch_count_by_license
+  description: 'Repository watch counts joined to license; group by li.license. Inner join: only repos
+    present in both tables.
+
+    '
+  sql_expression: SUM(r.watch_count)
+  source_model: metadata_database.repos
+  from_sql: metadata_database.repos r JOIN metadata_database.licenses li ON li.repo_name = r.repo_name
+  grain: one row per repository having both a watch_count and a license
+  domains:
+  - repositories
+- name: content_size_bytes
+  description: 'Original file size in bytes parsed from contents.repo_data_description ("N bytes" or "N-byte"
+    in all 12 templates; parsed for every row, range 3 - 65,937,671).
+
+    '
+  sql_expression: CAST(regexp_extract(repo_data_description, '([0-9]+)(?:-byte| bytes)', 1) AS BIGINT)
+  source_model: artifacts_database.contents
+  domains:
+  - contents
+- name: content_is_binary
+  description: 'TRUE when the file is binary per repo_data_description: the text says "non-binary" (any
+    case) for text files and "binary" otherwise. 3,786 binary, 20,500 non-binary. Binary files always
+    have NULL content.
+
+    '
+  sql_expression: lower(repo_data_description) NOT LIKE '%non-binary%'
+  source_model: artifacts_database.contents
+  domains:
+  - contents
+- name: content_copies
+  description: Number of copies of the file in the dataset ("appears/seen/duplicated/copied/repeated N
+    times"); 1 - 16,898.
+  sql_expression: CAST(regexp_extract(repo_data_description, '([0-9]+) times', 1) AS BIGINT)
+  source_model: artifacts_database.contents
+  domains:
+  - contents
+- name: content_sample_mode
+  description: 'Sample file mode from repo_data_description ("mode N", "mode code N", "mode: N"); values
+    33188 (regular), 33261 (executable), 40960 (symlink).
+
+    '
+  sql_expression: 'CAST(regexp_extract(repo_data_description, ''mode(?: code|:)? ([0-9]+)'', 1) AS BIGINT)'
+  source_model: artifacts_database.contents
+  domains:
+  - contents
+- name: content_with_file_metadata
+  description: 'Contents joined to files by blob id (files.id = contents.id). Only 362 ids overlap; a
+    blob may appear in several files rows. Count of matched rows.
+
+    '
+  sql_expression: COUNT(*)
+  source_model: artifacts_database.contents
+  from_sql: artifacts_database.contents c JOIN artifacts_database.files f ON f.id = c.id
+  grain: one row per (content blob, files row referencing that blob)
+  domains:
+  - contents
+  - files
+- name: file_kind
+  description: 'Meaning of files.mode (git mode stored as decimal): 33188 regular file (0100644), 33261
+    executable (0100755), 40960 symlink (0120000), 57344 gitlink/submodule (0160000).
+
+    '
+  sql_expression: CASE mode WHEN 33188 THEN 'regular' WHEN 33261 THEN 'executable' WHEN 40960 THEN 'symlink'
+    WHEN 57344 THEN 'submodule' ELSE 'other' END
+  source_model: artifacts_database.files
+  domains:
+  - files
+- name: file_extension
+  description: Lower-cased extension of files.path after the last dot in the final path segment; empty
+    string when none.
+  sql_expression: lower(regexp_extract(path, '\.([^./]+)$', 1))
+  source_model: artifacts_database.files
+  domains:
+  - files
+- name: commit_count
+  description: Number of commits (commit SHA is unique per row).
+  sql_expression: COUNT(DISTINCT commit)
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_author_name
+  description: Author name; JSON when valid, regex fallback for the 2 malformed author values.
+  sql_expression: 'CASE WHEN json_valid(author) THEN json_extract_string(author, ''$.name'') ELSE regexp_extract(author,
+    ''"name": "(.*)",'', 1) END'
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_author_email
+  description: Author email (hashed local part @ real domain); regex works on malformed rows too.
+  sql_expression: 'regexp_extract(author, ''"email": "([^"]*)"'', 1)'
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_committer_name
+  description: Committer name (committer JSON is always valid).
+  sql_expression: json_extract_string(committer, '$.name')
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_author_time
+  description: 'Author timestamp as UTC TIMESTAMP from author.time_sec (seconds since epoch; author.date
+    is the same in microseconds). tz_offset (minutes) is not applied.
+
+    '
+  sql_expression: 'make_timestamp(CAST(regexp_extract(author, ''"time_sec": (-?[0-9]+)'', 1) AS BIGINT)
+    * 1000000)'
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_committer_time
+  description: Committer timestamp as UTC TIMESTAMP from committer.time_sec.
+  sql_expression: 'make_timestamp(CAST(regexp_extract(committer, ''"time_sec": (-?[0-9]+)'', 1) AS BIGINT)
+    * 1000000)'
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_parent_count
+  description: Number of parent SHAs in the parent JSON array (always >= 1 here).
+  sql_expression: json_array_length(parent)
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: is_merge_commit
+  description: TRUE when the commit has more than one parent (1,370 commits).
+  sql_expression: json_array_length(parent) > 1
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_files_changed
+  description: 'Number of file-change entries in difference (JSON array of {new_path, old_path, new_mode,
+    old_mode, new_sha1, old_sha1}). Paths: json_extract_string(difference, ''$[*].new_path'').
+
+    '
+  sql_expression: json_array_length(difference)
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+- name: commit_trailer_count
+  description: Number of trailer entries; NULL for the 383 rows whose trailer is malformed JSON.
+  sql_expression: CASE WHEN json_valid(trailer) THEN json_array_length(trailer) END
+  source_model: artifacts_database.commits
+  domains:
+  - commits
+tables:
+- schema: metadata_database
+  table: languages
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in owner/repo format; unique.
+  - name: language_description
+    type: VARCHAR
+    description: Programming language(s) used in the repository in natural language, with byte counts;
+      may list several. Parse with language_names_list / language_bytes_list / primary_language. 'No language
+      information available.' means none.
+- schema: metadata_database
+  table: licenses
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in owner/repo format; unique.
+  - name: license
+    type: VARCHAR
+    description: License identifier associated with the repository, lowercase (e.g. apache-2.0, mit).
+- schema: metadata_database
+  table: repos
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in owner/repo format; unique.
+  - name: watch_count
+    type: BIGINT
+    description: Number of users watching the repository on GitHub (never NULL, 2-90,457).
+- schema: artifacts_database
+  table: commits
+  columns:
+  - name: commit
+    type: VARCHAR
+    description: Unique identifier (SHA) of the commit.
+  - name: tree
+    type: VARCHAR
+    description: SHA of the commit's tree object.
+  - name: parent
+    type: VARCHAR
+    description: JSON array of one or more parent commit SHAs (more than one = merge commit).
+  - name: author
+    type: VARCHAR
+    description: 'JSON object: name, email, date (microseconds), time_sec (epoch seconds), tz_offset (minutes).
+      2 rows malformed JSON.'
+  - name: committer
+    type: VARCHAR
+    description: JSON object with committer name, email, date, time_sec, tz_offset.
+  - name: subject
+    type: VARCHAR
+    description: Short subject line of the commit message.
+  - name: message
+    type: VARCHAR
+    description: Full commit message.
+  - name: trailer
+    type: VARCHAR
+    description: JSON array of {email, key, value} trailers (e.g. Signed-off-by); 383 rows malformed JSON.
+  - name: difference
+    type: VARCHAR
+    description: JSON array of file changes introduced by the commit (new/old path, mode, sha1).
+  - name: difference_truncated
+    type: DOUBLE
+    description: Indicator if difference is truncated; NULL in every row of this data.
+  - name: repo_name
+    type: VARCHAR
+    description: Repository name in owner/repo format (6 repos).
+  - name: encoding
+    type: VARCHAR
+    description: Encoding of commit data if applicable; NULL except 7 rows (ISO-8859-1/2).
+- schema: artifacts_database
+  table: contents
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Identifier of the file blob; unique; joins files.id.
+  - name: content
+    type: VARCHAR
+    description: File content (text). NULL for binary files and for text files over ~1 MB; may hold placeholders
+      or truncated values.
+  - name: sample_repo_name
+    type: VARCHAR
+    description: Repository where the file resides, owner/repo format.
+  - name: sample_ref
+    type: VARCHAR
+    description: Reference name (branch, e.g. refs/heads/master, or commit SHA).
+  - name: sample_path
+    type: VARCHAR
+    description: Path of the file within the repository.
+  - name: sample_symlink_target
+    type: VARCHAR
+    description: Symlink target path if the file is a symlink (3 rows).
+  - name: repo_data_description
+    type: VARCHAR
+    description: Natural-language summary of size (bytes), binary/non-binary, copies and mode; parse with
+      content_size_bytes, content_is_binary, content_copies, content_sample_mode.
+- schema: artifacts_database
+  table: files
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in owner/repo format.
+  - name: ref
+    type: VARCHAR
+    description: Reference (branch or commit SHA) at which the file metadata is recorded.
+  - name: path
+    type: VARCHAR
+    description: Path of the file within the repository.
+  - name: mode
+    type: BIGINT
+    description: 'Git file mode in decimal: 33188 regular, 33261 executable, 40960 symlink, 57344 submodule.'
+  - name: id
+    type: VARCHAR
+    description: Identifier of the file blob; joins contents.id.
+  - name: symlink_target
+    type: VARCHAR
+    description: Target path if the file is a symlink (set exactly when mode = 40960).
+relationships:
+- from: metadata_database.languages.repo_name
+  to: metadata_database.repos.repo_name
+  type: one_to_one
+  description: Repository metadata join on repo_name (not all language rows have a repos row).
+- from: metadata_database.licenses.repo_name
+  to: metadata_database.repos.repo_name
+  type: one_to_one
+  description: Repository metadata join on repo_name.
+- from: artifacts_database.files.repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Files to repo metadata.
+- from: artifacts_database.commits.repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Commits to repo metadata.
+- from: artifacts_database.contents.sample_repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Content blob's sample repository to repo metadata.
+- from: artifacts_database.files.id
+  to: artifacts_database.contents.id
+  type: many_to_one
+  description: Blob id join; only 362 ids overlap.

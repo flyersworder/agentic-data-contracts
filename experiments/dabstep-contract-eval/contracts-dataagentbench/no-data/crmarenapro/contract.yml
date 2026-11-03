@@ -1,0 +1,181 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: crmarenapro, author: claudeopus5.5
+version: '1.0'
+name: crmarenapro
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: core_crm
+    description: 'Core CRM data including users, accounts, and contacts from Salesforce CRMArena. Tables:
+      User (sales team information), Account (company/customer data), Contact (individual contacts). Described
+      as stored in SQLite; here it is a schema of the one DuckDB database.'
+    tables:
+    - Account
+    - Contact
+    - User
+  - schema: sales_pipeline
+    description: 'Sales pipeline data including opportunities, quotes, contracts, and leads. Tables: Contract
+      (signed contracts), Lead (sales leads), Opportunity (sales deals), OpportunityLineItem (deal line
+      items), Quote (price quotes), QuoteLineItem (quote details).'
+    tables:
+    - Contract
+    - Lead
+    - Opportunity
+    - OpportunityLineItem
+    - Quote
+    - QuoteLineItem
+  - schema: support
+    description: 'Customer support data including cases, knowledge articles, and communications. Tables:
+      Case (support cases), knowledge__kav (knowledge articles), issue__c (custom issues), casehistory__c
+      (case history), emailmessage (email communications), livechattranscript (chat logs). Described as
+      stored in PostgreSQL; here it is a schema of the one DuckDB database.'
+    tables:
+    - Case
+    - casehistory__c
+    - emailmessage
+    - issue__c
+    - knowledge__kav
+    - livechattranscript
+  - schema: products_orders
+    description: 'Product catalog and order data. Tables: ProductCategory (product categories), Product2
+      (product catalog), ProductCategoryProduct, Pricebook2 and PricebookEntry (pricing and mapping tables),
+      Order (customer orders), OrderItem (order details).'
+    tables:
+    - Order
+    - OrderItem
+    - Pricebook2
+    - PricebookEntry
+    - Product2
+    - ProductCategory
+    - ProductCategoryProduct
+  - schema: activities
+    description: 'Activity data including tasks, events, and voice call transcripts. Tables: Event (calendar
+      events), Task (activities and tasks), VoiceCallTranscript__c (call records).'
+    tables:
+    - Event
+    - Task
+    - VoiceCallTranscript__c
+  - schema: territory
+    description: 'Sales territory management data. Tables: Territory2 (sales territories), UserTerritory2Association
+      (territory assignments).'
+    tables:
+    - Territory2
+    - UserTerritory2Association
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: core_crm
+    summary: Users (sales team), accounts (companies/customers) and contacts
+    description: 'The core_crm database holds core CRM data from Salesforce CRMArena. User holds sales
+      team information; Account holds company/customer data; Contact holds individual contacts, linked
+      to their account through Contact.AccountId. Owner fields elsewhere (OwnerId, ownerid, UserId) refer
+      to core_crm.User.Id.
+
+      '
+    tables:
+    - core_crm.User
+    - core_crm.Account
+    - core_crm.Contact
+  - name: sales_pipeline
+    summary: Opportunities, quotes, contracts and leads
+    description: 'The sales_pipeline database holds sales pipeline data. Contract holds signed contracts;
+      Lead holds sales leads (IsConverted marks a converted lead, which has ConvertedContactId / ConvertedAccountId
+      / ConvertedDate); Opportunity holds sales deals (StageName, Amount, Probability, CloseDate); OpportunityLineItem
+      holds deal line items; Quote holds price quotes for an opportunity; QuoteLineItem holds quote details.
+      The documentation lists no value vocabulary for Status or StageName: inspect the distinct values
+      before filtering on them. Dates and numbers other than Opportunity.Amount are stored as VARCHAR;
+      cast them (TRY_CAST(... AS TIMESTAMP / DATE / DOUBLE)) before comparing or doing arithmetic.
+
+      '
+    tables:
+    - sales_pipeline.Contract
+    - sales_pipeline.Lead
+    - sales_pipeline.Opportunity
+    - sales_pipeline.OpportunityLineItem
+    - sales_pipeline.Quote
+    - sales_pipeline.QuoteLineItem
+  - name: support
+    summary: Support cases, case history, knowledge articles, issues, emails and chats
+    description: 'The support database holds customer support data. Case holds support cases (priority,
+      status, createddate, closeddate, linked to a contact, account, owner, order item via orderitemid__c
+      and issue via issueid__c); casehistory__c holds case history (field__c changed from oldvalue__c
+      to newvalue__c at createddate, for case caseid__c); knowledge__kav holds knowledge articles; issue__c
+      holds custom issues; emailmessage holds email communications; livechattranscript holds chat logs.
+      Column names in this schema are lower case. The table name Case is a reserved word in SQL: always
+      write it quoted, support."Case". Dates are stored as VARCHAR; cast before comparing or computing
+      durations.
+
+      '
+    tables:
+    - support.Case
+    - support.casehistory__c
+    - support.emailmessage
+    - support.issue__c
+    - support.knowledge__kav
+    - support.livechattranscript
+  - name: products_orders
+    summary: Product catalog, categories, pricebooks, orders and order items
+    description: 'The products_orders database holds product catalog and order data. ProductCategory holds
+      product categories; Product2 is the product catalog; ProductCategoryProduct, Pricebook2 and PricebookEntry
+      are the pricing and mapping tables (ProductCategoryProduct maps products to categories, PricebookEntry
+      gives a product''s UnitPrice within a pricebook); Order holds customer orders; OrderItem holds order
+      details. The table name Order is a reserved word in SQL: always write it quoted, products_orders."Order".
+      Quantity and UnitPrice are VARCHAR; cast to DOUBLE before arithmetic.
+
+      '
+    tables:
+    - products_orders.Order
+    - products_orders.OrderItem
+    - products_orders.Pricebook2
+    - products_orders.PricebookEntry
+    - products_orders.Product2
+    - products_orders.ProductCategory
+    - products_orders.ProductCategoryProduct
+  - name: activities
+    summary: Tasks, calendar events and voice call transcripts
+    description: 'The activities database holds activity data. Event holds calendar events; Task holds
+      activities and tasks; VoiceCallTranscript__c holds call records tied to an opportunity (OpportunityId__c)
+      or a lead (LeadId__c). Event.WhatId and Task.WhatId point at the related record (for example an
+      opportunity or account). DurationInMinutes and the date columns are VARCHAR; cast before arithmetic.
+
+      '
+    tables:
+    - activities.Event
+    - activities.Task
+    - activities.VoiceCallTranscript__c
+  - name: territory
+    summary: Sales territories and user-to-territory assignments
+    description: 'The territory database holds sales territory management data. Territory2 holds sales
+      territories; UserTerritory2Association holds territory assignments, linking a user (UserId -> core_crm.User.Id)
+      to a territory (Territory2Id -> Territory2.Id).
+
+      '
+    tables:
+    - territory.Territory2
+    - territory.UserTerritory2Association
+  rules:
+  - name: quote_reserved_table_names
+    description: support."Case" and products_orders."Order" are reserved words and must be written double-quoted.
+      Every table must be qualified with its schema (<db_name>.<table_name>), including in cross-database
+      joins.
+    enforcement: warn
+  - name: cast_varchar_values
+    description: Dates, quantities, prices, probabilities and durations are stored as VARCHAR. Cast them
+      with TRY_CAST before comparing, sorting or doing arithmetic; string comparison of numbers or dates
+      gives wrong answers.
+    enforcement: warn
+  - name: read_only
+    description: The databases are read-only; only SELECT queries are allowed.
+    enforcement: block

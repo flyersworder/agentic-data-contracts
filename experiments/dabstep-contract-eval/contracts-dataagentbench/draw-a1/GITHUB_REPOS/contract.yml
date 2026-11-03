@@ -1,0 +1,156 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: GITHUB_REPOS, author: claudeopus5.5
+version: '1.0'
+name: github-repos
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: metadata_database
+    description: 'Metadata about GitHub repositories: declared programming languages, licenses and repository-level
+      statistics (watch counts). Described as stored in SQLite, but here it is a schema of the same DuckDB
+      database; all SQL, including cross-database joins, is DuckDB SQL with tables written metadata_database.<table>.'
+    tables:
+    - languages
+    - licenses
+    - repos
+  - schema: artifacts_database
+    description: 'GitHub repository artifacts: file contents, commit history and file-level metadata.
+      Tables written artifacts_database.<table>.'
+    preferred: true
+    tables:
+    - commits
+    - contents
+    - files
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: repository_metadata
+    summary: Repositories, their watch counts, licenses and languages (metadata_database)
+    description: 'Every table identifies a repository by repo_name in `owner/repo` format, and that is
+      the join key across all six tables (contents uses sample_repo_name). repos: one row per repository
+      (400,000 distinct repo_name, no duplicates), watch_count = number of users watching the repository
+      on GitHub (BIGINT, 2..90,457, never NULL). licenses: one row per repository (3,325,634 rows, one
+      per repo_name), license = license identifier such as ''apache-2.0'' or ''mit''; stored lowercase,
+      observed values: mit, apache-2.0, gpl-2.0, gpl-3.0, bsd-3-clause, bsd-2-clause, unlicense, agpl-3.0,
+      lgpl-3.0, cc0-1.0, epl-1.0, lgpl-2.1, mpl-2.0, isc, artistic-2.0 (never NULL). languages: one row
+      per repository (the same 3,325,634 repo_names as licenses), language_description = the programming
+      language(s) used, in natural language.
+
+      COVERAGE: only 165,429 of the 400,000 repos rows have a languages / licenses row; repos with no
+      license row have no license recorded (e.g. torvalds/linux). Use LEFT JOINs when a repository may
+      lack metadata, and inner joins only when the question restricts to repos that have it.
+
+      LANGUAGE DESCRIPTION FORMAT (checked over all rows). It is free text in several templates: ''No
+      language information available.'' (368,341 rows, = no languages); multi/single-language lists ''Lang
+      (N bytes), Lang (N bytes).'' prefixed by ''This repository is mainly written in '' / ''While most
+      of the project is built in '' / ''The majority of the code is in '' / ''The codebase includes: ''
+      with connectives '', with additional code in'', '', it also incorporates'', '', followed by''; and
+      single-language forms ''This project is built entirely in Lang (N bytes of code).'' and ''Nearly
+      all of the code is in Lang, totaling N bytes.''. Byte counts carry thousands commas. Languages are
+      listed in descending byte order, so the first one is the primary language. Language names may contain
+      spaces, ''#'', ''+'', ''.'', ''-'' and even parentheses (''Graphviz (DOT)'', ''Visual Basic .NET'').
+      Never test a language with LIKE ''%Java%'' (matches JavaScript) or ''%C%''; parse with the metric
+      repo_language_breakdown / repo_language_names and compare whole names exactly (case-sensitive, e.g.
+      ''Python'', ''JavaScript'', ''C++'', ''C#'', ''Shell'').
+
+      '
+    tables:
+    - metadata_database.repos
+    - metadata_database.licenses
+    - metadata_database.languages
+  - name: files_and_contents
+    summary: File-level metadata (files) and sampled file blobs (contents)
+    description: 'files: one row per (repo_name, ref, path) (no duplicates; 524,077 rows, 59,686 repos).
+      ref is the reference name (branch, e.g. ''refs/heads/master''; all observed values start with ''refs/'')
+      at which the file metadata is recorded; path is the file path within the repo; id is the identifier
+      (SHA) of the file blob; symlink_target is the target path if the file is a symlink.
+
+      FILE MODE (files.mode, BIGINT, decimal form of the git octal mode). The documentation says mode
+      distinguishes normal file, executable and symlink. Observed values: 33188 (= octal 100644, normal
+      non-executable file, 494,849 rows), 33261 (= 100755, executable file, 26,930), 40960 (= 120000,
+      symlink, 2,170 — exactly the rows with a non-NULL symlink_target), 57344 (= 160000, 128 rows, git
+      submodule/gitlink; INTERPRETATION, the documentation does not name it).
+
+      contents: one row per blob id (24,286 rows, id unique). content = the file content as text; for
+      large or binary files it may contain placeholders or truncated values, and it is NULL for 3,828
+      rows (3,793 of them binary). sample_repo_name / sample_ref / sample_path / sample_symlink_target
+      are ONE sample location where the blob occurs (a blob may occur in many repos). repo_data_description
+      is a natural language summary of the original size, binary flag, copies and mode fields, in 12 templates
+      such as ''Non-binary content file (1455 bytes) seen 8 times, using sample mode 33188.'' or ''A 2526-byte
+      binary file appearing 8 times, with sample mode code 33188.''. Binary vs non-binary is stated as
+      ''binary'' / ''non-binary'' (so test for ''non-binary'', never LIKE ''%binary%'' alone). Use the
+      content_* metrics to extract size (bytes), copies (number of times the blob is seen in the dataset)
+      and sample mode; they parse every row.
+
+      JOINS: contents.id = files.id joins a blob to its file paths, but the two tables were sampled independently:
+      only 362 contents ids appear in files. contents.sample_repo_name and files.repo_name both join metadata_database.repos.repo_name
+      (all of them are present there).
+
+      '
+    tables:
+    - artifacts_database.files
+    - artifacts_database.contents
+  - name: commits
+    summary: Commit history with JSON author/committer/parent/trailer/difference fields
+    description: 'commits: one row per commit SHA (17,976 rows, commit unique), from only six repositories:
+      torvalds/linux (16,061), apple/swift (1,051), twbs/bootstrap (340), Microsoft/vscode (190), facebook/react
+      (178), tensorflow/tensorflow (156). tree is the SHA of the commit''s tree object. subject is the
+      short subject line, message the full message.
+
+      JSON-LIKE TEXT FIELDS (VARCHAR holding JSON). parent: JSON array of parent SHAs; 1 parent = ordinary
+      commit, 2+ = merge commit (observed up to 9; 1,370 commits have more than one parent). author /
+      committer: object {name, email, date, time_sec, tz_offset}; time_sec is Unix epoch seconds (UTC),
+      date is the same instant in microseconds, tz_offset is the timezone offset in minutes. Emails are
+      hashed in the local part (e.g. ''<sha>@linux-foundation.org''); the domain is real. Two author values
+      are malformed JSON (escaped quotes in names), so JSON functions raise on them: the commit_author_*
+      metrics guard with json_valid and read timestamps by regexp, which works on every row. trailer:
+      JSON array of {key, value, email} (e.g. key ''Signed-off-by''); 383 rows are malformed JSON — wrap
+      with json_valid(trailer) before parsing. difference: JSON array of changed files, each {old_path,
+      new_path, old_mode, new_mode, old_sha1, new_sha1}; old_mode/old_sha1 NULL = file added (26,456 entries),
+      new_mode/new_sha1 NULL = file deleted (14,802; paths are still both present), both present = modified
+      (200,188), 2 entries have neither; always valid JSON, never empty; 241,448 entries in total. difference_truncated
+      is documented as a boolean truncation flag but is stored as DOUBLE and is NULL in every row, so
+      truncation cannot be detected. encoding is NULL except 6 ''ISO-8859-1'' and 1 ''ISO-8859-2''.
+
+      SQL PITFALLS (verified): a lateral FROM commits c, unnest(...) over all commits exhausts memory
+      — unnest in a SELECT subquery instead, as the commit_file_change_type metric does. Do not zip several
+      json_extract_string(difference, ''$[*].field'') lists: they drop missing / null values and misalign.
+      Use json_extract_string(e, ''$.field'') rather than e->>''field'' inside boolean expressions (operator
+      precedence breaks the latter). Timestamps: use make_timestamp(microseconds) (returns TIMESTAMP);
+      to_timestamp returns TIMESTAMPTZ which the client cannot render.
+
+      '
+    tables:
+    - artifacts_database.commits
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; content, message and difference are very large text
+      fields.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: parse_language_description_with_metric
+    description: 'Language membership, primary language and byte counts must be derived with repo_language_breakdown
+      / repo_language_names / repo_primary_language, comparing whole language names, not substring LIKE
+      over language_description.
+
+      '
+    enforcement: warn
+  - name: guard_malformed_json
+    description: 'commits.author (2 rows) and commits.trailer (383 rows) contain malformed JSON; guard
+      JSON extraction with json_valid or use the regexp-based metrics.
+
+      '
+    enforcement: warn

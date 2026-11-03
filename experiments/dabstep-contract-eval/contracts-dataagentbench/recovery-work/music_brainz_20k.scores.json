@@ -1,0 +1,621 @@
+{
+ "dataset": "music_brainz_20k",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "music_brainz_20k-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The same real song can therefore appear as several track_ids — counting rows or track_ids counts records, not distinct songs.",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Computation false (references); the text states the equivalent."
+    },
+    {
+     "id": "music_brainz_20k-2",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "The documentation gives no deduplication key; any \"distinct song\" count is an entity-resolution judgement and must be stated as such. ... Each source formats fields differently: * source 1: title is \"Title (Album)\" ... * source 2: title is \"Artist - Title\" and the artist column is empty",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.track_artist_resolved.sql_expression",
+      "summary": "Recovers the source-2 artist from \"Artist - Title\"; no metric normalizes titles or groups tracks."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "No metric groups tracks, so there is nothing to compare with the held grouping (reference: 12,741 groups, 3,993 duplicate groups, largest 6). For contrast only (not stated by the draw): lower(raw title)|lower(track_artist_resolved) gives 19,231 groups, 122 duplicate groups.",
+     "right_part": "Right: the text makes duplicates an entity-resolution judgement and gives the per-source format differences that keep duplicates from matching exactly; the source-2 artist is built. Missing: which attributes to compare (title, artist, album, year), any title normalization, and any grouping.",
+     "class_note": null,
+     "notes": "Read as partial on the rubric's \"the text states part of the item, or the metric computes part of it\"."
+    },
+    {
+     "id": "music_brainz_20k-3",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "country is the country in which the sale occurred (values: France, Canada, UK, Germany, USA)",
+      "where": "contract.yml semantic.domains[sales].description; also semantic.yml tables[sales_database.sales].columns.country.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored country string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    },
+    {
+     "id": "music_brainz_20k-4",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "store is the store or platform (values: Apple Music, iTunes, Spotify, Google Play, Amazon Music)",
+      "where": "contract.yml semantic.domains[sales].description; also semantic.yml tables[sales_database.sales].columns.store.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored store string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "source 1: title is \"Title (Album)\", year 4-digit ... length 'mm:ss' ... source 3: ... length is DECIMAL MINUTES ... source 5: ... length in MILLISECONDS",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "source 2: title is \"Artist - Title\" and the artist column is empty (3,896 of 3,933 rows)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "source 4: ... year is almost always empty (3,757 of 3,861); length is 'Xm YYsec' ..., 'unknown' for 322 rows",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "source_track_id is the original identifier from the source and its uniqueness is NOT guaranteed (repeats occur within a source)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes (21 repeated source_id/source_track_id pairs)"
+    },
+    {
+     "quote": "every sale track_id exists in tracks and every one of the 19,375 track records has at least one sale",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "units_sold ... (1-499, never NULL); revenue_usd ... (0.99-641.82, never NULL). Revenue is already in USD",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes (ranges and no NULLs; the USD unit cannot be checked)"
+    },
+    {
+     "quote": "Whole table = 16,528,140.35 / Whole table = 14,499,017",
+     "where": "semantic.yml metrics.total_revenue_usd / total_units_sold descriptions",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Median is ~212-222 s in every source, confirming the units.",
+     "where": "semantic.yml metrics.track_length_seconds.description",
+     "confirmed": "yes (212-222 s per source)"
+    },
+    {
+     "quote": "Raw 'English' + variants map to English (~10,730 records) ... return NULL (4,880 records)",
+     "where": "semantic.yml metrics.track_language_normalized.description",
+     "confirmed": "yes (10,730 and 4,880)"
+    },
+    {
+     "quote": "for those rows the artist is the text before the first ' - ' of the title (3,796 such rows)",
+     "where": "semantic.yml metrics.track_artist_resolved.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "INTERPRETATION: 1-2 digit years pivot at 15 — 00-15 -> 2000-2015, 16-99 -> 1916-1999",
+     "where": "semantic.yml metrics.track_year.description",
+     "confirmed": "cannot be checked (a convention; no stored 2-digit value lies in 16-20)"
+    },
+    {
+     "quote": "sales joins to tracks only through sales.track_id = tracks.track_id (not source_track_id)",
+     "where": "contract.yml rules.join_sales_to_tracks_on_track_id; semantic.yml relationships",
+     "confirmed": "yes (no orphans either way)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "music_brainz_20k-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The same real-world song can appear as several track records from different sources, each with its own track_id and its own sales rows.",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Computation false (references); the text states the equivalent."
+    },
+    {
+     "id": "music_brainz_20k-2",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "No shared key links duplicates ... To count distinct songs, group on the normalised title and artist (and length/year if needed).",
+      "where": "contract.yml semantic.domains[tracks].description; also semantic.yml metrics.track_clean_title.description (\"Use it with track_clean_artist to find duplicate records of the same song across sources (compare lower-cased).\")"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.track_clean_title / track_clean_artist (/ track_clean_album).sql_expression",
+      "summary": "Strips the source-2 \"Artist - \" prefix (and takes the artist from it), the source-3 \" - Album\" suffix (at the first \" - \") and the source-4 \"NNN-\" prefix; leaves the source-1 \" (Album)\" suffix on the title. The grouping itself is in prose, on these two metrics, lower-cased."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Grouping on lower(track_clean_title)|lower(track_clean_artist), as the text directs: 14,873 groups, 3,046 duplicate groups, largest 6 (reference: 12,741 groups, 3,993 duplicate groups, largest 6); 12,361/19,375 track_ids sit in the same group as in the reference; 424 records get a NULL key. Source-1 records in duplicate groups: 2.3% (reference 55.7%); sources 2-5: 45-52% (reference 49-60%). Reported as information, per the ruling, not as a 1e-6 test.",
+     "right_part": "Right: the method (normalized title + artist, compared lower-cased across the source layouts) is stated and its keys are built for sources 2, 3 and 4. Wrong: the source-1 \"Title (Album)\" layout is not normalized, so source-1 records almost never merge with their duplicates.",
+     "class_note": null,
+     "notes": "Partial under the coordinator's ruling on item 2: a metric that normalizes but misses a source layout is partial."
+    },
+    {
+     "id": "music_brainz_20k-3",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "country takes exactly these values: 'USA', 'UK', 'Canada', 'France', 'Germany'.",
+      "where": "contract.yml semantic.domains[sales].description; also semantic.yml tables[sales_database.sales].columns.country.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored country string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    },
+    {
+     "id": "music_brainz_20k-4",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "store takes exactly these values: 'Spotify', 'Apple Music', 'iTunes', 'Google Play', 'Amazon Music'.",
+      "where": "contract.yml semantic.domains[sales].description; also semantic.yml tables[sales_database.sales].columns.store.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored store string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "source 1: source_track_id 'WoM<n>'; length 'mm:ss' ... source 2: ... 'MBox<n>-HH'; title is 'Artist - Title' ... source 3: '<n>MB-01'; title is 'Title - Album' ... source 4: '<n>-A0xx'; title is prefixed with a track number ... source 5: ... length in milliseconds",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "the numeric parts of source_track_id do not match across sources",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes (42 of the reference's 3,993 duplicate groups share a numeric part)"
+    },
+    {
+     "quote": "The data has no two-digit years from 16 to 20, so 00-20 is read as 20xx and 21-99 as 19xx.",
+     "where": "semantic.yml metrics.track_publication_year.description",
+     "confirmed": "yes for the absence of 16-20; the pivot is a convention"
+    },
+    {
+     "quote": "For source 4 the year column is mostly NULL, so the year falls back to the '(YYYY)' suffix of album.",
+     "where": "semantic.yml metrics.track_publication_year.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "About 72-74% of each source ends up with a year.",
+     "where": "semantic.yml metrics.track_publication_year.description",
+     "confirmed": "yes (71.5-73.7%)"
+    },
+    {
+     "quote": "'English' ~10,650 records, German ~590, French ~480, Spanish ~450, Japanese ~380, [Multiple languages] ~370, and about 5,000 NULL",
+     "where": "semantic.yml metrics.track_language.description",
+     "confirmed": "no for German (the metric gives 448: 'Ger.' maps to 'German, Swiss'); yes for the others (10,657; 480; 450; 380; 370; 5,000)"
+    },
+    {
+     "quote": "Revenue is a per-sale total, not a unit price, so sum it; do not multiply it by units_sold.",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes (revenue_usd / units_sold lies in 0.99-1.29, correlation 0.99)"
+    },
+    {
+     "quote": "Every one of the 19,375 track_ids has at least one sale and every sale matches a track. There are no NULLs in units_sold or revenue_usd. units_sold is >= 1 and revenue_usd ranges from 0.99 to 641.82.",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "After this conversion all five sources have a median of about 211-222 s.",
+     "where": "semantic.yml metrics.track_length_seconds.description",
+     "confirmed": "yes (212-222 s)"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "track_language maps 'Ger.' (128 records) to 'German, Swiss', 'Gre.' to 'Greenlandic' and 'Nor.' to 'Norwegian Nynorsk', and sends short English abbreviations ('E.', 'Eg.', 'Egn.', 'ng.', 'nEg.', 'Enq.'; about 70 records) to NULL: the best Jaro-Winkler match on the first three letters ties between candidates sharing a prefix and the sort picks the regional variant, and short dotted English forms score under 0.85. Language is read by no hint item.",
+     "where": "semantic.yml metrics.track_language.sql_expression",
+     "smallest_fix": "Drop the regional variants ('German, Swiss', 'Norwegian Nynorsk', 'Greenlandic') from the candidate list (or break ties by list order), and map the short dotted English forms explicitly to 'English'. (A2 is not corrected.)"
+    }
+   ]
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "music_brainz_20k-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The same real-world song can appear under several track_ids from different sources",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Computation false (references); the text states the equivalent."
+    },
+    {
+     "id": "music_brainz_20k-2",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "the documentation gives no deduplication rule, so count track records (track_id) unless a question explicitly asks for distinct songs, and say so when it matters. ... title/artist/album: source 2 leaves artist empty and writes title as 'Artist - Title'; source 3 ... 'Title - Album'; source 4 prefixes titles with a track number ...; source 1 suffixes title with ' (Album)'.",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.track_title_clean / track_artist_clean.sql_expression",
+      "summary": "Normalizes title and artist for sources 2, 3 (at the last \" - \") and 4; keeps the source-1 \" (Album)\" suffix (\"source 1 titles may still end in ' (Album)'\"). Not offered for deduplication; no metric groups tracks."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "No grouping is stated. For information only: lower(track_title_clean)|lower(track_artist_clean) gives 15,056 groups, 2,965 duplicate groups, largest 5 (reference: 12,741 groups, 3,993 duplicate groups, largest 6); 12,802/19,375 track_ids in the same group as the reference; source-1 records in duplicate groups 2.3% (reference 55.7%).",
+     "right_part": "Right: the text gives the per-source title/artist layouts (the format differences the item names) and metrics normalize them for sources 2-4. Missing: the text never says duplicates are resolved by comparing attributes, no metric groups tracks, and the source-1 layout is left in the title.",
+     "class_note": null,
+     "notes": "Read as partial on \"the metric computes part of it\" (the attribute normalization), though the draw does not tie it to duplicates; missed would be the stricter reading."
+    },
+    {
+     "id": "music_brainz_20k-3",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "country is one of Canada, France, Germany, UK, USA",
+      "where": "contract.yml semantic.domains[sales].description; also semantic.yml tables[sales_database.sales].columns.country.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored country string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    },
+    {
+     "id": "music_brainz_20k-4",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "store is one of Amazon Music, Apple Music, Google Play, Spotify, iTunes",
+      "where": "contract.yml semantic.domains[sales].description; also semantic.yml tables[sales_database.sales].columns.store.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored store string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "source_track_id ... uniqueness is NOT guaranteed (19,208 distinct values for 19,375 rows)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "year: source 1 and 5 four-digit ('1996'); source 2 two-digit without apostrophe ...; source 3 two-digit with apostrophe ...; source 4 mostly empty",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Noise everywhere: empty strings (~7,700)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "no (7,708 years are NULL; no year or language is an empty string)"
+    },
+    {
+     "quote": "implausible 4-digit values (2090, 9198, 0028, 1007 ...)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Parsed per source, each source has a median of ~212-222 seconds, which confirms the units.",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Checked against the full list of distinct values: every match is an English variant, and no other language ... matches.",
+     "where": "semantic.yml metrics.track_is_english.description",
+     "confirmed": "yes (10,732 records; every matched value is an English variant)"
+    },
+    {
+     "quote": "Checked: 58,049 sales, every track_id exists in tracks (no orphans) and every one of the 19,375 tracks has at least one sale. ... units_sold ranges 1-499; revenue_usd (USD) ranges 0.99-641.82; neither has NULLs.",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Aggregate sales before joining to tracks when attaching track attributes, to avoid fan-out.",
+     "where": "contract.yml rules.join_sales_on_track_id",
+     "confirmed": "cannot be checked (advice; the join is many-to-one and fans out nothing)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "music_brainz_20k-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Different track_ids can represent the same real-world track.",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Computation false (references); the text states the equivalent."
+    },
+    {
+     "id": "music_brainz_20k-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "you must perform entity resolution by comparing track attributes such as title, artist, album, year, etc. Duplicates may not match exactly (different year formats, minor attribute variations, typos), so reason about the meaning of the attributes rather than relying on exact string equality.",
+      "where": "contract.yml semantic.domains[tracks].description; also rules.resolve_entities_before_track_level_answers"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.track_match_key.sql_expression (on track_title_normalized / track_artist_normalized)",
+      "summary": "Normalized title|artist key across all five layouts (source-1 \"(album)\" suffix stripped when it equals the album, source-2 artist prefix, source-3 album suffix, source-4 track number), lower-cased with non-letters/digits removed; text adds fuzzy refinement and keeps empty-part keys apart."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Grouping on track_match_key: 12,676 groups, 3,993 duplicate groups, largest 89 (empty-part keys) (reference: 12,741 groups, 3,993 duplicate groups, largest 6); 17,533/19,375 track_ids in the same group as the reference. With the text's rule that empty title or artist parts are not merged: 12,778 groups, largest 7, 17,643/19,375 same. Share of each source's records in duplicate groups 51-61% (reference 49-60%). Information, not a 1e-6 test.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Recovered under the coordinator's ruling: the key metric groups on normalized title + artist across every source layout. Differences from the reference come from the source-1 strip requiring an exact album match (album typos keep the suffix) and the source-3 split at the first \" - \"."
+    },
+    {
+     "id": "music_brainz_20k-3",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "Sales are recorded in five countries: USA, UK, Canada, Germany, France (stored exactly as 'USA', 'UK', 'Canada', 'Germany', 'France').",
+      "where": "contract.yml semantic.domains[sales].description; also rules.sales_values_vocabulary (warn, no query_check) and semantic.yml tables[sales_database.sales].columns.country.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored country string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    },
+    {
+     "id": "music_brainz_20k-4",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "Sales occur across five platforms/stores: iTunes, Spotify, Apple Music, Amazon Music, Google Play (stored exactly with that spelling and case, e.g. 'iTunes', 'Amazon Music').",
+      "where": "contract.yml semantic.domains[sales].description; also rules.sales_values_vocabulary (warn, no query_check) and semantic.yml tables[sales_database.sales].columns.store.description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text's value list matches the stored store string exactly on 58049/58049 records (checked against the held file); agree is null because no metric reads the column, so there is no SQL reading to compare. Category follows the rubric: \"the text gives the reference reading and the SQL does not, or no metric reads the records\"."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "FOUND: it is not a cross-source key either -- the numeric parts do not line up across sources",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes (42 of the reference's 3,993 duplicate groups share a numeric part)"
+    },
+    {
+     "quote": "A real-world track appears at most once per source (in exact-key groups of 2-5 records, 3,982 of 3,990 have one record per distinct source)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes (3,982 of 3,990 under track_match_key)"
+    },
+    {
+     "quote": "source 1: title often \"Title (Album)\" (3,095 rows end with \"(<album>)\") ... source 2: ... artist is NULL (3,896 rows) ... source 3: ... album is NULL (3,737 rows) ... source 4: ... year column is mostly NULL (3,757 rows)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Example of one entity: track_ids 24 (src 2 \"Al Hirt - Tansy\", year '01', length '145'), 4131 (src 5 \"Tansy\", Al Hirt, \"G reatest Hits\", 2001, '145000') and 6561 (src 1 \"Tansy (Greatest Hits)\", Al Hirt, 2001)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "FOUND: the exact key alone yields ~12,400 groups",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "no (the declared track_match_key yields 12,676 groups; 12,778 with empty parts kept apart)"
+    },
+    {
+     "quote": "Records with empty/NULL title or artist (67 NULL titles, ~98 placeholder artists)",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes (67; 98)"
+    },
+    {
+     "quote": "2-digit years <= 30 map to 20YY, others to 19YY (FOUND: 2-digit values cluster 00-15 and 55-99)",
+     "where": "semantic.yml metrics.track_year_normalized.description",
+     "confirmed": "yes for the clusters (11 values lie in 20-39); the pivot is a convention"
+    },
+    {
+     "quote": "INTERPRETATION: 'Lat.' is ambiguous (Latvian/Latin) and maps to Latvian.",
+     "where": "semantic.yml metrics.track_language_normalized.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "every one of the 19,375 track records has at least one sale and every sale's track_id exists in tracks (no orphans); no NULL revenue_usd",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "music_brainz_20k-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Because the same real-world track may appear as several records (several track_ids) from different sources, counting rows or distinct track_ids counts track RECORDS, not distinct songs",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Computation false (references); the text states the equivalent."
+    },
+    {
+     "id": "music_brainz_20k-2",
+     "cls": "guidance",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "a question about distinct songs requires deduplication (e.g. on normalized title + artist, possibly album), and the documentation does not define a deduplication key",
+      "where": "contract.yml semantic.domains[tracks].description"
+     },
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric normalizes or groups tracks."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "No metric performs the computation; nothing to run.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text states the method (compare normalized title and artist, possibly album) without the source layouts, which the draw could not see."
+    },
+    {
+     "id": "music_brainz_20k-3",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The country column is only described as in the documentation ('Country in which the sale occurred.'), with no values; no metric reads it."
+    },
+    {
+     "id": "music_brainz_20k-4",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": null,
+      "summary": "No metric reads the column: the sales metrics (sums, counts, joins to tracks) never select, group or filter on it, and no rule has a query_check on its values."
+     },
+     "agree": null,
+     "total": 58049,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The store column is only described as in the documentation ('Store or platform where the sale occurred.'), with no values; no metric reads it."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "source_track_id ... do not assume it is unique even within one source",
+     "where": "contract.yml semantic.domains[tracks].description",
+     "confirmed": "yes (21 repeated pairs within a source)"
+    },
+    {
+     "quote": "INTERPRETATION: a value with ':' is read as m:ss (or h:mm:ss); otherwise it is cast to a number of seconds.",
+     "where": "semantic.yml metrics.track_length_seconds.description",
+     "confirmed": "no (source 3 stores decimal minutes, source 4 'Xm Ysec', source 5 milliseconds)"
+    },
+    {
+     "quote": "To report sales by track attributes (title, artist, album, year, language), join sales.track_id = tracks.track_id.",
+     "where": "contract.yml semantic.domains[sales].description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "track_length_seconds casts every value without ':' as seconds: source 3's decimal minutes become ~3.7 'seconds' (median), source 5's milliseconds become ~221,000 (max 14,690,178), and source 4's 'Xm Ysec' gives NULL. Length is read by no hint item.",
+     "where": "semantic.yml metrics.track_length_seconds.sql_expression",
+     "smallest_fix": "Parse per source_id: source 3 x 60, source 5 / 1000, source 4 'Xm Ysec' -> m*60+s. (no-data is not corrected.)"
+    }
+   ]
+  }
+ }
+}

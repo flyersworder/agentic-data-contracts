@@ -1,0 +1,97 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+version: '1.0'
+name: pancancer-atlas
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: clinical_database
+    description: Clinical information for patients in the PanCancer Atlas (described as stored in POSTGRES
+      format, but queried here as a DuckDB schema). Includes detailed metadata such as patient identifiers,
+      cancer type acronyms, demographics, diagnosis records, treatment outcomes, survival status and other
+      clinical annotations. One table, clinical_info, with over one hundred attributes describing each
+      patient.
+    tables:
+    - clinical_info
+  - schema: molecular_database
+    description: 'Molecular profiling data of patients in the PanCancer Atlas (DuckDB). Two tables: Mutation_Data
+      (somatic mutation calls, tumor vs normal control) and RNASeq_Expression (normalized RNA expression
+      per sample and gene).'
+    preferred: true
+    tables:
+    - Mutation_Data
+    - RNASeq_Expression
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: clinical
+    summary: Patient clinical annotations (clinical_database.clinical_info)
+    description: 'clinical_database contains clinical information for patients in the PanCancer Atlas:
+      patient identifiers, cancer type acronyms, demographics, diagnosis records, treatment outcomes,
+      survival status and other clinical annotations. Its single table clinical_info has over one hundred
+      attributes describing each patient; the documentation does not list them individually, so column
+      meanings beyond their names are not documented. Note that many numeric-sounding fields (days_to_death,
+      days_to_last_followup, lymph_node_examined_count, ...) are stored as VARCHAR and may need TRY_CAST
+      before arithmetic. All databases are schemas of one DuckDB database; write every query, including
+      cross-database joins, in DuckDB SQL using <schema>.<table> names.
+
+      '
+    tables:
+    - clinical_database.clinical_info
+  - name: mutations
+    summary: Somatic mutation calls (molecular_database.Mutation_Data)
+    description: 'Each row of Mutation_Data is a mutation call for a patient (ParticipantBarcode) observed
+      in a tumor sample/aliquot (Tumor_SampleBarcode, Tumor_AliquotBarcode) against a normal control sample/aliquot
+      (Normal_SampleBarcode, Normal_AliquotBarcode; Normal_SampleTypeLetterCode is the normal sample''s
+      type abbreviation). Hugo_Symbol is the gene symbol of the mutation (e.g. TP53, CDH1); HGVSp_Short
+      the protein-level annotation; HGVSc the coding DNA sequence annotation; Variant_Classification the
+      classification of the mutation (e.g. Missense_Mutation, Nonsense_Mutation); CENTERS the contributing
+      sequencing center; FILTER the mutation filter status, where ''PASS'' marks reliable calls. Use the
+      metrics reliable_mutation_count and mutated_patient_count, which restrict to FILTER = ''PASS''.
+
+      '
+    tables:
+    - molecular_database.Mutation_Data
+  - name: expression
+    summary: RNA-seq normalized expression (molecular_database.RNASeq_Expression)
+    description: 'Each row of RNASeq_Expression is the normalized RNA expression value (normalized_count)
+      of one gene (Symbol = gene symbol, Entrez = Entrez gene ID) in one sample (ParticipantBarcode =
+      patient, SampleBarcode = sample, AliquotBarcode = aliquot, SampleTypeLetterCode = sample type abbreviation,
+      SampleType = sample type description). Entrez is documented as a string but stored as BIGINT. Expression
+      and mutation data share the patient identifier ParticipantBarcode; see metric mean_expression_by_mutation_status.
+
+      '
+    tables:
+    - molecular_database.RNASeq_Expression
+    - molecular_database.Mutation_Data
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: reliable_mutation_calls
+    description: 'FILTER = ''PASS'' marks reliable mutation calls. When counting or identifying mutations
+      or mutated patients, restrict to FILTER = ''PASS'' unless the question explicitly asks for all calls,
+      and state which was used.
+
+      '
+    enforcement: warn
+  - name: duckdb_sql_cross_schema
+    description: 'All databases are schemas of one DuckDB database; write every query in DuckDB SQL with
+      <schema>.<table> names, including cross-database joins.
+
+      '
+    enforcement: warn

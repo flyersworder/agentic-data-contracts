@@ -1,0 +1,138 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+metrics:
+- name: reliable_mutation_count
+  description: 'Number of reliable mutation calls: rows of Mutation_Data whose FILTER is ''PASS'' (the
+    documentation: "PASS for reliable calls").
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE m."FILTER" = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  from_sql: molecular_database.Mutation_Data m
+  grain: one mutation call
+  domains:
+  - mutations
+- name: mutated_patient_count
+  description: 'Number of distinct patients (ParticipantBarcode) with at least one reliable (FILTER =
+    ''PASS'') mutation call. Add a Hugo_Symbol filter (e.g. m.Hugo_Symbol = ''TP53'') for a gene-specific
+    count.
+
+    '
+  sql_expression: COUNT(DISTINCT m.ParticipantBarcode) FILTER (WHERE m."FILTER" = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  from_sql: molecular_database.Mutation_Data m
+  grain: one mutation call
+  domains:
+  - mutations
+- name: mean_normalized_expression
+  description: 'Average normalized RNA expression value (normalized_count) over the rows in scope; group
+    by Symbol for per-gene means.
+
+    '
+  sql_expression: AVG(r.normalized_count)
+  source_model: molecular_database.RNASeq_Expression
+  from_sql: molecular_database.RNASeq_Expression r
+  grain: one gene in one sample/aliquot
+  domains:
+  - expression
+- name: mean_expression_by_mutation_status
+  description: 'Mean normalized expression with each expression row labelled by whether the patient carries
+    a reliable (FILTER = ''PASS'') mutation. Group by r.Symbol and mutated (expression ParticipantBarcode
+    present in the PASS mutation set). To restrict to a gene''s mutations, add a Hugo_Symbol condition
+    inside the subquery.
+
+    '
+  sql_expression: AVG(r.normalized_count)
+  source_model: molecular_database.RNASeq_Expression
+  from_sql: "molecular_database.RNASeq_Expression r LEFT JOIN (SELECT DISTINCT ParticipantBarcode\n  \
+    \         FROM molecular_database.Mutation_Data\n           WHERE \"FILTER\" = 'PASS') mp\n  ON r.ParticipantBarcode\
+    \ = mp.ParticipantBarcode\n"
+  grain: one gene in one sample/aliquot, with mp.ParticipantBarcode non-null when the patient has a PASS
+    mutation
+  domains:
+  - expression
+  - mutations
+tables:
+- schema: molecular_database
+  table: Mutation_Data
+  columns:
+  - name: ParticipantBarcode
+    type: VARCHAR
+    description: Patient identifier.
+  - name: Tumor_SampleBarcode
+    type: VARCHAR
+    description: Tumor sample identifier.
+  - name: Tumor_AliquotBarcode
+    type: VARCHAR
+    description: Tumor aliquot identifier.
+  - name: Normal_SampleBarcode
+    type: VARCHAR
+    description: Normal control sample identifier.
+  - name: Normal_AliquotBarcode
+    type: VARCHAR
+    description: Normal control aliquot identifier.
+  - name: Normal_SampleTypeLetterCode
+    type: VARCHAR
+    description: Sample type abbreviation for the normal sample.
+  - name: Hugo_Symbol
+    type: VARCHAR
+    description: Gene symbol of the mutation (e.g., TP53, CDH1).
+  - name: HGVSp_Short
+    type: VARCHAR
+    description: Protein-level mutation annotation.
+  - name: Variant_Classification
+    type: VARCHAR
+    description: Classification of the mutation (e.g., Missense_Mutation, Nonsense_Mutation).
+  - name: HGVSc
+    type: VARCHAR
+    description: Coding DNA sequence mutation annotation.
+  - name: CENTERS
+    type: VARCHAR
+    description: Contributing sequencing center.
+  - name: FILTER
+    type: VARCHAR
+    description: Mutation filter status; 'PASS' marks reliable calls. Quote the column name ("FILTER")
+      in SQL.
+- schema: molecular_database
+  table: RNASeq_Expression
+  columns:
+  - name: ParticipantBarcode
+    type: VARCHAR
+    description: Patient identifier; same identifier as Mutation_Data.ParticipantBarcode.
+  - name: SampleBarcode
+    type: VARCHAR
+    description: Sample identifier.
+  - name: AliquotBarcode
+    type: VARCHAR
+    description: Aliquot identifier.
+  - name: SampleTypeLetterCode
+    type: VARCHAR
+    description: Sample type abbreviation.
+  - name: SampleType
+    type: VARCHAR
+    description: Sample type description.
+  - name: Symbol
+    type: VARCHAR
+    description: Gene symbol.
+  - name: Entrez
+    type: BIGINT
+    description: Entrez gene ID (documented as string, stored as BIGINT).
+  - name: normalized_count
+    type: DOUBLE
+    description: Normalized RNA expression value.
+- schema: clinical_database
+  table: clinical_info
+  columns:
+  - name: patient_id
+    type: VARCHAR
+    description: Patient identifier. The documentation does not state how it corresponds to the molecular
+      ParticipantBarcode; inspect the data before joining.
+  - name: Patient_description
+    type: VARCHAR
+    description: Patient description; not further documented.
+relationships:
+- from: molecular_database.RNASeq_Expression.ParticipantBarcode
+  to: molecular_database.Mutation_Data.ParticipantBarcode
+  type: many_to_many
+  description: Both tables identify the patient by ParticipantBarcode (documented as 'Patient identifier'
+    in each).

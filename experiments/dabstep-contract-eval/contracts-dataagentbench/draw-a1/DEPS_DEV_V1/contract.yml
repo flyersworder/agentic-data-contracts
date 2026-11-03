@@ -1,0 +1,98 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: DEPS_DEV_V1, author: claudeopus5.5
+version: '1.0'
+name: deps-dev-v1
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: package_database
+    description: 'Metadata of software packages (one table, packageinfo): licensing, version release data,
+      dependency details, registry metadata. Documented as SQLite but queried as a DuckDB schema.'
+    tables:
+    - packageinfo
+  - schema: project_database
+    description: GitHub (also GitLab/Bitbucket) project information (project_info) and mappings between
+      projects and package versions (project_packageversion).
+    tables:
+    - project_info
+    - project_packageversion
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: packages
+    summary: 'Package versions: licenses, release info, advisories, dependencies, publish time'
+    description: 'package_database.packageinfo has one row per package version (System, Name, Version),
+      but NOT uniquely: 661,372 rows hold only 325,940 distinct (System, Name, Version) triples. Duplicates
+      are identical except sometimes Hashes/Links ordering and occasionally DependencyError. Count packages/versions
+      with COUNT(DISTINCT ...) (metrics package_version_count, package_count) and deduplicate before summing
+      per-version facts. Only System = ''NPM'' occurs in the data. JSON-like text columns: Licenses is
+      a JSON array of SPDX strings (e.g. ["MIT"]; ''[]'' = no license; in this data every array has at
+      most one element, some elements are '''' or ''non-standard''). Links is an array of {Label, URL}
+      with Label in ORIGIN, HOMEPAGE, SOURCE_REPO, ISSUE_TRACKER, ATTESTATION. Advisories is an array
+      of {Source, SourceID} (e.g. Source ''OSV'', SourceID ''GHSA-...''); ''[]'' = none. VersionInfo is
+      an object {IsRelease: bool, Ordinal: int}. Hashes is an array of {Hash, Type} with Type in MD5,
+      SHA1, SHA256, SHA512. Registries and UpstreamIdentifiers are always ''[]'' here; SLSAProvenance
+      and Purl are always NULL. DependenciesProcessed (whether dependencies were processed successfully)
+      and DependencyError (whether a dependency processing error occurred) are booleans stored as BIGINT
+      0/1. UpstreamPublishedAt: documented as a Unix timestamp in milliseconds, but the stored values
+      (1.43e15 .. 1.70e15) are MICROSECONDS since epoch (2015-04 .. 2023-11). Convert with make_timestamp(CAST(UpstreamPublishedAt
+      AS BIGINT)) (metric upstream_published_at); about 11.6k rows are NULL.
+
+      '
+    tables:
+    - package_database.packageinfo
+  - name: projects
+    summary: Source projects, their popularity stats, and project-to-package-version mappings
+    description: 'project_database.project_info: one row per project (770 rows). It has no project-name
+      column: Project_Information is free English text containing the repository path in owner/repo form
+      plus open issues, stars and forks counts, phrased in many ways ("has 0 open issues, 2 stars, and
+      1 fork", "an open issues count of 26, a stars count of 953", "forked 71 times", "starred by 1835
+      users"). Use metrics project_name, project_stars, project_forks, project_open_issues, which handle
+      these variants (verified to parse every row). Licenses is a JSON array like packageinfo.Licenses.
+      Description may differ from Project_Information. Homepage is NULL for most rows; OSSFuzz (OSSFuzz
+      status indicator) is always NULL. project_database.project_packageversion maps package versions
+      (System, Name, Version) to projects: ProjectType in GITHUB, GITLAB, BITBUCKET; ProjectName is the
+      repository path ''owner/repo'', always lowercase; RelationProvenance (provenance of the relationship)
+      in UNVERIFIED_METADATA, SLSA_ATTESTATION; RelationType in SOURCE_REPO_TYPE (source repository),
+      ISSUE_TRACKER_TYPE. A version often maps to the same project twice (once per RelationType) and the
+      table has exact duplicate rows (597,602 rows, 565,717 distinct), so use DISTINCT or filter RelationType
+      = ''SOURCE_REPO_TYPE'' when counting. JOINS: project_packageversion -> packageinfo on System, Name,
+      Version (both sides duplicated, so dedupe). project_info -> project_packageversion on project_packageversion.ProjectName
+      = project_name (lowercased extracted owner/repo); 768 of 770 projects match.
+
+      '
+    tables:
+    - project_database.project_info
+    - project_database.project_packageversion
+    - package_database.packageinfo
+  rules:
+  - name: dedupe_package_versions
+    description: 'packageinfo and project_packageversion contain duplicate rows; count distinct (System,
+      Name, Version) and deduplicate before aggregating per-version or per-project facts.
+
+      '
+    enforcement: warn
+  - name: published_at_is_microseconds
+    description: 'UpstreamPublishedAt is stored in microseconds despite the documentation saying milliseconds;
+      convert with make_timestamp(CAST(UpstreamPublishedAt AS BIGINT)).
+
+      '
+    enforcement: warn
+  - name: parse_project_info_with_metrics
+    description: 'Project name, stars, forks and open issues must be extracted from project_info.Project_Information
+      using the declared metrics, not ad-hoc patterns.
+
+      '
+    enforcement: warn

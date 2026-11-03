@@ -1,0 +1,129 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: DEPS_DEV_V1, author: claudeopus5.5
+version: '1.0'
+name: deps-dev-v1
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: package_database
+    description: Metadata of software packages (licensing, version release data, dependency details, registry
+      metadata). Described as stored in SQLite, but queried here as a schema of one DuckDB database; all
+      SQL is DuckDB.
+    preferred: true
+    tables:
+    - packageinfo
+  - schema: project_database
+    description: GitHub (and other host) project information and mappings between projects and their package
+      versions. Queried as a DuckDB schema.
+    tables:
+    - project_info
+    - project_packageversion
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: packages
+    summary: Package versions, licenses, release info, advisories, dependency processing
+    description: "package_database.packageinfo: one row per package version record. Fields (documentation):\
+      \ System = package ecosystem (e.g. NPM, Maven); Name = package name; Version = version string; Licenses\
+      \ = license(s), a JSON-like array; Links = JSON-like list of relevant links (origin, documentation,\
+      \ source code); Advisories = JSON-like list of security advisories; VersionInfo = JSON-like object\
+      \ with release metadata (IsRelease, Ordinal); Hashes = JSON-like list of file hashes; DependenciesProcessed\
+      \ (bool) = whether dependencies have been processed successfully; DependencyError (bool) = whether\
+      \ a dependency processing error occurred; UpstreamPublishedAt = timestamp of when the upstream release\
+      \ was published; Registries = JSON-like list of registries where the package is published; SLSAProvenance\
+      \ = SLSA provenance level if available; UpstreamIdentifiers = JSON-like list of upstream identifiers;\
+      \ Purl = package URL in purl format (if available).\nDATA FINDINGS (checked with SQL): * Only System\
+      \ = 'NPM' is present (661,372 rows, 16,614 distinct names). * DUPLICATES: there are only 325,940\
+      \ distinct (System, Name, Version)\n  triples; the same version appears 2-4 times, rows differing\
+      \ only in\n  Hashes and/or DependencyError. Count package versions with\n  COUNT(DISTINCT ...) over\
+      \ (System, Name, Version) — metric\n  package_version_count — never COUNT(*).\n* UpstreamPublishedAt:\
+      \ the doc says Unix ms, but values are ~1.7e15,\n  i.e. MICROSECONDS since epoch (1.7005e15 us =\
+      \ Nov 2023). Convert with\n  make_timestamp(CAST(UpstreamPublishedAt AS BIGINT)) (metric\n  upstream_published_at).\
+      \ to_timestamp returns TIMESTAMPTZ, which fails\n  to fetch in this environment; avoid it.\n* DependenciesProcessed\
+      \ / DependencyError are stored as BIGINT 0/1\n  (1 = true).\n* SLSAProvenance and Purl are NULL\
+      \ in every row. * VersionInfo always carries IsRelease (JSON boolean true/false) and\n  Ordinal\
+      \ (integer); read with json_extract_string(VersionInfo,\n  '$.IsRelease') = 'true' and CAST(VersionInfo->>'$.Ordinal'\
+      \ AS INTEGER).\n* Licenses is a pretty-printed JSON array of SPDX-like strings\n  (e.g. [\"MIT\"\
+      ], [] for none, \"non-standard\" also occurs, compound\n  expressions like \"EPL-2.0 OR GPL-2.0\
+      \ WITH Classpath-exception-2.0\"\n  appear as one string). Parse with from_json(Licenses, '[\"VARCHAR\"\
+      ]').\n* Advisories is a JSON array of {\"Source\": \"OSV\", \"SourceID\": \"GHSA-...\"}. * Links\
+      \ is a JSON array of {\"Label\", \"URL\"}; labels seen: ORIGIN,\n  HOMEPAGE, SOURCE_REPO, ISSUE_TRACKER,\
+      \ ATTESTATION.\n"
+    tables:
+    - package_database.packageinfo
+  - name: projects
+    summary: Repository projects, stars/forks/open issues, and package-to-project mapping
+    description: "project_database.project_packageversion maps package versions to projects: System, Name,\
+      \ Version = package ecosystem, name, version; ProjectType = type of project (e.g. GITHUB); ProjectName\
+      \ = repository path in owner/repo format; RelationProvenance = provenance of the relationship data;\
+      \ RelationType = type of relationship (e.g. source repository type).\nproject_database.project_info:\
+      \ Project_Information = textual description of the project (may include name, owner and general\
+      \ purpose) — it contains the project name (owner/repo) and repository metrics such as GitHub stars\
+      \ count, fork count and open issues count; Licenses = project license(s), JSON-like array; Description\
+      \ = project description field (may differ from Project_Information); Homepage = homepage URL, if\
+      \ available; OSSFuzz = OSSFuzz status indicator (if applicable).\nDATA FINDINGS: * ProjectType values:\
+      \ GITHUB, GITLAB, BITBUCKET. RelationType values:\n  SOURCE_REPO_TYPE, ISSUE_TRACKER_TYPE. RelationProvenance\
+      \ values:\n  UNVERIFIED_METADATA, SLSA_ATTESTATION.\n* The same (System, Name, Version, ProjectName)\
+      \ often appears twice —\n  once as SOURCE_REPO_TYPE and once as ISSUE_TRACKER_TYPE — and 3,649\n\
+      \  versions map to more than one ProjectName. Joins therefore fan out;\n  deduplicate (COUNT DISTINCT\
+      \ / DISTINCT) or filter RelationType when\n  counting.\n* project_info has 770 rows, one per project,\
+      \ but NO project-name\n  column: the name must be extracted from Project_Information text\n  (metric\
+      \ project_info_repo_name). Stars/forks/open issues are written\n  in free text with varying phrasing\
+      \ (\"38715 stars\", \"a stars count of\n  3761\", \"1 star\", \"starred by 1835 users\", \"forked\
+      \ 15 times\", \"an open\n  issues count of 130\"); the metrics project_stars, project_forks and\n\
+      \  project_open_issues handle all phrasings found and parse every row.\n* OSSFuzz is NULL in every\
+      \ row; Homepage is present in 178 of 770.\n"
+    tables:
+    - project_database.project_packageversion
+    - project_database.project_info
+  - name: package_project_linkage
+    summary: How to join packages to projects across the two databases
+    description: 'Match packageinfo to project_packageversion on the shared attributes System, Name and
+      Version; then take ProjectName from project_packageversion and find the corresponding project_info
+      record (by the owner/repo name extracted from Project_Information — see project_info_repo_name).
+      The declared from_sql of the metric package_project_stars is this join. Because packageinfo rows
+      are duplicated and the mapping has several rows per version, the joined rows are not unique per
+      package version or per project: aggregate with DISTINCT on the entity you are counting, and when
+      summing stars or forks per project, first reduce to one row per project.
+
+      '
+    tables:
+    - package_database.packageinfo
+    - project_database.project_packageversion
+    - project_database.project_info
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: dedupe_package_versions
+    description: 'packageinfo contains duplicate rows per (System, Name, Version) and the project mapping
+      fans out; count package versions and projects with DISTINCT keys, never raw COUNT(*) over the join.
+
+      '
+    enforcement: warn
+  - name: published_at_is_microseconds
+    description: 'UpstreamPublishedAt is microseconds since the Unix epoch in this data (despite the doc''s
+      "ms"); convert with make_timestamp(CAST(... AS BIGINT)).
+
+      '
+    enforcement: warn
+  - name: use_declared_extraction
+    description: 'Project name, stars, forks and open-issue counts must be extracted from Project_Information
+      with the declared metrics, not ad-hoc regexes.
+
+      '
+    enforcement: warn

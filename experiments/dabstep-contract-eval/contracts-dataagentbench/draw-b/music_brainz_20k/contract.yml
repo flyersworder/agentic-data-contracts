@@ -1,0 +1,121 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+version: '1.0'
+name: music-brainz-20k
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: tracks_database
+    description: 'Detailed information about music tracks (described as stored in SQLite, but queried
+      here as the DuckDB schema tracks_database). Primary source for the content of each track: title,
+      artist, album, year, length, language. One table, `tracks`, containing all tracks INCLUDING POTENTIAL
+      DUPLICATES generated from different sources; each row is one track record with a unique track_id.'
+    preferred: true
+    tables:
+    - tracks
+  - schema: sales_database
+    description: 'Sales information for the tracks in tracks_database (DuckDB). One table, `sales`: individual
+      sales transactions, each row a single sale record for a specific track_id, with units sold and revenue
+      generated in USD.'
+    tables:
+    - sales
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: tracks
+    summary: Track records from five sources, their formats, and entity resolution
+    description: "`tracks_database.tracks` contains all the tracks, including potential duplicates generated\
+      \ from different sources. Each row is a single track RECORD with a unique track_id; source_id identifies\
+      \ the source the record originates from; source_track_id is the original identifier from the source\
+      \ and its uniqueness is NOT guaranteed (FOUND: it is not a cross-source key either -- the numeric\
+      \ parts do not line up across sources, so never use it to link duplicates).\nENTITY RESOLUTION (documentation\
+      \ hint, mandatory). Different track_ids can represent the same real-world track. To answer queries\
+      \ correctly (e.g. \"how many tracks\", \"top-selling track\", \"revenue of song X\") you must perform\
+      \ entity resolution by comparing track attributes such as title, artist, album, year, etc. Duplicates\
+      \ may not match exactly (different year formats, minor attribute variations, typos), so reason about\
+      \ the meaning of the attributes rather than relying on exact string equality. Counting DISTINCT\
+      \ track_id counts records, not tracks.\nFOUND -- 19,375 records, sources 1..5 with ~3,830-3,930\
+      \ records each. A real-world track appears at most once per source (in exact-key groups of 2-5 records,\
+      \ 3,982 of 3,990 have one record per distinct source), so a resolved entity normally has 1-5 records\
+      \ from distinct sources; a cluster larger than 5 is a sign of an over-broad key (e.g. empty title).\
+      \ Each source writes the fields differently:\n  * source 1: title often \"Title (Album)\" (3,095\
+      \ rows end with\n    \"(<album>)\"); artist and album populated; year 4-digit; length\n    'mm:ss'\
+      \ (e.g. '04:04', with stray spaces / letter O for zero);\n    language almost always NULL.\n  *\
+      \ source 2: title is \"Artist - Title\" and artist is NULL (3,896 rows);\n    year 2-digit ('75'\
+      \ = 1975, '01' = 2001); length in seconds ('219').\n  * source 3: title is \"Title - Album\" and\
+      \ album is NULL (3,737 rows);\n    year written \"'YY\" (e.g. \"'11\"); length in decimal MINUTES\
+      \ ('4.367'\n    = 262 s, '2.15' = 129 s).\n  * source 4: title prefixed with a track number \"NNN-Title\"\
+      ; album is\n    \"Album (YYYY)\" or \"Album (unknown)\" and the year column is mostly\n    NULL\
+      \ (3,757 rows) -- take the year from the album parentheses;\n    length 'Xm Ysec' (e.g. '3m 36sec');\
+      \ language abbreviated ('Eng.',\n    'Ger.', 'Jap.').\n  * source 5: clean title/artist/album; year\
+      \ 4-digit; length in\n    MILLISECONDS ('145000' = 145 s).\nExample of one entity: track_ids 24\
+      \ (src 2 \"Al Hirt - Tansy\", year '01', length '145'), 4131 (src 5 \"Tansy\", Al Hirt, \"G reatest\
+      \ Hits\", 2001, '145000') and 6561 (src 1 \"Tansy (Greatest Hits)\", Al Hirt, 2001). All sources\
+      \ carry noise: injected typos (doubled/swapped letters, inserted spaces), placeholders 'unknown',\
+      \ 'unk.', 'n.a.', 'null' with spaces, '[unknown]' artists, occasional values shifted into the wrong\
+      \ column, and implausible years from digit swaps (e.g. 9198, 2901).\nRECOMMENDED PROCEDURE. Normalize\
+      \ with the metrics track_title_normalized, track_artist_normalized, track_album_normalized, track_year_normalized,\
+      \ track_length_seconds and track_language_normalized; block on track_match_key (normalized title\
+      \ + artist, exact); then merge remaining near-duplicates with fuzzy comparison (e.g. jaro_winkler_similarity\
+      \ or levenshtein on the normalized title and artist) confirmed by year and length (lengths of one\
+      \ entity agree within a few seconds). FOUND: the exact key alone yields ~12,400 groups -- an upper\
+      \ bound on the number of distinct real tracks, because typo variants stay separate. Records with\
+      \ empty/NULL title or artist (67 NULL titles, ~98 placeholder artists) must not be merged on the\
+      \ key alone.\n"
+    tables:
+    - tracks_database.tracks
+  - name: sales
+    summary: Sales transactions per track record, country and store
+    description: '`sales_database.sales` contains individual sales transactions for tracks; each row is
+      a single sale record (sale_id unique) for a specific track_id, linking to tracks_database.tracks.track_id.
+      units_sold is the number of units sold in the transaction; revenue_usd is the revenue generated
+      in USD from the sale.
+
+      Sales are recorded in five countries: USA, UK, Canada, Germany, France (stored exactly as ''USA'',
+      ''UK'', ''Canada'', ''Germany'', ''France''). Sales occur across five platforms/stores: iTunes,
+      Spotify, Apple Music, Amazon Music, Google Play (stored exactly with that spelling and case, e.g.
+      ''iTunes'', ''Amazon Music'').
+
+      FOUND: 58,049 sales rows; every one of the 19,375 track records has at least one sale and every
+      sale''s track_id exists in tracks (no orphans); no NULL revenue_usd. Because sales point at track
+      RECORDS, sales of one real-world track are spread over its duplicate track_ids: to report sales
+      per track (top tracks, per-artist revenue, etc.) first resolve entities (see the `tracks` domain)
+      and then sum sales over all track_ids of the entity.
+
+      '
+    tables:
+    - sales_database.sales
+    - tracks_database.tracks
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: resolve_entities_before_track_level_answers
+    description: 'Any count of tracks or any per-track / per-artist / per-album aggregate must be computed
+      over resolved entities (duplicate track records from different sources merged by comparing title,
+      artist, album, year, length), not over raw track_id. Exact string equality is not sufficient; duplicates
+      differ in format and contain typos.
+
+      '
+    enforcement: warn
+  - name: sales_values_vocabulary
+    description: 'Filter countries only with ''USA'',''UK'',''Canada'',''Germany'',''France'' and stores
+      only with ''iTunes'',''Spotify'',''Apple Music'',''Amazon Music'', ''Google Play'' (exact stored
+      spellings).
+
+      '
+    enforcement: warn

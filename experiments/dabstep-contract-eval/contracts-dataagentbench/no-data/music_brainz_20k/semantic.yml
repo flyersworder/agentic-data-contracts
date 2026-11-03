@@ -1,0 +1,148 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+metrics:
+- name: total_revenue_usd
+  description: 'Total revenue in USD: sum of revenue_usd (revenue generated in USD from each sale) over
+    the sales in scope.'
+  sql_expression: SUM(s.revenue_usd)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: total_units_sold
+  description: 'Total number of units sold: sum of units_sold (units sold in each transaction) over the
+    sales in scope.'
+  sql_expression: SUM(s.units_sold)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: sale_count
+  description: Number of sale records (transactions); each row of sales is a single sale with a unique
+    sale_id. Not the same as units sold.
+  sql_expression: COUNT(DISTINCT s.sale_id)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: revenue_per_unit_usd
+  description: 'Average revenue in USD per unit sold: total revenue_usd divided by total units_sold over
+    the sales in scope.'
+  sql_expression: SUM(s.revenue_usd) / NULLIF(SUM(s.units_sold), 0)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: track_record_count
+  description: 'Number of track records (unique track_id). Tracks include potential duplicates from different
+    sources, so this counts records, not distinct real-world songs.
+
+    '
+  sql_expression: COUNT(DISTINCT t.track_id)
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_revenue_usd
+  description: 'Revenue in USD attributed to track records, via sales.track_id = tracks.track_id; group
+    by track attributes (title, artist, album, year, language). Duplicate track records of one song are
+    separate track_ids, so group by the song attributes rather than track_id to aggregate a song.
+
+    '
+  sql_expression: SUM(s.revenue_usd)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s JOIN tracks_database.tracks t ON s.track_id = t.track_id
+  grain: one sale joined to the track record it links to
+  domains:
+  - sales
+  - tracks
+- name: track_units_sold
+  description: 'Units sold attributed to track records, via sales.track_id = tracks.track_id; group by
+    track attributes as needed.
+
+    '
+  sql_expression: SUM(s.units_sold)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s JOIN tracks_database.tracks t ON s.track_id = t.track_id
+  grain: one sale joined to the track record it links to
+  domains:
+  - sales
+  - tracks
+- name: track_length_seconds
+  description: 'Track length as a number of seconds. length is stored as text, either in seconds or as
+    a formatted string. INTERPRETATION: a value with '':'' is read as m:ss (or h:mm:ss); otherwise it
+    is cast to a number of seconds. Unparseable values yield NULL.
+
+    '
+  sql_expression: "CASE\n  WHEN t.length LIKE '%:%:%' THEN\n    TRY_CAST(split_part(t.length, ':', 1)\
+    \ AS DOUBLE) * 3600\n    + TRY_CAST(split_part(t.length, ':', 2) AS DOUBLE) * 60\n    + TRY_CAST(split_part(t.length,\
+    \ ':', 3) AS DOUBLE)\n  WHEN t.length LIKE '%:%' THEN\n    TRY_CAST(split_part(t.length, ':', 1) AS\
+    \ DOUBLE) * 60\n    + TRY_CAST(split_part(t.length, ':', 2) AS DOUBLE)\n  ELSE TRY_CAST(t.length AS\
+    \ DOUBLE)\nEND\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+tables:
+- schema: tracks_database
+  table: tracks
+  columns:
+  - name: track_id
+    type: BIGINT
+    description: Unique identifier for the track record in this database. Joins to sales.track_id.
+  - name: source_id
+    type: BIGINT
+    description: Identifier of the source from which the track record originates.
+  - name: source_track_id
+    type: VARCHAR
+    description: Original track identifier from the source; uniqueness is not guaranteed.
+  - name: title
+    type: VARCHAR
+    description: Title of the track.
+  - name: artist
+    type: VARCHAR
+    description: Name of the track's artist or band.
+  - name: album
+    type: VARCHAR
+    description: Name of the album in which the track appears.
+  - name: year
+    type: VARCHAR
+    description: Year of publication (stored as text).
+  - name: length
+    type: VARCHAR
+    description: Length of the track (in seconds or formatted string). Parse with metric track_length_seconds.
+  - name: language
+    type: VARCHAR
+    description: Language of the track.
+- schema: sales_database
+  table: sales
+  columns:
+  - name: sale_id
+    type: INTEGER
+    description: Unique identifier for the sale record.
+  - name: track_id
+    type: INTEGER
+    description: Identifier linking the sale to a track in the tracks table (tracks_database.tracks.track_id).
+  - name: country
+    type: VARCHAR
+    description: Country in which the sale occurred.
+  - name: store
+    type: VARCHAR
+    description: Store or platform where the sale occurred.
+  - name: units_sold
+    type: INTEGER
+    description: Number of units sold in this transaction.
+  - name: revenue_usd
+    type: DOUBLE
+    description: Revenue generated in USD from this sale.
+relationships:
+- from: sales_database.sales.track_id
+  to: tracks_database.tracks.track_id
+  type: many_to_one
+  description: Each sale is for a specific track record; many sales per track_id.

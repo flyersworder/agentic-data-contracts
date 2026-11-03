@@ -1,0 +1,91 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+version: '1.0'
+name: stockindex
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: indexinfo_database
+    description: 'Metadata about stock exchanges around the world (US, China, Canada, Germany, Japan,
+      ...). One table, index_info: Exchange (full name of the stock exchange) and Currency (trading currency
+      of the exchange). 14 rows, one per exchange.'
+    tables:
+    - index_info
+  - schema: indextrade_database
+    description: 'Daily price data for indices tracking stock exchanges across countries and regions.
+      One table, index_trade: Index (abbreviated index symbol), Date (trading date, stored as text in
+      three formats), Open, High, Low, Close, "Adj Close", CloseUSD (closing price in USD).'
+    preferred: true
+    tables:
+    - index_trade
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: exchanges
+    summary: Exchanges, their currencies, their major index symbols and their regions
+    description: 'index_info.Exchange holds full exchange names (e.g. "Tokyo Stock Exchange", "New York
+      Stock Exchange"); index_trade.Index holds abbreviated index symbols (e.g. "N225", "HSI", "000001.SS").
+      There is no shared key: to join, match each exchange name with its corresponding major index symbol.
+      The documentation''s examples: "Tokyo Stock Exchange" = N225 (Nikkei 225), "Hong Kong Stock Exchange"
+      = HSI (Hang Seng Index). Full mapping used by this contract (exchange -> index symbol, region):
+      New York Stock Exchange -> NYA (NYSE Composite), North America; NASDAQ -> IXIC (NASDAQ Composite),
+      North America; Toronto Stock Exchange -> GSPTSE (S&P/TSX Composite), North America; Hong Kong Stock
+      Exchange -> HSI, Asia; Shanghai Stock Exchange -> 000001.SS (SSE Composite), Asia; Shenzhen Stock
+      Exchange -> 399001.SZ (SZSE Component), Asia; Tokyo Stock Exchange -> N225, Asia; National Stock
+      Exchange of India -> NSEI (Nifty 50), Asia; Korea Exchange -> KS11 (KOSPI), Asia — NOTE: KS11 has
+      NO rows in index_trade, so Korea Exchange never appears in price-based results; Taiwan Stock Exchange
+      -> TWII, Asia; Euronext -> N100 (Euronext 100), Europe; Frankfurt Stock Exchange -> GDAXI (DAX),
+      Europe; SIX Swiss Exchange -> SSMI (SMI), Europe; Johannesburg Stock Exchange -> J203.JO (FTSE/JSE
+      All Share), Africa. The region (Asia, Europe, North America, ...) is not stored anywhere; it is
+      inferred from geography (e.g. N225 is Asia because it tracks the Tokyo Stock Exchange in Japan).
+      The 13 symbols present in index_trade are exactly the ones above except KS11. Use the from_sql of
+      the metrics in semantic.yml (a VALUES mapping table aliased m) to join and to group by region.
+
+      '
+    tables:
+    - indexinfo_database.index_info
+    - indextrade_database.index_trade
+  - name: daily_prices
+    summary: Daily OHLC prices, trading dates, up/down days and intraday volatility
+    description: 'One row of index_trade = one index on one trading day (verified: no duplicate (Index,
+      date) pairs after parsing). Date is VARCHAR in three mixed formats: ''YYYY-MM-DD HH:MM:SS'' (e.g.
+      ''1987-01-05 00:00:00''), ''DD Mon YYYY, HH:MM'' (e.g. ''31 Dec 1986, 00:00'') and ''Month DD, YYYY
+      at HH:MM AM'' (e.g. ''January 02, 1987 at 12:00 AM''). Never compare, sort, or take min/max of the
+      raw string — parse it with the metric trade_date (all 104,224 rows parse; range 1965-01-05 to 2021-06-03).
+      UP DAYS are trading days where the closing price is higher than the opening price (Close > Open).
+      DOWN DAYS are trading days where the closing price is lower than the opening price (Close < Open).
+      Days with Close = Open (about 21k rows, many with High = Low = Open = Close) are neither up nor
+      down. AVERAGE INTRADAY VOLATILITY is the average relative fluctuation of an index within each trading
+      day: (High - Low) / Open computed per day, then averaged across the given time period. Open is never
+      NULL or 0 in the data; no price column has NULLs; High >= Low always. Prices are in each index''s
+      local currency except CloseUSD, which is the closing price converted to USD; use CloseUSD when comparing
+      closing levels across indices with different currencies.
+
+      '
+    tables:
+    - indextrade_database.index_trade
+  rules:
+  - name: parse_dates
+    description: 'Filter, group and order by trading date only through the parsed trade_date expression;
+      the raw Date string has three formats and does not sort chronologically.
+
+      '
+    enforcement: warn
+  - name: use_declared_definitions
+    description: 'Up/down days, intraday volatility and the exchange-to-index-to-region mapping must follow
+      the metric definitions in semantic.yml.
+
+      '
+    enforcement: warn

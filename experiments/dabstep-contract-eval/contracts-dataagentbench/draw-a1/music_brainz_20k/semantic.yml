@@ -1,0 +1,265 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+metrics:
+- name: total_revenue_usd
+  description: 'Total revenue in USD: sum of sales.revenue_usd (revenue generated in USD from each sale).
+    No NULLs in the column. Whole table = 16,528,140.35.
+
+    '
+  sql_expression: SUM(s.revenue_usd)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one row per sale record
+  domains:
+  - sales
+- name: total_units_sold
+  description: 'Total units sold: sum of sales.units_sold (number of units sold per transaction). Whole
+    table = 14,499,017.
+
+    '
+  sql_expression: SUM(s.units_sold)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one row per sale record
+  domains:
+  - sales
+- name: sale_count
+  description: Number of individual sale records (transactions); sale_id is unique.
+  sql_expression: COUNT(DISTINCT s.sale_id)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one row per sale record
+  domains:
+  - sales
+- name: revenue_per_unit_usd
+  description: 'Average revenue per unit sold in USD: total revenue divided by total units (volume-weighted,
+    not an average of per-sale ratios).
+
+    '
+  sql_expression: SUM(s.revenue_usd) / NULLIF(SUM(s.units_sold), 0)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one row per sale record
+  domains:
+  - sales
+- name: track_revenue_usd
+  description: 'Revenue in USD attributed to track records, joining each sale to its track via track_id.
+    Group by t.track_id for per-record revenue, or by track attributes (t.artist, track_artist_resolved,
+    t.source_id, ...) as needed. Duplicate records of one song each carry their own sales, so per-song
+    totals require grouping duplicates together.
+
+    '
+  sql_expression: SUM(s.revenue_usd)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s JOIN tracks_database.tracks t ON s.track_id = t.track_id
+  grain: one row per sale record, enriched with its track record
+  domains:
+  - sales
+  - tracks
+- name: track_units_sold
+  description: Units sold attributed to track records via sales.track_id = tracks.track_id.
+  sql_expression: SUM(s.units_sold)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s JOIN tracks_database.tracks t ON s.track_id = t.track_id
+  grain: one row per sale record, enriched with its track record
+  domains:
+  - sales
+  - tracks
+- name: track_record_count
+  description: 'Number of track records (distinct track_id). Because tracks contains potential duplicates
+    from different sources, this counts records, not distinct songs.
+
+    '
+  sql_expression: COUNT(DISTINCT t.track_id)
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one row per track record
+  domains:
+  - tracks
+- name: track_year
+  description: 'Year of publication parsed to an INTEGER. Checked formats: 4-digit (sources 1, 4, 5),
+    2-digit (source 2, e.g. ''89''; occasionally 1 digit), apostrophe 2-digit (source 3, "''07"). Whitespace
+    and apostrophes are removed and the letter o/O is read as 0 (''2o06''). 4-digit values are kept only
+    within 1900-2024 (larger values such as 2090, 9198, 10809 are typos -> NULL). INTERPRETATION: 1-2
+    digit years pivot at 15 — 00-15 -> 2000-2015, 16-99 -> 1916-1999 — because the 4-digit years in the
+    data cluster up to 2014. Empty, ''unknown'', ''n.a.'', and shifted text values return NULL.
+
+    '
+  sql_expression: "(SELECT CASE\n   WHEN d ~ '^[0-9]{4}$' AND CAST(d AS INTEGER) BETWEEN 1900 AND 2024\
+    \ THEN CAST(d AS INTEGER)\n   WHEN d ~ '^[0-9]{1,2}$' THEN CASE WHEN CAST(d AS INTEGER) <= 15 THEN\
+    \ 2000 + CAST(d AS INTEGER)\n                                     ELSE 1900 + CAST(d AS INTEGER) END\n\
+    \   ELSE NULL END\n FROM (SELECT regexp_replace(replace(replace(t.year, 'o', '0'), 'O', '0'), '[\\\
+    s'']', '', 'g') AS d))\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one row per track record
+  domains:
+  - tracks
+- name: track_length_seconds
+  description: 'Track length in seconds (DOUBLE), parsed per source format after removing whitespace and
+    reading O as 0: ''mm:ss'' (source 1, also accepted anywhere); ''Xm YYsec'' or ''Xm-YYsec'' (source
+    4); decimal MINUTES x 60 (source 3, ''4.101'' -> 246 s); MILLISECONDS / 1000 (source 5, ''217333''
+    -> 217 s); whole seconds (source 2); source 1 values written without the colon (''0348'') read as
+    mmss. ''unknown'', ''unk.'', ''n.a.'', empty and shifted text return NULL. Median is ~212-222 s in
+    every source, confirming the units. A handful of extreme outliers remain (e.g. 14,690 s) and are source
+    data, not parse errors.
+
+    '
+  sql_expression: "(SELECT CASE\n   WHEN s ~ '^[0-9]+:[0-9]{1,2}$' THEN CAST(split_part(s, ':', 1) AS\
+    \ INTEGER) * 60 + CAST(split_part(s, ':', 2) AS INTEGER)\n   WHEN s ~ '^[0-9]+m-?[0-9]+sec$' THEN\
+    \ CAST(regexp_extract(s, '^([0-9]+)m', 1) AS INTEGER) * 60 + CAST(regexp_extract(s, '([0-9]+)sec$',\
+    \ 1) AS INTEGER)\n   WHEN t.source_id = 3 AND s ~ '^[0-9]+(\\.[0-9]+)?$' THEN round(CAST(s AS DOUBLE)\
+    \ * 60)\n   WHEN t.source_id = 5 AND s ~ '^[0-9]+$' THEN round(CAST(s AS DOUBLE) / 1000)\n   WHEN\
+    \ t.source_id = 2 AND s ~ '^[0-9]+$' THEN CAST(s AS DOUBLE)\n   WHEN t.source_id = 1 AND s ~ '^[0-9]{3,4}$'\
+    \ THEN CAST(left(s, length(s) - 2) AS INTEGER) * 60 + CAST(right(s, 2) AS INTEGER)\n   ELSE NULL END\n\
+    \ FROM (SELECT regexp_replace(replace(lower(t.length), 'o', '0'), '\\s', '', 'g') AS s))\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one row per track record
+  domains:
+  - tracks
+- name: track_language_normalized
+  description: 'Language mapped to a canonical English name. Raw values mix full names, 3-letter abbreviations
+    (''Eng.'', ''Ger.'', ''Spa.''), case variants (''ENGLISH''), typos and injected characters (''Englsih'',
+    ''EnglisPh'', ''nEglish''). Raw ''English'' + variants map to English (~10,730 records). Non-letters
+    are stripped, then exact names/abbreviations are matched, then edit-distance matching (levenshtein)
+    is applied to common languages. Missing markers ('''', NULL, ''unknown'', ''unk.'', ''n.a.'', ''null''
+    variants) and values that are only digits/years return NULL (4,880 records). ''[Multiple languages]''
+    variants -> ''Multiple languages''; ''No linguistic content'' variants kept as such. ''Lat.'' (Latin
+    or Latvian) and ''Slo.'' (Slovenian or Slovak) are ambiguous and returned unchanged. Unmatched values
+    (rare languages, values shifted from other columns) are returned trimmed as-is. INTERPRETATION: a
+    best-effort normalization; the documentation defines no language codes.
+
+    '
+  sql_expression: "(SELECT CASE\n  WHEN c = '' OR c IN ('unk','u','na','null','nul','nll','ull','nlul','nulll','nulzl')\
+    \ OR levenshtein(c,'unknown') <= 2 OR levenshtein(c,'null') <= 1 THEN NULL\n  WHEN c LIKE '%multi%'\
+    \ OR c LIKE '%languag%' OR levenshtein(c,'[multiplelanguages]') <= 3 THEN 'Multiple languages'\n \
+    \ WHEN c LIKE '%linguistic%' OR levenshtein(c,'nolinguisticcontent') <= 3 THEN 'No linguistic content'\n\
+    \  WHEN c IN ('english','eng','en','e','eg','egn','ng','engg','enng','eeng','neg','eegn') THEN 'English'\n\
+    \  WHEN c IN ('german','ger','gr','g') THEN 'German'\n  WHEN c IN ('french','fre','fr') THEN 'French'\n\
+    \  WHEN c IN ('spanish','spa') THEN 'Spanish'\n  WHEN c IN ('japanese','jap','j') THEN 'Japanese'\n\
+    \  WHEN c IN ('italian','ita') THEN 'Italian'\n  WHEN c IN ('portuguese','por') THEN 'Portuguese'\n\
+    \  WHEN c IN ('finnish','fin') THEN 'Finnish'\n  WHEN c IN ('dutch','dut') THEN 'Dutch'\n  WHEN c\
+    \ IN ('swedish','swe') THEN 'Swedish'\n  WHEN c IN ('russian','rus','russ') THEN 'Russian'\n  WHEN\
+    \ c IN ('turkish','tur') THEN 'Turkish'\n  WHEN c IN ('greek','gre') THEN 'Greek'\n  WHEN c IN ('polish','pol')\
+    \ THEN 'Polish'\n  WHEN c IN ('chinese','chi') THEN 'Chinese'\n  WHEN c IN ('norwegian','nor') THEN\
+    \ 'Norwegian'\n  WHEN c IN ('danish','dan') THEN 'Danish'\n  WHEN c IN ('hindi','hin') THEN 'Hindi'\n\
+    \  WHEN c IN ('korean','kor') THEN 'Korean'\n  WHEN c IN ('czech','cze') THEN 'Czech'\n  WHEN c IN\
+    \ ('estonian','est','estonia') THEN 'Estonian'\n  WHEN c IN ('hungarian','hun') THEN 'Hungarian'\n\
+    \  WHEN c IN ('croatian','cro') THEN 'Croatian'\n  WHEN c IN ('romanian','rom') THEN 'Romanian'\n\
+    \  WHEN c IN ('hebrew','heb') THEN 'Hebrew'\n  WHEN c IN ('catalan','cat') THEN 'Catalan'\n  WHEN\
+    \ c IN ('afrikaans','afr') THEN 'Afrikaans'\n  WHEN c IN ('serbian','ser') THEN 'Serbian'\n  WHEN\
+    \ c IN ('bosnian','bos') THEN 'Bosnian'\n  WHEN c IN ('icelandic','ice') THEN 'Icelandic'\n  WHEN\
+    \ c IN ('lithuanian','lit') THEN 'Lithuanian'\n  WHEN c IN ('indonesian','ind') THEN 'Indonesian'\n\
+    \  WHEN c IN ('panjabi','pan') THEN 'Panjabi'\n  WHEN c IN ('yiddish','yid') THEN 'Yiddish'\n  WHEN\
+    \ c IN ('basque','bas') THEN 'Basque'\n  WHEN c IN ('welsh','wel') THEN 'Welsh'\n  WHEN c IN ('tagalog','tag')\
+    \ THEN 'Tagalog'\n  WHEN c IN ('filipino','fil') THEN 'Filipino'\n  WHEN c IN ('vietnamese','vie')\
+    \ THEN 'Vietnamese'\n  WHEN c IN ('thai','tha') THEN 'Thai'\n  WHEN c IN ('swahili','swa') THEN 'Swahili'\n\
+    \  WHEN c IN ('georgian','geo') THEN 'Georgian'\n  WHEN c = 'latin' THEN 'Latin'\n  WHEN c = 'latvian'\
+    \ THEN 'Latvian'\n  WHEN levenshtein(c,'english') <= 2 OR (length(c) <= 5 AND levenshtein(c,'eng')\
+    \ <= 1) THEN 'English'\n  WHEN levenshtein(c,'german') <= 2 OR (length(c) <= 4 AND levenshtein(c,'ger')\
+    \ <= 1 AND c LIKE '%g%') THEN 'German'\n  WHEN levenshtein(c,'french') <= 2 THEN 'French'\n  WHEN\
+    \ levenshtein(c,'spanish') <= 2 OR (length(c) <= 4 AND levenshtein(c,'spa') <= 1 AND c LIKE '%s%')\
+    \ THEN 'Spanish'\n  WHEN levenshtein(c,'japanese') <= 2 OR (length(c) <= 4 AND levenshtein(c,'jap')\
+    \ <= 1 AND c LIKE '%j%') THEN 'Japanese'\n  WHEN levenshtein(c,'italian') <= 2 THEN 'Italian'\n  WHEN\
+    \ levenshtein(c,'portuguese') <= 2 THEN 'Portuguese'\n  WHEN levenshtein(c,'finnish') <= 2 THEN 'Finnish'\n\
+    \  WHEN levenshtein(c,'swedish') <= 2 THEN 'Swedish'\n  WHEN levenshtein(c,'russian') <= 2 THEN 'Russian'\n\
+    \  WHEN levenshtein(c,'norwegian') <= 2 THEN 'Norwegian'\n  WHEN levenshtein(c,'hungarian') <= 2 THEN\
+    \ 'Hungarian'\n  WHEN levenshtein(c,'indonesian') <= 2 THEN 'Indonesian'\n  WHEN levenshtein(c,'icelandic')\
+    \ <= 2 THEN 'Icelandic'\n  WHEN levenshtein(c,'estonian') <= 2 THEN 'Estonian'\n  WHEN levenshtein(c,'romanian')\
+    \ <= 1 THEN 'Romanian'\n  WHEN levenshtein(c,'croatian') <= 2 THEN 'Croatian'\n  WHEN levenshtein(c,'chinese')\
+    \ <= 2 THEN 'Chinese'\n  WHEN levenshtein(c,'catalan') <= 2 THEN 'Catalan'\n  WHEN levenshtein(c,'serbian')\
+    \ <= 2 THEN 'Serbian'\n  WHEN levenshtein(c,'arabic') <= 1 THEN 'Arabic'\n  WHEN levenshtein(c,'danish')\
+    \ <= 1 THEN 'Danish'\n  WHEN levenshtein(c,'polish') <= 1 THEN 'Polish'\n  WHEN levenshtein(c,'hebrew')\
+    \ <= 1 THEN 'Hebrew'\n  WHEN levenshtein(c,'panjabi') <= 1 THEN 'Panjabi'\n  WHEN levenshtein(c,'korean')\
+    \ <= 1 THEN 'Korean'\n  WHEN levenshtein(c,'dutch') <= 1 OR (length(c) <= 4 AND levenshtein(c,'dut')\
+    \ <= 1 AND c LIKE '%d%') THEN 'Dutch'\n  WHEN levenshtein(c,'hindi') <= 1 OR (length(c) <= 4 AND levenshtein(c,'hin')\
+    \ <= 1 AND c LIKE '%h%') THEN 'Hindi'\n  WHEN levenshtein(c,'greek') <= 1 THEN 'Greek'\n  WHEN levenshtein(c,'welsh')\
+    \ <= 1 THEN 'Welsh'\n  ELSE trim(t.language) END\n FROM (SELECT lower(regexp_replace(t.language, '[^A-Za-z\\\
+    [\\]]', '', 'g')) AS c))\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one row per track record
+  domains:
+  - tracks
+- name: track_artist_resolved
+  description: 'Name of the track''s artist or band. Source 2 leaves the artist column empty and embeds
+    it in the title as "Artist - Title"; for those rows the artist is the text before the first '' - ''
+    of the title (3,796 such rows). Otherwise the trimmed artist column; NULL when empty. ''[unknown]''
+    artist values are kept as written (they mean the source did not know the artist).
+
+    '
+  sql_expression: "CASE\n  WHEN (t.artist IS NULL OR trim(t.artist) = '') AND t.source_id = 2 AND strpos(t.title,\
+    \ ' - ') > 0\n    THEN trim(split_part(t.title, ' - ', 1))\n  ELSE NULLIF(trim(t.artist), '')\nEND\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one row per track record
+  domains:
+  - tracks
+tables:
+- schema: tracks_database
+  table: tracks
+  columns:
+  - name: track_id
+    type: BIGINT
+    description: Unique identifier for the track record in this database. Joins to sales.track_id.
+  - name: source_id
+    type: BIGINT
+    description: Identifier of the source the track record originates from (1-5). Determines the format
+      of title, year and length — see the tracks domain.
+  - name: source_track_id
+    type: VARCHAR
+    description: Original track identifier from the source; uniqueness is not guaranteed (repeats occur).
+      Not a join key to sales.
+  - name: title
+    type: VARCHAR
+    description: 'Title of the track. Source-dependent: source 1 ''Title (Album)'', source 2 ''Artist
+      - Title'', source 3 often ''Title - Album'', source 4 prefixed ''NNN-''.'
+  - name: artist
+    type: VARCHAR
+    description: Name of the track's artist or band. Empty for nearly all source-2 rows (artist is in
+      the title); use metric track_artist_resolved.
+  - name: album
+    type: VARCHAR
+    description: Name of the album in which the track appears. Source 4 often appends '(year)' or '(unknown)';
+      source 3 often empty.
+  - name: year
+    type: VARCHAR
+    description: 'Year of publication as text: 4-digit, 2-digit (''89'') or apostrophe 2-digit ("''07"),
+      often empty/''unknown''. Use metric track_year.'
+  - name: length
+    type: VARCHAR
+    description: 'Length of the track (in seconds or formatted string): mm:ss (src 1), seconds (src 2),
+      decimal minutes (src 3), ''Xm YYsec'' (src 4), milliseconds (src 5). Use metric track_length_seconds.'
+  - name: language
+    type: VARCHAR
+    description: Language of the track, free text with abbreviations and typos; empty for most source-1
+      rows. Use metric track_language_normalized.
+- schema: sales_database
+  table: sales
+  columns:
+  - name: sale_id
+    type: INTEGER
+    description: Unique identifier for the sale record.
+  - name: track_id
+    type: INTEGER
+    description: Identifier linking the sale to a track in tracks_database.tracks (track_id). Every value
+      matches a track record.
+  - name: country
+    type: VARCHAR
+    description: 'Country in which the sale occurred: France, Canada, UK, Germany, USA.'
+  - name: store
+    type: VARCHAR
+    description: 'Store or platform where the sale occurred: Apple Music, iTunes, Spotify, Google Play,
+      Amazon Music.'
+  - name: units_sold
+    type: INTEGER
+    description: Number of units sold in this transaction (1-499).
+  - name: revenue_usd
+    type: DOUBLE
+    description: Revenue generated in USD from this sale (0.99-641.82).
+relationships:
+- from: sales_database.sales.track_id
+  to: tracks_database.tracks.track_id
+  type: many_to_one
+  description: Each sale belongs to one track record; a track record has one or more sales.

@@ -1,0 +1,182 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: crmarenapro, author: claudeopus5.5
+metrics:
+- name: case_count
+  description: Number of support cases. Use count(DISTINCT ltrim(trim(c.id),'#')).
+  sql_expression: COUNT(DISTINCT ltrim(trim(c.id), '#'))
+  source_model: support.Case
+  from_sql: support.Case c
+  grain: one row per case
+  domains:
+  - support
+- name: open_case_count
+  description: 'Cases not closed: trimmed status <> ''Closed'' (Working or Waiting on Customer). closeddate
+    is NULL exactly for these.'
+  sql_expression: COUNT(DISTINCT ltrim(trim(c.id), '#')) FILTER (WHERE trim(c.status) <> 'Closed')
+  source_model: support.Case
+  from_sql: support.Case c
+  grain: one row per case
+  domains:
+  - support
+- name: avg_case_handle_time_hours
+  description: Average hours from createddate to closeddate over closed cases (both UTC ISO strings cast
+    to TIMESTAMPTZ). About 7.5 h over the 75 closed cases.
+  sql_expression: AVG(date_diff('second', CAST(c.createddate AS TIMESTAMPTZ), CAST(c.closeddate AS TIMESTAMPTZ))
+    / 3600.0) FILTER (WHERE trim(c.status) = 'Closed' AND c.closeddate IS NOT NULL)
+  source_model: support.Case
+  from_sql: support.Case c
+  grain: one row per case
+  domains:
+  - support
+- name: cases_per_issue
+  description: Cases grouped by issue name; join Case.issueid__c to issue__c.id after stripping '#'. Group
+    by trim(i.name).
+  sql_expression: COUNT(DISTINCT ltrim(trim(c.id), '#'))
+  source_model: support.Case
+  from_sql: support.Case c JOIN support.issue__c i ON ltrim(trim(c.issueid__c), '#') = ltrim(trim(i.id),
+    '#')
+  grain: one row per case with its issue
+  domains:
+  - support
+- name: total_opportunity_amount
+  description: Sum of Opportunity.Amount (DOUBLE). Filter trim(StageName) as needed; 'Closed' is the only
+    closed stage.
+  sql_expression: SUM(o.Amount)
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - sales
+- name: opportunity_amount_by_owner
+  description: Opportunity amount per sales user; owner joined to core_crm.User with '#'-stripped Ids
+    (all 1170 match). Group by u.FirstName, u.LastName.
+  sql_expression: SUM(o.Amount)
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o JOIN core_crm.User u ON ltrim(trim(o.OwnerId), '#') = ltrim(trim(u.Id),
+    '#')
+  grain: one row per opportunity with its owner
+  domains:
+  - sales
+- name: weighted_pipeline_amount
+  description: Amount weighted by Probability (VARCHAR percent such as '75.0', divided by 100).
+  sql_expression: SUM(o.Amount * CAST(o.Probability AS DOUBLE) / 100)
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - sales
+- name: lead_conversion_rate
+  description: 'Share of leads with IsConverted = 1. CAUTION: 384 leads have Status ''Converted'' but
+    IsConverted = 0 and no conversion details; this metric uses the IsConverted flag. For a status-based
+    reading use trim(Status) = ''Converted'' and say so.'
+  sql_expression: AVG(CASE WHEN l.IsConverted = 1 THEN 1.0 ELSE 0.0 END)
+  source_model: sales_pipeline.Lead
+  from_sql: sales_pipeline.Lead l
+  grain: one row per lead
+  domains:
+  - sales
+- name: quote_line_total
+  description: Quote line value = Quantity * UnitPrice * (1 - Discount/100); Discount is a percent. Equals
+    stored TotalPrice on every row.
+  sql_expression: SUM(CAST(q.Quantity AS DOUBLE) * CAST(q.UnitPrice AS DOUBLE) * (1 - CAST(q.Discount
+    AS DOUBLE) / 100))
+  source_model: sales_pipeline.QuoteLineItem
+  from_sql: sales_pipeline.QuoteLineItem q
+  grain: one row per quote line item
+  domains:
+  - sales
+- name: opportunity_line_total
+  description: Sum of OpportunityLineItem.TotalPrice (VARCHAR cast to DOUBLE).
+  sql_expression: SUM(CAST(oli.TotalPrice AS DOUBLE))
+  source_model: sales_pipeline.OpportunityLineItem
+  from_sql: sales_pipeline.OpportunityLineItem oli
+  grain: one row per opportunity line item
+  domains:
+  - sales
+- name: order_item_revenue
+  description: Order line revenue = Quantity * UnitPrice (both VARCHAR cast to DOUBLE).
+  sql_expression: SUM(CAST(oi.Quantity AS DOUBLE) * CAST(oi.UnitPrice AS DOUBLE))
+  source_model: products_orders.OrderItem
+  from_sql: products_orders.OrderItem oi
+  grain: one row per order item
+  domains:
+  - products_orders
+- name: event_total_minutes
+  description: Total Event duration in minutes (DurationInMinutes VARCHAR cast to DOUBLE).
+  sql_expression: SUM(CAST(e.DurationInMinutes AS DOUBLE))
+  source_model: activities.Event
+  from_sql: activities.Event e
+  grain: one row per event
+  domains:
+  - activities_territory
+- name: accounts_per_territory
+  description: Accounts whose trimmed ShippingState is in the territory's comma-separated state list (Territory2.Description).
+    Group by trim(t.Name).
+  sql_expression: COUNT(DISTINCT ltrim(trim(a.Id), '#'))
+  source_model: territory.Territory2
+  from_sql: territory.Territory2 t JOIN core_crm.Account a ON list_contains(string_split(replace(t.Description,
+    ' ', ''), ','), trim(a.ShippingState))
+  grain: one row per (territory, account in its states)
+  domains:
+  - activities_territory
+tables:
+- schema: support
+  table: Case
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Case Id (may have leading '#').
+  - name: status
+    type: VARCHAR
+    description: Closed, Working, Waiting on Customer (trim; trailing spaces present).
+  - name: priority
+    type: VARCHAR
+    description: High, Medium, Low.
+  - name: createddate
+    type: VARCHAR
+    description: UTC timestamp string; cast to TIMESTAMPTZ.
+  - name: closeddate
+    type: VARCHAR
+    description: UTC timestamp string; NULL unless status is Closed.
+  - name: issueid__c
+    type: VARCHAR
+    description: FK to support.issue__c.id.
+  - name: orderitemid__c
+    type: VARCHAR
+    description: FK to products_orders.OrderItem.Id.
+  - name: ownerid
+    type: VARCHAR
+    description: FK to core_crm.User.Id (agent).
+- schema: sales_pipeline
+  table: QuoteLineItem
+  columns:
+  - name: Discount
+    type: VARCHAR
+    description: Discount percent (0-30) as text.
+  - name: TotalPrice
+    type: VARCHAR
+    description: Quantity * UnitPrice * (1 - Discount/100), as text.
+- schema: sales_pipeline
+  table: Lead
+  columns:
+  - name: IsConverted
+    type: BIGINT
+    description: 1 = converted with conversion details; disagrees with Status 'Converted' on 384 rows.
+  - name: Status
+    type: VARCHAR
+    description: New, Working, Qualified, Converted (trim).
+- schema: territory
+  table: Territory2
+  columns:
+  - name: Description
+    type: VARCHAR
+    description: Comma-separated US state codes covered by the territory, matching Account.ShippingState.
+- schema: support
+  table: emailmessage
+  columns:
+  - name: toids
+    type: VARCHAR
+    description: JSON array string of recipient Ids.
+  - name: relatedtoid
+    type: VARCHAR
+    description: Related Case (500...) or Opportunity (006...) Id.

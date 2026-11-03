@@ -1,0 +1,85 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+version: '1.0'
+name: stockindex
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: indexinfo_database
+    description: 'Metadata about stock market indices from major exchanges around the world (United States,
+      China, Canada, Germany, Japan and more). Described as stored in SQLite, but queried here as a DuckDB
+      schema. One table, index_info: Exchange (full name of the stock exchange), Currency (trading currency
+      of the exchange).'
+    tables:
+    - index_info
+  - schema: indextrade_database
+    description: 'Daily price data for indices tracking stock exchanges across various countries and regions.
+      One table, index_trade: Index (abbreviated index symbol), Date (trading date, stored as text in
+      mixed formats), Open, High, Low, Close, Adj Close (adjusted closing price), CloseUSD (closing price
+      in USD).'
+    preferred: true
+    tables:
+    - index_trade
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: index_prices
+    summary: Daily index prices (open/high/low/close, adjusted close, close in USD)
+    description: 'indextrade_database.index_trade holds one row per index per trading day. Fields: Index
+      = abbreviated index symbol; Date = trading date; Open = opening price; High = highest price during
+      the day; Low = lowest price during the day; Close = closing price; "Adj Close" = adjusted closing
+      price; CloseUSD = closing price in USD. Open/High/Low/Close/Adj Close are in the index''s local
+      currency (the trading currency of its exchange); only CloseUSD is in USD, so compare prices across
+      indices with CloseUSD.
+
+      DATA FINDINGS (checked with SQL): 104,224 rows, 13 index symbols (000001.SS, 399001.SZ, GDAXI, GSPTSE,
+      HSI, IXIC, J203.JO, N100, N225, NSEI, NYA, SSMI, TWII). No NULLs in any price column; High >= Low
+      on every row. No duplicate (Index, date) pairs once dates are parsed. "Adj Close" differs from Close
+      on 13,046 rows. CloseUSD / Close is a constant factor per index (e.g. HSI 0.13, N225 0.01, GDAXI
+      1.22, IXIC and NYA 1.0) — a fixed conversion rate, not a daily FX rate.
+
+      DATE FORMAT: Date is VARCHAR in three mixed formats: ''1987-01-05 00:00:00'', ''31 Dec 1986, 00:00''
+      and ''January 02, 1987 at 12:00 AM''. Never compare, sort, or MIN/MAX the raw string — always parse
+      with the metric `trade_date` (all rows parse; range 1965-01-05 to 2021-06-03). Column names Index,
+      Date, Open, Close, "Adj Close" should be double-quoted in SQL.
+
+      '
+    tables:
+    - indextrade_database.index_trade
+  - name: exchanges
+    summary: Stock exchanges and their trading currencies
+    description: 'indexinfo_database.index_info lists 14 exchanges with their trading currency: New York
+      Stock Exchange USD, NASDAQ USD, Hong Kong Stock Exchange HKD, Shanghai Stock Exchange CNY, Tokyo
+      Stock Exchange JPY, Euronext EUR, Shenzhen Stock Exchange CNY, Toronto Stock Exchange CAD, National
+      Stock Exchange of India INR, Frankfurt Stock Exchange EUR, Korea Exchange KRW, SIX Swiss Exchange
+      CHF, Taiwan Stock Exchange TWD, Johannesburg Stock Exchange ZAR. There is no key column linking
+      index_info to index_trade: the link from an index symbol to its exchange is given by the metric
+      `index_exchange` (standard symbol-to-exchange mapping: NYA NYSE, IXIC NASDAQ, HSI Hong Kong, 000001.SS
+      Shanghai, N225 Tokyo, N100 Euronext, 399001.SZ Shenzhen, GSPTSE Toronto, NSEI NSE India, GDAXI Frankfurt,
+      SSMI SIX Swiss, TWII Taiwan, J203.JO Johannesburg). Korea Exchange has no index in index_trade.
+
+      '
+    tables:
+    - indexinfo_database.index_info
+    - indextrade_database.index_trade
+  rules:
+  - name: parse_dates
+    description: Date is mixed-format text; filter, group and sort by the parsed `trade_date` expression,
+      never the raw string.
+    enforcement: warn
+  - name: usd_for_cross_index_comparison
+    description: Prices other than CloseUSD are in local currency; use CloseUSD when comparing or aggregating
+      across indices.
+    enforcement: warn

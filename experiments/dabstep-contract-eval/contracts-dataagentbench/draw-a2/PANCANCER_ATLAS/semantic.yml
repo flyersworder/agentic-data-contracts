@@ -1,0 +1,309 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+metrics:
+- name: participant_barcode
+  description: 'The patient''s TCGA participant barcode (TCGA-XX-XXXX), extracted from Patient_description;
+    the key that joins to Mutation_Data.ParticipantBarcode and RNASeq_Expression.ParticipantBarcode. Present
+    and unique on all 10,761 rows. patient_id is only the barcode''s last 4 characters.
+
+    '
+  sql_expression: regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}')
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+  - cross_database
+- name: patient_gender
+  description: 'Patient gender, ''MALE'' or ''FEMALE'', extracted from Patient_description with word boundaries
+    (plain LIKE ''%MALE%'' also matches FEMALE). Present on every row.
+
+    '
+  sql_expression: regexp_extract(c.Patient_description, '\b(FEMALE|MALE)\b', 1)
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: vital_status
+  description: 'Vital status ''Alive'' or ''Dead'', the last word of Patient_description. NULL for 5 patients
+    whose description says ''nan'' or ''[Discrepancy]''.
+
+    '
+  sql_expression: NULLIF(regexp_extract(c.Patient_description, '(Alive|Dead)\.?\s*$', 1), '')
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: cancer_type_acronym
+  description: 'TCGA cancer type acronym derived from the cancer-type name inside Patient_description
+    (no column stores it). Uterine Carcinosarcoma (UCS) is tested before Sarcoma (SARC) because the name
+    contains ''sarcoma''. Every row maps to one of 32 acronyms (no LAML in the data). Counts verified
+    e.g. BRCA 1087, GBM 590, OV 584, SARC 257, UCS 57.
+
+    '
+  sql_expression: "CASE\n WHEN c.Patient_description ILIKE '%Adrenocortical carcinoma%' THEN 'ACC'\n WHEN\
+    \ c.Patient_description ILIKE '%Bladder Urothelial Carcinoma%' THEN 'BLCA'\n WHEN c.Patient_description\
+    \ ILIKE '%Brain Lower Grade Glioma%' THEN 'LGG'\n WHEN c.Patient_description ILIKE '%Breast invasive\
+    \ carcinoma%' THEN 'BRCA'\n WHEN c.Patient_description ILIKE '%Cervical squamous cell carcinoma and\
+    \ endocervical adenocarcinoma%' THEN 'CESC'\n WHEN c.Patient_description ILIKE '%Cholangiocarcinoma%'\
+    \ THEN 'CHOL'\n WHEN c.Patient_description ILIKE '%Colon adenocarcinoma%' THEN 'COAD'\n WHEN c.Patient_description\
+    \ ILIKE '%Esophageal carcinoma%' THEN 'ESCA'\n WHEN c.Patient_description ILIKE '%Glioblastoma multiforme%'\
+    \ THEN 'GBM'\n WHEN c.Patient_description ILIKE '%Head and Neck squamous cell carcinoma%' THEN 'HNSC'\n\
+    \ WHEN c.Patient_description ILIKE '%Kidney Chromophobe%' THEN 'KICH'\n WHEN c.Patient_description\
+    \ ILIKE '%Kidney renal clear cell carcinoma%' THEN 'KIRC'\n WHEN c.Patient_description ILIKE '%Kidney\
+    \ renal papillary cell carcinoma%' THEN 'KIRP'\n WHEN c.Patient_description ILIKE '%Acute Myeloid\
+    \ Leukemia%' THEN 'LAML'\n WHEN c.Patient_description ILIKE '%Liver hepatocellular carcinoma%' THEN\
+    \ 'LIHC'\n WHEN c.Patient_description ILIKE '%Lung adenocarcinoma%' THEN 'LUAD'\n WHEN c.Patient_description\
+    \ ILIKE '%Lung squamous cell carcinoma%' THEN 'LUSC'\n WHEN c.Patient_description ILIKE '%Lymphoid\
+    \ Neoplasm Diffuse Large B-cell Lymphoma%' THEN 'DLBC'\n WHEN c.Patient_description ILIKE '%Mesothelioma%'\
+    \ THEN 'MESO'\n WHEN c.Patient_description ILIKE '%Ovarian serous cystadenocarcinoma%' THEN 'OV'\n\
+    \ WHEN c.Patient_description ILIKE '%Pancreatic adenocarcinoma%' THEN 'PAAD'\n WHEN c.Patient_description\
+    \ ILIKE '%Pheochromocytoma and Paraganglioma%' THEN 'PCPG'\n WHEN c.Patient_description ILIKE '%Prostate\
+    \ adenocarcinoma%' THEN 'PRAD'\n WHEN c.Patient_description ILIKE '%Rectum adenocarcinoma%' THEN 'READ'\n\
+    \ WHEN c.Patient_description ILIKE '%Uterine Carcinosarcoma%' THEN 'UCS'\n WHEN c.Patient_description\
+    \ ILIKE '%Sarcoma%' THEN 'SARC'\n WHEN c.Patient_description ILIKE '%Skin Cutaneous Melanoma%' THEN\
+    \ 'SKCM'\n WHEN c.Patient_description ILIKE '%Stomach adenocarcinoma%' THEN 'STAD'\n WHEN c.Patient_description\
+    \ ILIKE '%Testicular Germ Cell Tumors%' THEN 'TGCT'\n WHEN c.Patient_description ILIKE '%Thymoma%'\
+    \ THEN 'THYM'\n WHEN c.Patient_description ILIKE '%Thyroid carcinoma%' THEN 'THCA'\n WHEN c.Patient_description\
+    \ ILIKE '%Uterine Corpus Endometrial Carcinoma%' THEN 'UCEC'\n WHEN c.Patient_description ILIKE '%Uveal\
+    \ Melanoma%' THEN 'UVM'\nEND\n"
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: days_to_death_num
+  description: 'days_to_death as a number. Stored as VARCHAR; ''[Not Applicable]'' (alive patients, 7,332
+    rows), ''[Discrepancy]'' and NULL all become NULL.
+
+    '
+  sql_expression: TRY_CAST(c.days_to_death AS DOUBLE)
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: days_to_last_followup_num
+  description: 'days_to_last_followup as a number (VARCHAR in storage; ''[Discrepancy]'' and NULL become
+    NULL; 14 rows are negative and are kept as stored).
+
+    '
+  sql_expression: TRY_CAST(c.days_to_last_followup AS DOUBLE)
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: overall_survival_days
+  description: 'Survival time in days: days_to_death for patients whose vital status is Dead, otherwise
+    days_to_last_followup (censored). NULL when the relevant field is a placeholder or the vital status
+    is unknown.
+
+    '
+  sql_expression: "CASE regexp_extract(c.Patient_description, '(Alive|Dead)\\.?\\s*$', 1)\n  WHEN 'Dead'\
+    \ THEN TRY_CAST(c.days_to_death AS DOUBLE)\n  WHEN 'Alive' THEN TRY_CAST(c.days_to_last_followup AS\
+    \ DOUBLE)\nEND\n"
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: patient_count
+  description: Number of distinct patients (barcodes) in clinical_info.
+  sql_expression: COUNT(DISTINCT regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'))
+  source_model: clinical_database.clinical_info
+  from_sql: clinical_database.clinical_info c
+  grain: one row per patient
+  domains:
+  - clinical
+- name: is_reliable_mutation
+  description: 'True for a reliable mutation call: FILTER = ''PASS'' exactly (1,780,124 of ~2.13M rows).
+    Comma-combined or other flag values are not reliable.
+
+    '
+  sql_expression: m.FILTER = 'PASS'
+  source_model: molecular_database.Mutation_Data
+  from_sql: molecular_database.Mutation_Data m
+  grain: one row per mutation call
+  domains:
+  - mutations
+- name: mutated_patient_count
+  description: 'Number of distinct patients with at least one reliable (FILTER = ''PASS'') mutation call
+    in the rows under analysis; add a Hugo_Symbol filter for a gene.
+
+    '
+  sql_expression: COUNT(DISTINCT m.ParticipantBarcode) FILTER (WHERE m.FILTER = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  from_sql: molecular_database.Mutation_Data m
+  grain: one row per mutation call
+  domains:
+  - mutations
+- name: mutated_patients_with_clinical
+  description: 'Distinct patients with a reliable (PASS) mutation, joined to their clinical row via the
+    extracted barcode, so results can be grouped by cancer_type_acronym, gender, vital status etc.
+
+    '
+  sql_expression: COUNT(DISTINCT m.ParticipantBarcode) FILTER (WHERE m.FILTER = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  from_sql: "molecular_database.Mutation_Data m JOIN clinical_database.clinical_info c\n  ON m.ParticipantBarcode\
+    \ = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}')\n"
+  grain: one row per mutation call of a patient that has a clinical record
+  domains:
+  - mutations
+  - cross_database
+- name: mean_normalized_expression
+  description: 'Average normalized RNA expression (normalized_count) over the rows under analysis; NULL
+    counts (177,196 rows) are ignored by AVG. Filter on Symbol and on SampleTypeLetterCode (e.g. ''TP''
+    for primary tumor) as needed.
+
+    '
+  sql_expression: AVG(r.normalized_count)
+  source_model: molecular_database.RNASeq_Expression
+  from_sql: molecular_database.RNASeq_Expression r
+  grain: one row per aliquot x gene
+  domains:
+  - expression
+- name: log2_expression
+  description: 'log2(normalized_count + 1), the usual log transform of the normalized count. Small negative
+    counts (> -1) still give a finite value; NULL stays NULL.
+
+    '
+  sql_expression: log2(r.normalized_count + 1)
+  source_model: molecular_database.RNASeq_Expression
+  from_sql: molecular_database.RNASeq_Expression r
+  grain: one row per aliquot x gene
+  domains:
+  - expression
+- name: expression_with_clinical_mean
+  description: 'Mean normalized_count with expression rows joined to the patient''s clinical record via
+    the extracted barcode, for grouping by cancer type, gender, vital status or other clinical fields.
+
+    '
+  sql_expression: AVG(r.normalized_count)
+  source_model: molecular_database.RNASeq_Expression
+  from_sql: "molecular_database.RNASeq_Expression r JOIN clinical_database.clinical_info c\n  ON r.ParticipantBarcode\
+    \ = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}')\n"
+  grain: one row per aliquot x gene of a patient that has a clinical record
+  domains:
+  - expression
+  - cross_database
+tables:
+- schema: clinical_database
+  table: clinical_info
+  columns:
+  - name: Patient_description
+    type: VARCHAR
+    description: Free-text sentence holding the TCGA barcode, UUID, gender (MALE/FEMALE), cancer type
+      name and vital status (Alive/Dead). Extract with metrics participant_barcode, patient_gender, cancer_type_acronym,
+      vital_status.
+  - name: patient_id
+    type: VARCHAR
+    description: Last 4 characters of the TCGA barcode only (e.g. '1953'); not a join key to molecular
+      data.
+  - name: days_to_birth
+    type: DOUBLE
+    description: Days from birth to diagnosis, negative.
+  - name: days_to_death
+    type: VARCHAR
+    description: Days to death; '[Not Applicable]' for living patients. TRY_CAST to DOUBLE.
+  - name: days_to_last_followup
+    type: VARCHAR
+    description: Days to last follow-up; NULL or '[Discrepancy]' possible. TRY_CAST to DOUBLE.
+  - name: age_at_initial_pathologic_diagnosis
+    type: DOUBLE
+    description: Age in years at initial diagnosis (10-90).
+  - name: pathologic_stage
+    type: VARCHAR
+    description: Pathologic stage, e.g. 'Stage I', 'Stage IIA', 'Stage IV'; also '[Not Applicable]', '[Unknown]',
+      '[Discrepancy]', NULL.
+  - name: race
+    type: VARCHAR
+    description: e.g. WHITE, BLACK OR AFRICAN AMERICAN, ASIAN; '[Unknown]'/'[Not Evaluated]'/NULL are
+      missing.
+  - name: ethnicity
+    type: VARCHAR
+    description: HISPANIC OR LATINO / NOT HISPANIC OR LATINO; bracketed values and NULL are missing.
+  - name: person_neoplasm_cancer_status
+    type: VARCHAR
+    description: TUMOR FREE or WITH TUMOR; '[Unknown]', '[Discrepancy]', NULL are missing.
+  - name: tobacco_smoking_history
+    type: VARCHAR
+    description: Text category, e.g. 'Lifelong Non-smoker', 'Current smoker', 'Current reformed smoker
+      for > 15 years'.
+  - name: neoplasm_histologic_grade
+    type: VARCHAR
+    description: G1-G4, GX, GB, 'High Grade', 'Low Grade'; mostly NULL.
+- schema: molecular_database
+  table: Mutation_Data
+  columns:
+  - name: ParticipantBarcode
+    type: VARCHAR
+    description: Patient identifier (TCGA-XX-XXXX).
+  - name: Tumor_SampleBarcode
+    type: VARCHAR
+    description: Tumor sample identifier.
+  - name: Tumor_AliquotBarcode
+    type: VARCHAR
+    description: Tumor aliquot identifier.
+  - name: Normal_SampleBarcode
+    type: VARCHAR
+    description: Normal control sample identifier.
+  - name: Normal_AliquotBarcode
+    type: VARCHAR
+    description: Normal control aliquot identifier.
+  - name: Normal_SampleTypeLetterCode
+    type: VARCHAR
+    description: 'Sample type abbreviation for the normal sample: NB, NT, NBC.'
+  - name: Hugo_Symbol
+    type: VARCHAR
+    description: Gene symbol of the mutation (e.g. TP53, CDH1).
+  - name: HGVSp_Short
+    type: VARCHAR
+    description: Protein-level mutation annotation (e.g. p.S351P).
+  - name: Variant_Classification
+    type: VARCHAR
+    description: Mutation classification, e.g. Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del,
+      Splice_Site.
+  - name: HGVSc
+    type: VARCHAR
+    description: Coding DNA sequence mutation annotation.
+  - name: CENTERS
+    type: VARCHAR
+    description: Contributing sequencing centers/callers, '|'-separated.
+  - name: FILTER
+    type: VARCHAR
+    description: Mutation filter status; 'PASS' = reliable call. Other values are flags, possibly comma-combined.
+- schema: molecular_database
+  table: RNASeq_Expression
+  columns:
+  - name: ParticipantBarcode
+    type: VARCHAR
+    description: Patient identifier (TCGA-XX-XXXX).
+  - name: SampleBarcode
+    type: VARCHAR
+    description: Sample identifier.
+  - name: AliquotBarcode
+    type: VARCHAR
+    description: Aliquot identifier.
+  - name: SampleTypeLetterCode
+    type: VARCHAR
+    description: 'Sample type abbreviation: TP, TM, TB, TR, TAP, TAM, NT.'
+  - name: SampleType
+    type: VARCHAR
+    description: Sample type description, e.g. 'Primary solid Tumor', 'Solid Tissue Normal'.
+  - name: Symbol
+    type: VARCHAR
+    description: Gene symbol; '?' for unannotated genes (29 Entrez IDs).
+  - name: Entrez
+    type: BIGINT
+    description: Entrez gene ID (documented as str, stored as BIGINT).
+  - name: normalized_count
+    type: DOUBLE
+    description: Normalized RNA expression value; NULL in 177,196 rows, small negatives present.
+relationships:
+- from: molecular_database.Mutation_Data.ParticipantBarcode
+  to: molecular_database.RNASeq_Expression.ParticipantBarcode
+  type: many_to_many
+  description: Same TCGA participant barcode in both molecular tables.

@@ -1,0 +1,484 @@
+{
+ "dataset": "googlelocal",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "googlelocal-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Link reviews to businesses only on gmap_id (review_database.review.gmap_id = business_database.business_description.gmap_id), never on name",
+      "where": "contract.yml rules.join_on_gmap_id.description (also domains.reviews.description, semantic.yml review.gmap_id column)"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.business_average_rating.from_sql; metrics.business_review_count.from_sql",
+      "summary": "relationship review.gmap_id -> business_description.gmap_id many_to_one; business_average_rating inner-joins on r.gmap_id = b.gmap_id; business_review_count LEFT JOINs from business_description on the same key"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "ran each joining from_sql on the built file: 2000 joined rows, 0 reviews unmatched, 0 rows whose r.gmap_id differs from b.gmap_id; review count per business agrees with the reference on 79 of 79 businesses. Relationship declared with keys review_database.review.gmap_id -> business_database.business_description.gmap_id, many_to_one. Agrees with the reference (2000 rows, many-to-one).",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "googlelocal-2",
+     "cls": "guidance",
+     "category": "missed",
+     "text_reading": {
+      "quote": "Business description; values begin with a leading space.",
+      "where": "semantic.yml tables.business_description.columns.description (domains.businesses.description says only 'description = business description')"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "Kept as guidance (the reference's note: close to data-discoverable, but names no records or reading).",
+     "notes": "The contract says nothing about what the description column holds beyond restating DAB's 'business description'; it never says that location (city, state, ZIP) or the kind of business is to be read from it. No metric reads description."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "`time` is VARCHAR and stored in THREE formats mixed together ... use the metric review_timestamp, which parses all 2000 rows (range 2011-05-04 to 2021-09-08)",
+     "where": "contract.yml domains.reviews.description; semantic.yml metrics.review_timestamp",
+     "confirmed": "yes",
+     "note": "679 / 661 / 660 rows parse in the three formats; the coalesce parses all 2000; min 2011-05-04, max 2021-09-08."
+    },
+    {
+     "quote": "Every rating is an integer between 1 and 5 and none is NULL.",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Reviewer names are not unique people identifiers: the same name appears on several reviews.",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes",
+     "note": "2000 reviews carry 1917 distinct reviewer names."
+    },
+    {
+     "quote": "79 businesses, gmap_id and name both unique.",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "`hours` is VARCHAR holding a JSON array of 7 [day, hours] pairs ... (en dash between times; values like 'Closed' and 'Open 24 hours'); NULL for 13 businesses.",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.hours_for_day",
+     "confirmed": "yes",
+     "note": "hours non-NULL 66 rows, each a JSON array of 7 pairs; NULL 13; 64 of 66 carry an en dash, none a hyphen range."
+    },
+    {
+     "quote": "`MISC` is VARCHAR holding a JSON object mapping a category (...) to a list of strings; NULL for 16 businesses. Access with json_extract(MISC, '$.\"Service options\"')",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.misc_attribute_values",
+     "confirmed": "yes",
+     "note": "MISC NULL 16; 14 distinct keys, matching the list. The metric runs (25 non-NULL)."
+    },
+    {
+     "quote": "`state` is a free-text Google Maps status snapshot ... NULL for 9. 'Closed ⋅ Opens ...' means closed at that hour, not closed as a business",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.business_status_category",
+     "confirmed": "yes",
+     "note": "state NULL 9; values are Google Maps status texts ('Open ⋅ Closes 5PM' etc.), Permanently closed 3, Temporarily closed 1. The reading of 'Closed ⋅ Opens ...' as operating is a convention; the values are confirmed."
+    },
+    {
+     "quote": "`description` values start with a leading space; trim before comparing.",
+     "where": "contract.yml domains.businesses.description; semantic.yml description column",
+     "confirmed": "no",
+     "note": "76 of 79 descriptions start with a space; 3 do not. The advice to trim is still safe."
+    },
+    {
+     "quote": "num_of_reviews equals the count of rows in review for every business except gmap_60 (48 vs 17 reviews present); the stored total is 2031 against 2000 review rows.",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.stated_num_of_reviews, business_review_count",
+     "confirmed": "yes",
+     "note": "Only gmap_60 differs (48 stated vs 17 rows); SUM(num_of_reviews) = 2031."
+    },
+    {
+     "quote": "Described as stored in SQLite / PostgreSQL, but queried here as a DuckDB schema.",
+     "where": "contract.yml allowed_tables[*].description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "googlelocal-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "JOIN: review.gmap_id = business_description.gmap_id (many reviews to one business).",
+      "where": "contract.yml domains.reviews.description (also rules.join_on_gmap_id)"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.business_average_rating.from_sql",
+      "summary": "relationship review.gmap_id -> business_description.gmap_id many_to_one; business_average_rating inner-joins on r.gmap_id = b.gmap_id"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "ran each joining from_sql on the built file: 2000 joined rows, 0 reviews unmatched, 0 rows whose r.gmap_id differs from b.gmap_id; review count per business agrees with the reference on 79 of 79 businesses. Relationship declared with keys review_database.review.gmap_id -> business_database.business_description.gmap_id, many_to_one. Agrees with the reference (2000 rows, many-to-one).",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "googlelocal-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "description (business description, often starts with a leading space and mentions the city/ZIP, e.g. 'Los Angeles, CA 90023')",
+      "where": "contract.yml domains.businesses.description; semantic.yml tables.business_description.columns.description ('often has a leading space and mentions city/state/ZIP')"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "Kept as guidance (the reference's note: close to data-discoverable, but names no records or reading).",
+     "notes": "States that description carries the business's location (city/state/ZIP), the reference's equivalent. It does not say this is the only place location lives, nor mention the kind of business, and builds no metric on it; the item implies no computation, so recovered."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "time is VARCHAR in three mixed formats: '2021-04-12 17:07:52' (ISO, ~680 rows), ... use the metric review_timestamp, which parses all 2000 rows (range 2011-05-04 to 2021-09-08)",
+     "where": "contract.yml domains.reviews.description; semantic.yml metrics.review_timestamp",
+     "confirmed": "yes",
+     "note": "679 / 661 / 660 rows parse in the three formats; the coalesce parses all 2000; min 2011-05-04, max 2021-09-08."
+    },
+    {
+     "quote": "rating ... 1-5 scale; no NULLs, values 1..5",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "79 rows, gmap_id unique, names unique",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "hours is a VARCHAR holding a JSON array of [day, hours] pairs ... the time range separator is an EN DASH ... 13 rows have NULL hours. Parse with CAST(hours::JSON AS VARCHAR[][]).",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.business_hours_for_day",
+     "confirmed": "yes",
+     "note": "hours non-NULL 66 rows, each a JSON array of 7 pairs; NULL 13; 64 of 66 carry an en dash, none a hyphen range. The cast runs."
+    },
+    {
+     "quote": "MISC is a VARCHAR holding a JSON object mapping a category to a list of strings ... 16 rows NULL. Keys seen: ... use MISC::JSON->'Service options'",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.misc_has_attribute",
+     "confirmed": "yes",
+     "note": "MISC NULL 16; 14 distinct keys, matching the list. The -> access runs."
+    },
+    {
+     "quote": "state is free text from Google Maps, not a clean enum ... 9 rows NULL. 'Closed ⋅ Opens ...' means closed at the moment of collection, not permanently closed",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.business_operating_status",
+     "confirmed": "yes",
+     "note": "state NULL 9; values are Google Maps status texts ('Open ⋅ Closes 5PM' etc.), Permanently closed 3, Temporarily closed 1."
+    },
+    {
+     "quote": "often starts with a leading space",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes",
+     "note": "76 of 79."
+    },
+    {
+     "quote": "business_description.num_of_reviews is the stored total and can differ from the count of rows in review (e.g. gmap_60: 48 vs 17)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes",
+     "note": "Only gmap_60 differs (48 stated vs 17 rows); SUM(num_of_reviews) = 2031."
+    },
+    {
+     "quote": "Described as SQLite / PostgreSQL; here a DuckDB schema.",
+     "where": "contract.yml allowed_tables[*].description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "googlelocal-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Reviews link to businesses only via gmap_id (review_database.review.gmap_id = business_database.business_description.gmap_id); ... never join on name.",
+      "where": "contract.yml rules.join_on_gmap_id.description (also domains.reviews.description: 'Every review gmap_id exists in business_description')"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.business_average_rating.from_sql",
+      "summary": "relationship review.gmap_id -> business_description.gmap_id many_to_one; business_average_rating inner-joins on r.gmap_id = b.gmap_id"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "ran each joining from_sql on the built file: 2000 joined rows, 0 reviews unmatched, 0 rows whose r.gmap_id differs from b.gmap_id; review count per business agrees with the reference on 79 of 79 businesses. Relationship declared with keys review_database.review.gmap_id -> business_database.business_description.gmap_id, many_to_one. Agrees with the reference (2000 rows, many-to-one).",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "googlelocal-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The US state/city/ZIP of a business appears only inside the description text (e.g. 'Los Angeles, CA 90023').",
+      "where": "contract.yml domains.businesses.description; also rules.state_is_operating_status ('location must be read from description') and semantic.yml description column"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "Kept as guidance (the reference's note: close to data-discoverable, but names no records or reading).",
+     "notes": "States the reference's equivalent: location lives only in description and must be read from it. No metric extracts it; none is required."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "time is VARCHAR in three mixed formats ... use the metric review_timestamp, which parses all 2000 rows (range 2011-05-04 to 2021-09-08)",
+     "where": "contract.yml domains.reviews.description; semantic.yml metrics.review_timestamp",
+     "confirmed": "yes",
+     "note": "679 / 661 / 660 rows parse in the three formats; the coalesce parses all 2000; min 2011-05-04, max 2021-09-08."
+    },
+    {
+     "quote": "rating (1-5 scale, no NULLs)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "79 rows, gmap_id unique",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "description (business description; 76 of 79 start with a leading space - TRIM before comparing)",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "hours is VARCHAR holding a JSON array of [day, hours] pairs ... (the range separator is an en dash) ...; 13 rows are NULL.",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes",
+     "note": "hours non-NULL 66 rows, each a JSON array of 7 pairs; NULL 13; 64 of 66 carry an en dash, none a hyphen range."
+    },
+    {
+     "quote": "MISC is VARCHAR holding a JSON object of category -> list of strings ...; 16 rows NULL. Keys seen: ... list_contains(CAST(json_extract(MISC,'$.\"Service options\"') AS VARCHAR[]), 'Delivery')",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes",
+     "note": "MISC NULL 16; 14 distinct keys, matching the list."
+    },
+    {
+     "quote": "state is NOT a US state - it is the Google Maps status text as scraped ...; 9 rows NULL. ... only 'Permanently closed' / 'Temporarily closed' indicate a business not operating.",
+     "where": "contract.yml domains.businesses.description, rules.state_is_operating_status; semantic.yml metrics.is_permanently_or_temporarily_closed, is_open_status",
+     "confirmed": "yes",
+     "note": "state NULL 9; values are Google Maps status texts ('Open ⋅ Closes 5PM' etc.), Permanently closed 3, Temporarily closed 1. is_open_status excludes 'Opens soon ⋅ 10AM' (1 row) by its own description; draws A1/A2 count it as open. A convention, not checkable."
+    },
+    {
+     "quote": "Review text may begin with generated location boilerplate (e.g. 'Located in ... Los Angeles, CA 90023 ...') before the quoted original review.",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes",
+     "note": "269 review texts begin 'Located in'; 982 of 2000 contain a 'City, ST ZIP' fragment."
+    },
+    {
+     "quote": "for 78 businesses num_of_reviews equals the count of rows in review; for one (gmap_60: 48 vs 17 rows) the table holds fewer.",
+     "where": "contract.yml domains.reviews.description; semantic.yml metrics.total_num_of_reviews",
+     "confirmed": "yes",
+     "note": "Only gmap_60 differs (48 stated vs 17 rows); SUM(num_of_reviews) = 2031."
+    },
+    {
+     "quote": "Documented as stored in PostgreSQL / SQLite; here it is a DuckDB schema, so write DuckDB SQL.",
+     "where": "contract.yml allowed_tables[*].description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "googlelocal-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "JOIN: the two databases are joined on gmap_id to combine review information with business metadata.",
+      "where": "contract.yml domains.reviews.description (also rules.join_on_gmap_id, semantic.yml relationships[0].description)"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.business_average_rating.from_sql",
+      "summary": "relationship review.gmap_id -> business_description.gmap_id many_to_one; business_average_rating inner-joins on r.gmap_id = b.gmap_id"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "ran each joining from_sql on the built file: 2000 joined rows, 0 reviews unmatched, 0 rows whose r.gmap_id differs from b.gmap_id; review count per business agrees with the reference on 79 of 79 businesses. Relationship declared with keys review_database.review.gmap_id -> business_database.business_description.gmap_id, many_to_one. Agrees with the reference (2000 rows, many-to-one).",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "googlelocal-2",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "LOCATION: the documentation says needed information can be taken from the `description` column. Descriptions are free text ... and usually embed an address fragment \"City, ST 12345\"",
+      "where": "contract.yml domains.businesses.description; semantic.yml description column ('Source for location')"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.business_state_code, business_zip_code",
+      "summary": "regexp_extract of ',\\s*([A-Z]{2})\\s+(\\d{5})' from description: state code 'CA' for 78 businesses and '' for gmap_36; ZIP for the same 78 (65 distinct) and '' for gmap_36. Agrees with the reference characterisation (78 of 79 with 'City, ST ZIP', all CA, 65 ZIPs, the one other blank)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "Kept as guidance (the reference's note: close to data-discoverable, but names no records or reading).",
+     "notes": "States the hint and its meaning for this data (location in description). The item implies no computation; the location metrics go beyond it and agree with the reference's characterisation. The text also quotes the hint ('the documentation says'), as expected of draw B."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "TIME is VARCHAR in three mixed formats (checked) ... use the metric `review_timestamp`, which parses all 2000 rows (range 2011-05-04 to 2021-09-08).",
+     "where": "contract.yml domains.reviews.description; semantic.yml metrics.review_timestamp",
+     "confirmed": "yes",
+     "note": "679 / 661 / 660 rows parse in the three formats; the coalesce parses all 2000; min 2011-05-04, max 2021-09-08."
+    },
+    {
+     "quote": "rating (1-5 scale integer, no NULLs)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "79 rows, gmap_id unique",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Descriptions are free text with a leading space",
+     "where": "contract.yml domains.businesses.description; semantic.yml description column",
+     "confirmed": "no",
+     "note": "76 of 79 descriptions start with a space; 3 do not. The advice to trim is still safe."
+    },
+    {
+     "quote": "HOURS is stored as VARCHAR holding JSON text ... (note the en dash). NULL for 13 businesses. Example access: json_extract_string(hours, '$[0][1]'), or unnest via from_json(hours, '[\"VARCHAR[]\"]').",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes",
+     "note": "hours non-NULL 66 rows, each a JSON array of 7 pairs; NULL 13; 64 of 66 carry an en dash, none a hyphen range. Both access expressions run."
+    },
+    {
+     "quote": "MISC is VARCHAR holding a JSON object whose keys are categories ... NULL for 16 businesses. ... json_extract(MISC, '$.\"Service options\"')",
+     "where": "contract.yml domains.businesses.description",
+     "confirmed": "yes",
+     "note": "MISC NULL 16; 14 distinct keys, matching the list."
+    },
+    {
+     "quote": "STATE (operating status) is not a US state. Observed values: ... 'Open ⋅ Closes 5PM' (... some with '⋅ Reopens ...'), ... 'Permanently closed' (3), 'Temporarily closed' (1), and NULL (9). The separator is '⋅' (U+22C5).",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.business_operating_status",
+     "confirmed": "yes",
+     "note": "state NULL 9; values are Google Maps status texts ('Open ⋅ Closes 5PM' etc.), Permanently closed 3, Temporarily closed 1. 4 values carry '⋅ Reopens'. business_operating_status maps 'Closed ⋅ Opens ...' to 'open' by its own description (A1/A2 use 'closed now'): a convention."
+    },
+    {
+     "quote": "num_of_reviews equals the count of review rows for 78 of 79 businesses; gmap_60 states 48 but has 17 review rows.",
+     "where": "contract.yml domains.reviews.description; semantic.yml num_of_reviews column",
+     "confirmed": "yes",
+     "note": "Only gmap_60 differs (48 stated vs 17 rows); SUM(num_of_reviews) = 2031."
+    },
+    {
+     "quote": "no_select_star rule: Queries must name their columns (enforcement: block).",
+     "where": "contract.yml rules.no_select_star",
+     "confirmed": "cannot be checked",
+     "note": "A policy the author added, not a property of the data."
+    },
+    {
+     "quote": "Documented as stored in PostgreSQL / SQLite; here it is a schema of one DuckDB database.",
+     "where": "contract.yml allowed_tables[*].description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "googlelocal-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "a cross-database query is a plain join written in DuckDB SQL: review_database.review r JOIN business_database.business_description b ON r.gmap_id = b.gmap_id.",
+      "where": "contract.yml domains.cross_database.description (also rules.join_on_gmap_id)"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.business_review_count.from_sql, business_average_rating.from_sql",
+      "summary": "relationship review.gmap_id -> business_description.gmap_id many_to_one; both metrics inner-join on r.gmap_id = b.gmap_id"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "ran each joining from_sql on the built file: 2000 joined rows, 0 reviews unmatched, 0 rows whose r.gmap_id differs from b.gmap_id; review count per business agrees with the reference on 79 of 79 businesses. Relationship declared with keys review_database.review.gmap_id -> business_database.business_description.gmap_id, many_to_one. Agrees with the reference (2000 rows, many-to-one).",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "googlelocal-2",
+     "cls": "guidance",
+     "category": "missed",
+     "text_reading": {
+      "quote": "description = business description",
+      "where": "contract.yml domains.businesses.description; semantic.yml description column ('Business description.')"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "Kept as guidance (the reference's note: close to data-discoverable, but names no records or reading).",
+     "notes": "Restates DAB's field description only; nothing says description holds location or is to be read for facts held nowhere else. The no-data author could not see the values."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "time = timestamp of the review, stored as text (VARCHAR) - inspect its format before parsing it",
+     "where": "contract.yml domains.reviews.description; semantic.yml time column",
+     "confirmed": "yes",
+     "note": "Stored as VARCHAR in three formats; the contract does not give them."
+    },
+    {
+     "quote": "num_of_reviews = total number of reviews for this business (a stored attribute; it may differ from the count of rows present in review_database.review)",
+     "where": "contract.yml domains.businesses.description; semantic.yml metrics.listed_num_of_reviews, business_review_count",
+     "confirmed": "yes",
+     "note": "Only gmap_60 differs (48 stated vs 17 rows); SUM(num_of_reviews) = 2031."
+    },
+    {
+     "quote": "state = business operating status (e.g. open, closed, temporarily closed) - it is NOT a US state / geographic field.",
+     "where": "contract.yml domains.businesses.description, rules.state_is_operating_status",
+     "confirmed": "yes",
+     "note": "state NULL 9; values are Google Maps status texts ('Open ⋅ Closes 5PM' etc.), Permanently closed 3, Temporarily closed 1."
+    },
+    {
+     "quote": "The two databases are schemas of one DuckDB database, so a cross-database query is a plain join written in DuckDB SQL",
+     "where": "contract.yml domains.cross_database.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review.rating is on a 1-5 scale; treat values outside 1-5 as invalid.",
+     "where": "contract.yml rules.rating_scale",
+     "confirmed": "yes",
+     "note": "All 2000 ratings are 1..5; none would be treated as invalid."
+    },
+    {
+     "quote": "Both databases cover Google Maps data collected up to September 2021 in the United States; no data after that is available.",
+     "where": "contract.yml rules.data_coverage",
+     "confirmed": "yes",
+     "note": "Latest parsed review time 2021-09-08."
+    },
+    {
+     "quote": "Both tables have a `name` column with different meanings (reviewer name vs business name); always qualify it.",
+     "where": "contract.yml domains.cross_database.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  }
+ }
+}

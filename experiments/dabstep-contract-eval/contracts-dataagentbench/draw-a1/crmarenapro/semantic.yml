@@ -1,0 +1,277 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: crmarenapro, author: claudeopus5.5
+metrics:
+- name: clean_id
+  description: 'Canonical form of any Id or foreign-key value: strip whitespace and the leading ''#''
+    that ~25% of stored ids carry. Shown on Opportunity.Id; apply the same expression to every id column
+    on both sides of a join.
+
+    '
+  sql_expression: ltrim(trim(o.Id), '#')
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - data_quality
+- name: opportunity_count
+  description: Number of distinct opportunities (cleaned ids).
+  sql_expression: COUNT(DISTINCT ltrim(trim(o.Id), '#'))
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - sales
+- name: opportunity_amount_total
+  description: Sum of Opportunity.Amount (DOUBLE, no NULLs). Filter stages with trim(o.StageName).
+  sql_expression: SUM(o.Amount)
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - sales
+- name: closed_opportunity_count
+  description: Opportunities whose trimmed StageName is 'Closed' (no won/lost split exists).
+  sql_expression: COUNT(DISTINCT ltrim(trim(o.Id), '#')) FILTER (WHERE trim(o.StageName) = 'Closed')
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - sales
+- name: opportunity_probability
+  description: Opportunity win probability as a percentage number (stored as text like '75.0').
+  sql_expression: CAST(o.Probability AS DOUBLE)
+  source_model: sales_pipeline.Opportunity
+  from_sql: sales_pipeline.Opportunity o
+  grain: one row per opportunity
+  domains:
+  - sales
+- name: lead_conversion_rate
+  description: 'Share of leads converted, using IsConverted = 1 (consistent with ConvertedDate). Status
+    = ''Converted'' is NOT reliable: 384 such leads have IsConverted = 0 and no conversion date.
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE l.IsConverted = 1) * 1.0 / NULLIF(COUNT(*), 0)
+  source_model: sales_pipeline.Lead
+  from_sql: sales_pipeline.Lead l
+  grain: one row per lead
+  domains:
+  - sales
+- name: lead_days_to_conversion
+  description: Days from lead creation to conversion, for converted leads (IsConverted = 1); NULL otherwise.
+  sql_expression: date_diff('day', CAST(CAST(l.CreatedDate AS TIMESTAMP) AS DATE), CAST(l.ConvertedDate
+    AS DATE))
+  source_model: sales_pipeline.Lead
+  from_sql: sales_pipeline.Lead l
+  grain: one row per lead
+  domains:
+  - sales
+- name: quote_line_total
+  description: 'Value of a quote line after discount: Quantity * UnitPrice * (1 - Discount/100), which
+    equals the stored TotalPrice on every row (verified). Discount is a percent.
+
+    '
+  sql_expression: CAST(qli.Quantity AS DOUBLE) * CAST(qli.UnitPrice AS DOUBLE) * (1 - CAST(qli.Discount
+    AS DOUBLE) / 100)
+  source_model: sales_pipeline.QuoteLineItem
+  from_sql: sales_pipeline.QuoteLineItem qli
+  grain: one row per quote line item
+  domains:
+  - sales
+- name: opportunity_line_total
+  description: Sum of OpportunityLineItem.TotalPrice (text cast to DOUBLE).
+  sql_expression: SUM(CAST(oli.TotalPrice AS DOUBLE))
+  source_model: sales_pipeline.OpportunityLineItem
+  from_sql: sales_pipeline.OpportunityLineItem oli
+  grain: one row per opportunity line item
+  domains:
+  - sales
+- name: contract_term_months
+  description: Contract term in months (ContractTerm text cast to integer).
+  sql_expression: CAST(ct.ContractTerm AS INTEGER)
+  source_model: sales_pipeline.Contract
+  from_sql: sales_pipeline.Contract ct
+  grain: one row per contract
+  domains:
+  - sales
+- name: order_item_amount
+  description: 'Value of an order line: Quantity * UnitPrice (both text, cast to DOUBLE). Sum it for order
+    revenue.'
+  sql_expression: CAST(oi.Quantity AS DOUBLE) * CAST(oi.UnitPrice AS DOUBLE)
+  source_model: products_orders.OrderItem
+  from_sql: products_orders.OrderItem oi
+  grain: one row per order item
+  domains:
+  - products_orders
+- name: order_revenue_by_account
+  description: Order revenue joined through cleaned order ids; group by ltrim(trim(od.AccountId), '#').
+  sql_expression: SUM(CAST(oi.Quantity AS DOUBLE) * CAST(oi.UnitPrice AS DOUBLE))
+  source_model: products_orders.OrderItem
+  from_sql: products_orders."Order" od JOIN products_orders.OrderItem oi ON ltrim(trim(oi.OrderId), '#')
+    = ltrim(trim(od.Id), '#')
+  grain: one row per order item joined to its order
+  domains:
+  - products_orders
+- name: case_handle_time_hours
+  description: 'Hours from case creation to close, for closed cases (trim(status) = ''Closed''; all of
+    them have closeddate; NULL for open cases). Timestamps are UTC ISO strings.
+
+    '
+  sql_expression: date_diff('second', CAST(c.createddate AS TIMESTAMP), CAST(c.closeddate AS TIMESTAMP))
+    / 3600.0
+  source_model: support.Case
+  from_sql: support."Case" c
+  grain: one row per case
+  domains:
+  - support_cases
+- name: open_case_count
+  description: 'Cases not closed: trimmed status ''Working'' or ''Waiting on Customer''.'
+  sql_expression: COUNT(DISTINCT ltrim(trim(c.id), '#')) FILTER (WHERE trim(c.status) <> 'Closed')
+  source_model: support.Case
+  from_sql: support."Case" c
+  grain: one row per case
+  domains:
+  - support_cases
+- name: cases_per_issue
+  description: Case count per issue, joined on cleaned ids; group by trim(i.name).
+  sql_expression: COUNT(DISTINCT ltrim(trim(c.id), '#'))
+  source_model: support.Case
+  from_sql: support."Case" c JOIN support.issue__c i ON ltrim(trim(c.issueid__c), '#') = ltrim(trim(i.id),
+    '#')
+  grain: one row per case with its issue
+  domains:
+  - support_cases
+- name: event_duration_minutes
+  description: Event duration in minutes (DurationInMinutes text cast to DOUBLE).
+  sql_expression: CAST(e.DurationInMinutes AS DOUBLE)
+  source_model: activities.Event
+  from_sql: activities.Event e
+  grain: one row per event
+  domains:
+  - activities
+- name: account_territory_match
+  description: 'True when an account''s trimmed ShippingState is listed in a territory''s comma-separated
+    Description of state codes.
+
+    '
+  sql_expression: list_contains(string_split(replace(t.Description, ' ', ''), ','), trim(a.ShippingState))
+  source_model: territory.Territory2
+  from_sql: core_crm.Account a JOIN territory.Territory2 t ON list_contains(string_split(replace(t.Description,
+    ' ', ''), ','), trim(a.ShippingState))
+  grain: one row per (account, territory covering its shipping state)
+  domains:
+  - territory
+tables:
+- schema: sales_pipeline
+  table: Lead
+  columns:
+  - name: Status
+    type: VARCHAR
+    description: New, Working, Qualified, Converted (trim first). Not reliable for conversion; use IsConverted.
+  - name: IsConverted
+    type: BIGINT
+    description: 1 = converted (885 leads), 0 otherwise. Authoritative conversion flag.
+  - name: CreatedDate
+    type: VARCHAR
+    description: ISO UTC timestamp string.
+  - name: ConvertedDate
+    type: VARCHAR
+    description: Date string, NULL unless IsConverted = 1.
+- schema: sales_pipeline
+  table: Opportunity
+  columns:
+  - name: StageName
+    type: VARCHAR
+    description: Qualification, Discovery, Quote, Negotiation, Closed.
+  - name: Probability
+    type: VARCHAR
+    description: Percent as text, e.g. '75.0'.
+  - name: Amount
+    type: DOUBLE
+    description: Deal amount.
+  - name: ContractID__c
+    type: VARCHAR
+    description: Linked Contract Id (may carry '#').
+  - name: CloseDate
+    type: VARCHAR
+    description: Date string YYYY-MM-DD.
+- schema: sales_pipeline
+  table: QuoteLineItem
+  columns:
+  - name: Discount
+    type: VARCHAR
+    description: Discount percent as text (0-30).
+  - name: TotalPrice
+    type: VARCHAR
+    description: Quantity * UnitPrice * (1 - Discount/100).
+- schema: sales_pipeline
+  table: Contract
+  columns:
+  - name: Status
+    type: VARCHAR
+    description: Only 'Activated' (with stray spaces).
+  - name: ContractTerm
+    type: VARCHAR
+    description: Term in months, as text.
+- schema: support
+  table: Case
+  columns:
+  - name: status
+    type: VARCHAR
+    description: Working, Waiting on Customer, Closed (trim first).
+  - name: priority
+    type: VARCHAR
+    description: High, Medium, Low.
+  - name: closeddate
+    type: VARCHAR
+    description: ISO UTC timestamp; NULL for open cases.
+  - name: issueid__c
+    type: VARCHAR
+    description: Links to issue__c.id.
+  - name: orderitemid__c
+    type: VARCHAR
+    description: Links to products_orders.OrderItem.Id.
+- schema: support
+  table: casehistory__c
+  columns:
+  - name: field__c
+    type: VARCHAR
+    description: '''Case Creation'', ''Owner Assignment'', ''Case Closed''.'
+  - name: newvalue__c
+    type: VARCHAR
+    description: For Owner Assignment, the new owner's User Id.
+- schema: support
+  table: emailmessage
+  columns:
+  - name: parentid
+    type: VARCHAR
+    description: Case id or NULL.
+  - name: relatedtoid
+    type: VARCHAR
+    description: Opportunity id ('006...') or Case id ('500...').
+  - name: toids
+    type: VARCHAR
+    description: JSON-style array text of recipient ids.
+- schema: activities
+  table: Task
+  columns:
+  - name: WhatId
+    type: VARCHAR
+    description: Opportunity Id.
+  - name: Status
+    type: VARCHAR
+    description: Not Started, In Progress, Deferred, Waiting, Completed.
+- schema: activities
+  table: Event
+  columns:
+  - name: WhatId
+    type: VARCHAR
+    description: Opportunity Id.
+  - name: DurationInMinutes
+    type: VARCHAR
+    description: Minutes as text.
+- schema: territory
+  table: Territory2
+  columns:
+  - name: Description
+    type: VARCHAR
+    description: Comma-separated US state codes covered, e.g. 'MO,KS,OK'.

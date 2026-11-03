@@ -1,0 +1,128 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockmarket, author: claudeopus5.5
+metrics:
+- name: trading_date
+  description: 'The trading date of a daily row, as a DATE. The documented Date field is stored as a string,
+    so cast it before any date logic. The metric is written against one representative table. Substitute
+    the ticker table you need (stocktrade_database."<SYMBOL>").
+
+    '
+  sql_expression: TRY_CAST("Date" AS DATE)
+  source_model: stocktrade_database.EMTY
+  domains:
+  - daily_trading
+- name: daily_price_range
+  description: 'The intraday price range of one trading day: the highest price during the day minus the
+    lowest price during the day (High - Low). Written against a representative table. Substitute the ticker
+    table you need.
+
+    '
+  sql_expression: '"High" - "Low"'
+  source_model: stocktrade_database.EMTY
+  domains:
+  - daily_trading
+- name: daily_open_to_close_change
+  description: 'The price change within one trading day: closing price minus opening price (Close - Open).
+    Written against a representative table. Substitute the ticker table you need.
+
+    '
+  sql_expression: '"Close" - "Open"'
+  source_model: stocktrade_database.EMTY
+  domains:
+  - daily_trading
+- name: total_volume
+  description: 'Total number of shares traded over the selected trading days (sum of Volume). Volume is
+    BIGINT in most tables and DOUBLE in 38, so it is cast to DOUBLE here. Written against a representative
+    table. Substitute the ticker table you need.
+
+    '
+  sql_expression: SUM(CAST("Volume" AS DOUBLE))
+  source_model: stocktrade_database.EMTY
+  domains:
+  - daily_trading
+- name: average_close
+  description: 'Average closing price over the selected trading days. Use "Adj Close" (the adjusted closing
+    price) instead when the question asks for adjusted prices. Written against a representative table.
+    Substitute the ticker table you need.
+
+    '
+  sql_expression: AVG("Close")
+  source_model: stocktrade_database.EMTY
+  domains:
+  - daily_trading
+- name: security_count
+  description: 'Number of distinct securities (ticker symbols) in the stockinfo metadata, over whatever
+    filter is applied.
+
+    '
+  sql_expression: COUNT(DISTINCT "Symbol")
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - security_metadata
+tables:
+- schema: stockinfo_database
+  table: stockinfo
+  columns:
+  - name: Nasdaq Traded
+    type: VARCHAR
+    description: Whether the stock is traded on NASDAQ. Code values are not documented. Check the distinct
+      values.
+  - name: Symbol
+    type: VARCHAR
+    description: Stock ticker symbol. It equals the name of the security's daily price table in stocktrade_database.
+  - name: Listing Exchange
+    type: VARCHAR
+    description: Exchange where the stock is listed. Code values are not documented. Check the distinct
+      values.
+  - name: Market Category
+    type: VARCHAR
+    description: Market category classification. Code values are not documented. Check the distinct values.
+  - name: ETF
+    type: VARCHAR
+    description: Whether the security is an ETF. Code values are not documented. Check the distinct values.
+  - name: Round Lot Size
+    type: DOUBLE
+    description: Standard trading unit size.
+  - name: Test Issue
+    type: VARCHAR
+    description: Whether this is a test issue. Code values are not documented. Check the distinct values.
+  - name: Financial Status
+    type: VARCHAR
+    description: Financial status (delinquent, deficient, etc.). May be null.
+  - name: NextShares
+    type: VARCHAR
+    description: NextShares designation.
+  - name: Company Description
+    type: VARCHAR
+    description: Company name and description.
+- schema: stocktrade_database
+  table: EMTY
+  columns: &id001
+  - name: Date
+    type: VARCHAR
+    description: Trading date, stored as a string. Cast with TRY_CAST("Date" AS DATE) before date logic.
+  - name: Open
+    type: DOUBLE
+    description: Opening price.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day.
+  - name: Close
+    type: DOUBLE
+    description: Closing price.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price.
+  - name: Volume
+    type: BIGINT
+    description: Number of shares traded. BIGINT in 2,715 tables and DOUBLE in 38. Cast it when combining
+      tables.
+- schema: stocktrade_database
+  table: ITI
+  columns: *id001
+- schema: stocktrade_database
+  table: MNE
+  columns: *id001

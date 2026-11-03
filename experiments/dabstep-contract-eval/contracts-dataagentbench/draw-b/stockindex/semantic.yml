@@ -1,0 +1,155 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+metrics:
+- name: trade_date
+  description: 'Trading date parsed from the text Date column, which mixes three formats (''1987-01-05
+    00:00:00'', ''31 Dec 1986, 00:00'', ''January 02, 1987 at 12:00 AM''). Verified: every row parses
+    with this expression; result is a DATE.
+
+    '
+  sql_expression: "CAST(COALESCE(try_strptime(t.Date, '%Y-%m-%d %H:%M:%S'),\n              try_strptime(t.Date,\
+    \ '%d %b %Y, %H:%M'),\n              try_strptime(t.Date, '%B %d, %Y at %I:%M %p')) AS DATE)\n"
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: is_up_day
+  description: 'Up day: trading day where the closing price is higher than the opening price (Close >
+    Open).'
+  sql_expression: t.Close > t.Open
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: is_down_day
+  description: 'Down day: trading day where the closing price is lower than the opening price (Close <
+    Open). Close = Open is neither up nor down.'
+  sql_expression: t.Close < t.Open
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: up_days
+  description: Number of up days (Close > Open) in the group.
+  sql_expression: COUNT(*) FILTER (WHERE t.Close > t.Open)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: down_days
+  description: Number of down days (Close < Open) in the group.
+  sql_expression: COUNT(*) FILTER (WHERE t.Close < t.Open)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: daily_intraday_volatility
+  description: 'Relative fluctuation within one trading day: (High - Low) / Open. Open is never 0 or NULL
+    in the data.'
+  sql_expression: (t.High - t.Low) / t.Open
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: average_intraday_volatility
+  description: 'Average intraday volatility: (High - Low) / Open computed for each trading day, then averaged
+    (unweighted mean of daily values) across the given time period and group. Filter the period with trade_date,
+    not the raw Date string.
+
+    '
+  sql_expression: AVG((t.High - t.Low) / t.Open)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - daily_prices
+- name: index_region
+  description: 'Region of an index, inferred from the geography of the exchange it tracks (not stored
+    in the data). m is a mapping of index_symbol -> exchange -> region: NYA/IXIC/GSPTSE North America;
+    HSI, 000001.SS, 399001.SZ, N225, NSEI, KS11, TWII Asia; N100, GDAXI, SSMI Europe; J203.JO Africa.
+    Joined to index_info for Currency (LEFT JOIN on full exchange name). KS11 (Korea Exchange) has no
+    price rows, so the inner join on index_trade drops it.
+
+    '
+  sql_expression: m.region
+  source_model: indextrade_database.index_trade
+  from_sql: "indextrade_database.index_trade t JOIN (VALUES ('NYA','New York Stock Exchange','North America'),\n\
+    \             ('IXIC','NASDAQ','North America'),\n             ('GSPTSE','Toronto Stock Exchange','North\
+    \ America'),\n             ('HSI','Hong Kong Stock Exchange','Asia'),\n             ('000001.SS','Shanghai\
+    \ Stock Exchange','Asia'),\n             ('399001.SZ','Shenzhen Stock Exchange','Asia'),\n       \
+    \      ('N225','Tokyo Stock Exchange','Asia'),\n             ('NSEI','National Stock Exchange of India','Asia'),\n\
+    \             ('KS11','Korea Exchange','Asia'),\n             ('TWII','Taiwan Stock Exchange','Asia'),\n\
+    \             ('N100','Euronext','Europe'),\n             ('GDAXI','Frankfurt Stock Exchange','Europe'),\n\
+    \             ('SSMI','SIX Swiss Exchange','Europe'),\n             ('J203.JO','Johannesburg Stock\
+    \ Exchange','Africa'))\n  AS m(index_symbol, exchange, region) ON m.index_symbol = t.\"Index\"\nLEFT\
+    \ JOIN indexinfo_database.index_info i ON i.Exchange = m.exchange\n"
+  grain: one index on one trading day, with its exchange, currency and region
+  domains:
+  - exchanges
+- name: average_intraday_volatility_by_region
+  description: 'Average intraday volatility ((High - Low) / Open per day, averaged) over the days of all
+    indices in a region; GROUP BY m.region (and filter the period on the trade_date expression). Same
+    join as index_region.
+
+    '
+  sql_expression: AVG((t.High - t.Low) / t.Open)
+  source_model: indextrade_database.index_trade
+  from_sql: "indextrade_database.index_trade t JOIN (VALUES ('NYA','New York Stock Exchange','North America'),\n\
+    \             ('IXIC','NASDAQ','North America'),\n             ('GSPTSE','Toronto Stock Exchange','North\
+    \ America'),\n             ('HSI','Hong Kong Stock Exchange','Asia'),\n             ('000001.SS','Shanghai\
+    \ Stock Exchange','Asia'),\n             ('399001.SZ','Shenzhen Stock Exchange','Asia'),\n       \
+    \      ('N225','Tokyo Stock Exchange','Asia'),\n             ('NSEI','National Stock Exchange of India','Asia'),\n\
+    \             ('KS11','Korea Exchange','Asia'),\n             ('TWII','Taiwan Stock Exchange','Asia'),\n\
+    \             ('N100','Euronext','Europe'),\n             ('GDAXI','Frankfurt Stock Exchange','Europe'),\n\
+    \             ('SSMI','SIX Swiss Exchange','Europe'),\n             ('J203.JO','Johannesburg Stock\
+    \ Exchange','Africa'))\n  AS m(index_symbol, exchange, region) ON m.index_symbol = t.\"Index\"\nLEFT\
+    \ JOIN indexinfo_database.index_info i ON i.Exchange = m.exchange\n"
+  grain: one index on one trading day, with its exchange, currency and region
+  domains:
+  - exchanges
+  - daily_prices
+tables:
+- schema: indexinfo_database
+  table: index_info
+  columns:
+  - name: Exchange
+    type: VARCHAR
+    description: Full name of the stock exchange (e.g. 'Tokyo Stock Exchange'). Not a key into index_trade;
+      map to an index symbol via the index_region metric's mapping.
+  - name: Currency
+    type: VARCHAR
+    description: Trading currency of the exchange (ISO code, e.g. USD, HKD, CNY, JPY, EUR).
+- schema: indextrade_database
+  table: index_trade
+  columns:
+  - name: Index
+    type: VARCHAR
+    description: Abbreviated index symbol (e.g. N225, HSI, 000001.SS). Quote as "Index". 13 distinct symbols.
+  - name: Date
+    type: VARCHAR
+    description: Trading date as text in three mixed formats; parse with the trade_date metric before
+      filtering/sorting.
+  - name: Open
+    type: DOUBLE
+    description: Opening price (local currency). Never NULL or 0.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day (local currency).
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day (local currency).
+  - name: Close
+    type: DOUBLE
+    description: Closing price (local currency).
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price; quote as "Adj Close". Differs from Close on ~13k rows.
+  - name: CloseUSD
+    type: DOUBLE
+    description: Closing price in USD; use for cross-currency comparisons.

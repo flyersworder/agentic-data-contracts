@@ -1,0 +1,101 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: googlelocal, author: claudeopus5.5
+version: '1.0'
+name: googlelocal
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: business_database
+    description: Business metadata from Google Maps (business name, description, hours, etc.) collected
+      up to September 2021 in the United States. Documented as stored in PostgreSQL; here it is a schema
+      of one DuckDB database.
+    tables:
+    - business_description
+  - schema: review_database
+    description: Review information from Google Maps (reviewer name, ratings, text, etc.) collected up
+      to September 2021 in the United States. Documented as stored in SQLite; here it is a schema of one
+      DuckDB database.
+    tables:
+    - review
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: businesses
+    summary: 'Google Maps business metadata: name, description, hours, MISC, operating status'
+    description: 'One row of business_database.business_description is one business (79 rows, gmap_id
+      unique). Fields: name (business name); gmap_id (Google Maps business identifier, links to review_database);
+      description (business description); num_of_reviews (total number of reviews for this business);
+      hours (operating hours, a list); MISC (additional miscellaneous business information, a dict); state
+      (business operating status, e.g. open, closed, temporarily closed).
+
+      LOCATION: the documentation says needed information can be taken from the `description` column.
+      Descriptions are free text with a leading space and usually embed an address fragment "City, ST
+      12345" (e.g. "Located in Los Angeles, CA 90023"). Checked: 78 of 79 descriptions contain ", <2-letter
+      state> <5-digit zip>" — all with state CA; one (gmap_36) has no location ("... practitioners in
+      ."). Use the metrics `business_state_code` and `business_zip_code`; to filter by city use `description
+      ILIKE ''%<City>, CA%''` (city text precedes ", CA" but the preceding words vary, so a regex cannot
+      reliably isolate the city).
+
+      HOURS is stored as VARCHAR holding JSON text: a list of [weekday, hours] pairs, e.g. [["Thursday","6:30AM–6PM"],...,["Monday","Closed"]]
+      (note the en dash ''–''). NULL for 13 businesses. Example access: json_extract_string(hours, ''$[0][1]''),
+      or unnest via from_json(hours, ''["VARCHAR[]"]'').
+
+      MISC is VARCHAR holding a JSON object whose keys are categories ("Service options", "Accessibility",
+      "Offerings", "Amenities", "Atmosphere", "Payments", ...) and whose values are arrays of strings,
+      e.g. {"Service options": ["Takeout","Dine-in","Delivery"]}. NULL for 16 businesses. Keys contain
+      spaces, so quote them in JSON paths: json_extract(MISC, ''$."Service options"'').
+
+      STATE (operating status) is not a US state. Observed values: ''Open now'', ''Open 24 hours'', ''Open
+      ⋅ Closes 5PM'' (and other closing times, some with ''⋅ Reopens ...''), ''Opens soon ⋅ 10AM'', ''Closed
+      ⋅ Opens 10AM'' (closed at the moment of collection but operating), ''Permanently closed'' (3), ''Temporarily
+      closed'' (1), and NULL (9). The separator is ''⋅'' (U+22C5). See metric `business_operating_status`.
+
+      '
+    tables:
+    - business_database.business_description
+  - name: reviews
+    summary: 'Google Maps reviews: reviewer, timestamp, rating 1-5, text'
+    description: 'One row of review_database.review is one review (2000 rows over 79 businesses). Fields:
+      name (reviewer name), time (timestamp of the review), rating (1-5 scale integer, no NULLs), text
+      (review text), gmap_id (Google Maps business identifier).
+
+      TIME is VARCHAR in three mixed formats (checked): ISO ''2021-04-12 17:07:52'', ''September 03, 2020
+      at 04:15 PM'', and ''08 Mar 2020, 00:04''. Never compare or cast it directly; use the metric `review_timestamp`,
+      which parses all 2000 rows (range 2011-05-04 to 2021-09-08).
+
+      JOIN: the two databases are joined on gmap_id to combine review information with business metadata.
+      Every review gmap_id exists in business_description. num_of_reviews equals the count of review rows
+      for 78 of 79 businesses; gmap_60 states 48 but has 17 review rows. Questions about "the number of
+      reviews in the data" should count review rows; num_of_reviews is the business''s stated total.
+
+      '
+    tables:
+    - review_database.review
+    - business_database.business_description
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: parse_review_time
+    description: 'review.time is mixed-format text; any date filtering, ordering or grouping must use
+      the `review_timestamp` parse expression.
+
+      '
+    enforcement: warn
+  - name: join_on_gmap_id
+    description: Reviews and businesses are joined only on gmap_id.
+    enforcement: warn

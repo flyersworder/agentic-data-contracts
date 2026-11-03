@@ -1,0 +1,231 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: GITHUB_REPOS, author: claudeopus5.5
+metrics:
+- name: repo_count
+  description: 'Number of distinct GitHub repositories (repo_name, `owner/repo`) in metadata_database.repos.
+
+    '
+  sql_expression: COUNT(DISTINCT repo_name)
+  source_model: metadata_database.repos
+  domains:
+  - repository_metadata
+- name: total_watch_count
+  description: 'Sum of watch_count, the number of users watching the repository on GitHub, over the repositories
+    in scope.
+
+    '
+  sql_expression: SUM(watch_count)
+  source_model: metadata_database.repos
+  domains:
+  - repository_metadata
+- name: watch_count_by_license
+  description: 'Total watch_count of repositories, grouped by license identifier (e.g. apache-2.0, mit).
+    Group by l.license.
+
+    '
+  sql_expression: SUM(r.watch_count)
+  source_model: metadata_database.repos
+  from_sql: metadata_database.licenses l JOIN metadata_database.repos r ON l.repo_name = r.repo_name
+  grain: one row per (repository, license) pair
+  domains:
+  - repository_metadata
+- name: watch_count_by_language_match
+  description: 'Total watch_count of repositories whose language_description (natural language text) mentions
+    a language; filter with l.language_description ILIKE ''%<language>%''.
+
+    '
+  sql_expression: SUM(r.watch_count)
+  source_model: metadata_database.repos
+  from_sql: metadata_database.languages l JOIN metadata_database.repos r ON l.repo_name = r.repo_name
+  grain: one row per (repository, language_description) pair
+  domains:
+  - repository_metadata
+- name: commit_count
+  description: Number of distinct commits (by commit SHA).
+  sql_expression: COUNT(DISTINCT commit)
+  source_model: artifacts_database.commits
+  domains:
+  - repository_artifacts
+- name: truncated_difference_share
+  description: 'Share of commit rows whose difference data is truncated (difference_truncated true, stored
+    as 1).
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE difference_truncated = 1) / NULLIF(COUNT(*), 0)
+  source_model: artifacts_database.commits
+  domains:
+  - repository_artifacts
+- name: file_count
+  description: Number of file records (repo_name, ref, path) in files.
+  sql_expression: COUNT(*)
+  source_model: artifacts_database.files
+  domains:
+  - repository_artifacts
+- name: symlink_file_count
+  description: Number of file records that are symlinks (symlink_target set).
+  sql_expression: COUNT(*) FILTER (WHERE symlink_target IS NOT NULL)
+  source_model: artifacts_database.files
+  domains:
+  - repository_artifacts
+- name: files_with_content_count
+  description: 'Number of file records whose blob content is available, joining files to contents on the
+    file blob identifier id.
+
+    '
+  sql_expression: COUNT(*)
+  source_model: artifacts_database.files
+  from_sql: artifacts_database.files f JOIN artifacts_database.contents c ON f.id = c.id
+  grain: one row per (file record, matching content blob)
+  domains:
+  - repository_artifacts
+- name: commit_watch_count
+  description: 'Commits joined to their repository''s watch_count across databases on repo_name (`owner/repo`);
+    counts distinct commits.
+
+    '
+  sql_expression: COUNT(DISTINCT c.commit)
+  source_model: artifacts_database.commits
+  from_sql: artifacts_database.commits c JOIN metadata_database.repos r ON c.repo_name = r.repo_name
+  grain: one row per (commit, repository) pair
+  domains:
+  - repository_artifacts
+  - repository_metadata
+tables:
+- schema: metadata_database
+  table: languages
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in `owner/repo` format.
+  - name: language_description
+    type: VARCHAR
+    description: Programming language(s) used in the repository, represented in natural language format.
+- schema: metadata_database
+  table: licenses
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in `owner/repo` format.
+  - name: license
+    type: VARCHAR
+    description: License identifier associated with the repository (e.g., `apache-2.0`, `mit`).
+- schema: metadata_database
+  table: repos
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in `owner/repo` format.
+  - name: watch_count
+    type: BIGINT
+    description: Number of users watching the repository on GitHub.
+- schema: artifacts_database
+  table: contents
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Identifier of the file blob in the repository; joins to files.id.
+  - name: content
+    type: VARCHAR
+    description: The file content (textual data). For large or binary files, this may contain placeholders
+      or truncated values.
+  - name: sample_repo_name
+    type: VARCHAR
+    description: Name of the repository where the file resides, in `owner/repo` format.
+  - name: sample_ref
+    type: VARCHAR
+    description: Reference name (e.g., branch or commit SHA).
+  - name: sample_path
+    type: VARCHAR
+    description: Path of the file within the repository.
+  - name: sample_symlink_target
+    type: VARCHAR
+    description: If the file is a symlink, indicates the symlink target path.
+  - name: repo_data_description
+    type: VARCHAR
+    description: Natural language description summarizing the file's metadata (derived from original size,
+      binary, copies, and mode fields).
+- schema: artifacts_database
+  table: commits
+  columns:
+  - name: commit
+    type: VARCHAR
+    description: Unique identifier (SHA) of the commit.
+  - name: tree
+    type: VARCHAR
+    description: SHA identifier of the commit's associated tree object.
+  - name: parent
+    type: VARCHAR
+    description: One or more parent commit SHAs (JSON-like format for merge commits).
+  - name: author
+    type: VARCHAR
+    description: JSON-like object containing author information (name, email, timestamp).
+  - name: committer
+    type: VARCHAR
+    description: JSON-like object containing committer information (name, email, timestamp).
+  - name: subject
+    type: VARCHAR
+    description: Short subject line of the commit message.
+  - name: message
+    type: VARCHAR
+    description: Full commit message.
+  - name: trailer
+    type: VARCHAR
+    description: Additional metadata fields attached to the commit (JSON-like).
+  - name: difference
+    type: VARCHAR
+    description: JSON-like structure representing file changes introduced by the commit.
+  - name: difference_truncated
+    type: DOUBLE
+    description: Indicator if the difference data is truncated (documented as bool; 1 = truncated).
+  - name: repo_name
+    type: VARCHAR
+    description: Repository name in `owner/repo` format.
+  - name: encoding
+    type: VARCHAR
+    description: Encoding format of the commit data (if applicable).
+- schema: artifacts_database
+  table: files
+  columns:
+  - name: repo_name
+    type: VARCHAR
+    description: Name of the GitHub repository in `owner/repo` format.
+  - name: ref
+    type: VARCHAR
+    description: Reference name (branch or commit SHA) at which the file metadata is recorded.
+  - name: path
+    type: VARCHAR
+    description: Path of the file within the repository.
+  - name: mode
+    type: BIGINT
+    description: File mode (e.g., normal file, executable, symlink).
+  - name: id
+    type: VARCHAR
+    description: Identifier of the file blob; joins to contents.id.
+  - name: symlink_target
+    type: VARCHAR
+    description: If the file is a symlink, the target path it points to.
+relationships:
+- from: artifacts_database.files.id
+  to: artifacts_database.contents.id
+  type: many_to_one
+  description: Both columns are the file blob identifier.
+- from: artifacts_database.commits.repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Repository name in `owner/repo` format.
+- from: artifacts_database.files.repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Repository name in `owner/repo` format.
+- from: artifacts_database.contents.sample_repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Repository where the file resides, `owner/repo`.
+- from: metadata_database.languages.repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Repository name in `owner/repo` format.
+- from: metadata_database.licenses.repo_name
+  to: metadata_database.repos.repo_name
+  type: many_to_one
+  description: Repository name in `owner/repo` format.

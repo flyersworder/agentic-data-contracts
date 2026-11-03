@@ -1,0 +1,87 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+version: '1.0'
+name: bookreview
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: books_database
+    description: 'Amazon book information including descriptions, price, details, title, etc. up to 2023.
+      Described as stored in PostgreSQL; here it is the DuckDB schema books_database. One table: books_info.'
+    preferred: true
+    tables:
+    - books_info
+  - schema: review_database
+    description: 'Amazon book review information including ratings, text, helpfulness votes, etc. up to
+      2023. Described as stored in SQLite; here it is the DuckDB schema review_database. One table: review.'
+    preferred: true
+    tables:
+    - review
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: books
+    summary: Amazon book catalogue information up to 2023 (books_database.books_info)
+    description: 'books_database.books_info holds Amazon book information up to 2023, one row per book
+      identified by book_id (unique book identifier). Fields: title (book title), subtitle (book subtitle),
+      author (book author(s)), rating_number (total number of ratings received), features (book features,
+      stored as a string representation of a list/dict), description (book description, stored as a string
+      representation of a list/dict), price (book price), store (store information), categories (book
+      categories, stored as a string representation of a list/dict), details (additional book details).
+      Because features, description and categories are strings holding a list/dict representation, filter
+      them with string matching (e.g. ILIKE / contains) or parse them explicitly; they are not native
+      DuckDB LIST/STRUCT columns.
+
+      '
+    tables:
+    - books_database.books_info
+  - name: reviews
+    summary: Amazon book reviews up to 2023 (review_database.review) and their link to books
+    description: 'review_database.review holds Amazon book review information up to 2023, one row per
+      review. Fields: rating (rating given by the reviewer, on a 1.0-5.0 scale; stored as BIGINT here),
+      title (review title — NOT the book title), text (review text content), purchase_id (unique identifier
+      linking to book_id in books_database.books_info), review_time (timestamp when the review was posted,
+      stored as a VARCHAR string), helpful_vote (number of helpful votes received), verified_purchase
+      (whether the purchase was verified; documented as boolean, stored as BIGINT 1 = verified, 0 = not
+      verified).
+
+      JOIN: review_database.review.purchase_id = books_database.books_info.book_id. Both databases are
+      schemas of one DuckDB database, so cross-database joins are ordinary DuckDB joins with schema-qualified
+      table names. Note both tables have a `title` column with different meanings; always qualify it with
+      an alias.
+
+      '
+    tables:
+    - review_database.review
+    - books_database.books_info
+  rules:
+  - name: join_reviews_to_books_on_purchase_id
+    description: 'Reviews link to books only through review.purchase_id = books_info.book_id. Do not join
+      on title (review.title is the review''s title, not the book''s).
+
+      '
+    enforcement: warn
+  - name: rating_scale
+    description: 'review.rating is on a 1.0-5.0 scale. books_info.rating_number is a count of ratings
+      received, not a rating value; never average it as a rating.
+
+      '
+    enforcement: warn
+  - name: verified_purchase_encoding
+    description: 'verified_purchase is a boolean stored as BIGINT: 1 = verified purchase, 0 = not verified.
+      Compare with = 1, not with TRUE strings.
+
+      '
+    enforcement: warn

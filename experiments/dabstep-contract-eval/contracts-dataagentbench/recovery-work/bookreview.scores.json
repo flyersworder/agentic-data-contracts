@@ -1,0 +1,616 @@
+{
+ "dataset": "bookreview",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "bookreview-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "features, description and categories are stored as string representations of lists (valid JSON text in every row)",
+      "where": "contract.yml domains.books.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check. Also stated per column in semantic.yml tables.books_info.columns."
+    },
+    {
+     "id": "bookreview-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "review.purchase_id is the identifier linking to book_id in books_info.",
+      "where": "contract.yml domains.book_reviews.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-3",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "purchase_id = 'purchaseid_<n>' and book_id = 'bookid_<n>' with the same <n>. Join with replace(r.purchase_id, 'purchaseid_', 'bookid_') = b.book_id; a plain equality matches nothing.",
+      "where": "contract.yml domains.book_reviews.description; also rules.join_via_id_suffix"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.book_average_rating.from_sql; metrics.book_review_count.from_sql (LEFT JOIN)",
+      "summary": "replace(r.purchase_id,'purchaseid_','bookid_') = b.book_id; each of the 200 purchase_ids joins exactly its reference book; 1833 of 1833 review rows joined"
+     },
+     "agree": 200,
+     "total": 200,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "The item says 'fuzzy join'; on the built file the link is exact once the prefixes are removed. Scored against the committed reading ('not equal as stored; needs a transformation').",
+     "notes": "Built per the brief's ruling: the relationship block declares the keys, and its description gives the key transformation (the Relationship model has no field for a transformation, so the description is the only place for it). Every metric that joins the two tables performs it in from_sql. Per-record comparison held in ~/data/dce-held-results/exp7/recovery/bookreview/bookreview-3.per-draw.json."
+    },
+    {
+     "id": "bookreview-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "the second element ('$[1]') is the top-level genre ... details is free English prose (publisher, publication date, language, format, pages, ISBN).",
+      "where": "contract.yml domains.books.description; semantic.yml metrics.book_main_category"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check. Names both columns with what they hold; does not say in so many words that queries need them, which the reference does not require."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "author is a JSON object text {\"avatar\", \"name\", \"about\"} or NULL (51 of 200 rows are NULL)",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "the `store` column, which holds the author/contributor credit line",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "categories is a JSON array whose first element is always \"Books\" ... (14 rows have '[]')",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "price: 10 rows NULL and 10 rows 0.0; max 1599.97",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "in DuckDB `->>` binds looser than comparison/AND, so parenthesise (author->>'$.name')",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "stored as BIGINT with values 1,2,3,4,5, so cast to DOUBLE before dividing",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review_time ... VARCHAR 'YYYY-MM-DD HH:MM:SS' (all rows parse), range 1997-08-15 to 2023-06-14",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "verified_purchase ... stored as BIGINT 1 (verified) / 0 (not verified)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "With this join all 1833 reviews match a book and all 200 books have reviews.",
+     "where": "contract.yml domains.book_reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "rating_number (books_info) is Amazon's total ratings count, not the number of review rows in this database",
+     "where": "contract.yml domains.book_reviews.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "bookreview-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "features and description are JSON array text ... categories is a valid JSON array text in every row",
+      "where": "contract.yml domains.books.description (DATA CHECKS)"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check. The same domain also repeats 'stored as string representation of list/dict' for all three; rules.parse_text_fields says to parse them with JSON functions."
+    },
+    {
+     "id": "bookreview-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "purchase_id (unique identifier linking to book_id in books_info)",
+      "where": "contract.yml domains.reviews.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-3",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "purchase_id values are 'purchaseid_<n>' and link to book_id 'bookid_<n>' with the same number: join on replace(r.purchase_id,'purchaseid_','bookid_') = b.book_id ... A plain r.purchase_id = b.book_id matches nothing.",
+      "where": "contract.yml domains.reviews.description; also rules.join_via_id_mapping"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.book_average_rating.from_sql; metrics.book_review_count.from_sql (LEFT JOIN)",
+      "summary": "replace(r.purchase_id,'purchaseid_','bookid_') = b.book_id; each of the 200 purchase_ids joins exactly its reference book; 1833 of 1833 review rows joined"
+     },
+     "agree": 200,
+     "total": 200,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "The item says 'fuzzy join'; on the built file the link is exact once the prefixes are removed. Scored against the committed reading ('not equal as stored; needs a transformation').",
+     "notes": "Built per the brief's ruling: the relationship block declares the keys, and its description gives the key transformation (the Relationship model has no field for a transformation, so the description is the only place for it). Every metric that joins the two tables performs it in from_sql. Per-record comparison held in ~/data/dce-held-results/exp7/recovery/bookreview/bookreview-3.per-draw.json."
+    },
+    {
+     "id": "bookreview-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "element 1 is the top-level genre ... details is English prose (not JSON) stating publisher, publication date ..., language, format, page count, ISBN-10/13, weight, dimensions; extract with regex",
+      "where": "contract.yml domains.books.description; semantic.yml metrics.book_top_category, metrics.book_publication_year"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "author is a JSON object text {\"avatar\",\"name\",\"about\"} ... 51 of 200 books have author NULL",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "the store column often also names the author(s) with role",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "element 0 is always 'Books' ... 14 books have '[]'",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "'[]' means empty (18 and 97 rows respectively)",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "metric book_publication_year finds a full date in 188 of 200 rows",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "10 rows have NULL price and 10 have price 0 -- average_price excludes both (0 treated as missing)",
+     "where": "contract.yml domains.books.description; semantic.yml metrics.average_price",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review_time is VARCHAR 'YYYY-MM-DD HH:MM:SS', every row parses ...; range 1997-08-15 to 2023-06-14",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "verified_purchase is BIGINT 0/1 (1 = verified), not boolean",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "rating_number in books_info (Amazon's total ratings count) is NOT the count of rows in review",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "subtitle ... 9 NULL; store ... 7 NULL",
+     "where": "semantic.yml tables.books_info.columns",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "metrics.book_publication_year limits the year to (19|20)YY, while its description says it takes the first 'Month D, YYYY' date; the one book whose details date is in 1885 gets NULL (188 found against 189 dates present).",
+     "where": "semantic.yml metrics.book_publication_year.sql_expression",
+     "smallest_fix": "Replace '((19|20)[0-9][0-9])' with '([0-9]{4})' in the regex (group 2 still the year)."
+    }
+   ]
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "bookreview-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "features (book features, stored as a string representation of a list/dict), description (... string representation of a list/dict) ... categories (... string representation of a list/dict); categories is a valid JSON array string ... features and description are JSON array strings",
+      "where": "contract.yml domains.books.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "purchase_id (identifier linking to book_id in books_database.books_info)",
+      "where": "contract.yml domains.reviews.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-3",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "JOIN KEY: purchase_id looks like 'purchaseid_<n>' while book_id looks like 'bookid_<n>'; they do NOT match by plain equality. The number is shared: join on replace(r.purchase_id, 'purchaseid_', 'bookid_') = b.book_id.",
+      "where": "contract.yml domains.reviews.description; also rules.join_review_to_book_by_number"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0]; metrics.book_average_rating.from_sql; metrics.book_review_count.from_sql (LEFT JOIN); metrics.review_book_id.sql_expression (the key transformation alone)",
+      "summary": "replace(r.purchase_id,'purchaseid_','bookid_') = b.book_id; each of the 200 purchase_ids joins exactly its reference book; 1833 of 1833 review rows joined"
+     },
+     "agree": 200,
+     "total": 200,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "The item says 'fuzzy join'; on the built file the link is exact once the prefixes are removed. Scored against the committed reading ('not equal as stored; needs a transformation').",
+     "notes": "Built per the brief's ruling: the relationship block declares the keys, and its description gives the key transformation (the Relationship model has no field for a transformation, so the description is the only place for it). Every metric that joins the two tables performs it in from_sql. Per-record comparison held in ~/data/dce-held-results/exp7/recovery/bookreview/bookreview-3.per-draw.json. metrics.review_book_id maps each of the 200 purchase_ids to its reference book_id too."
+    },
+    {
+     "id": "bookreview-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "element 1 is the top-level genre ... details is English prose ... Publisher, publication date, language, format, page count, ISBN are only extractable with regex",
+      "where": "contract.yml domains.books.description; semantic.yml metrics.book_main_category, metrics.book_publication_date"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "author is a JSON object string {\"avatar\",\"name\",\"about\"} ... author is NULL for 51 of 200 books",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "use book_author_name, which falls back to store",
+     "where": "contract.yml domains.books.description; semantic.yml metrics.book_author_name",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "element 0 is always \"Books\" ... 14 books have '[]'",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "'[]' means empty (18 and 97 books respectively)",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "price: 10 NULLs and 10 rows with 0.0; max 1599.97",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "11 rows have no 'Month D, YYYY' date in details",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "rating is stored as BIGINT (integers 1..5), not float",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "verified_purchase is stored as BIGINT 0/1 (1 = verified), not boolean",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review_time is VARCHAR 'YYYY-MM-DD HH:MM:SS' (all rows parse); range 1997-08-15 to 2023-06-14",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "All 1,833 reviews match a book this way.",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "rating_number in books_info (Amazon's total rating count) is not the same as the count of rows in review",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "bookreview-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The description, categories and features fields look like lists or dictionaries but are stored as strings (VARCHAR); parse them with DuckDB JSON functions",
+      "where": "contract.yml domains.books.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "purchase_id refers to the same book entity as books_info.book_id",
+      "where": "contract.yml domains.reviews.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-3",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "the values differ in prefix ('purchaseid_N' vs 'bookid_N'), so a plain equality join returns nothing. Join on the numeric suffix: replace(r.purchase_id,'purchaseid_','') = replace(b.book_id,'bookid_','')",
+      "where": "contract.yml domains.reviews.description; also rules.join_on_id_suffix"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.review_book_join (sql_expression and from_sql); metrics.review_count.from_sql; metrics.average_rating.from_sql",
+      "summary": "suffix string equality replace(purchase_id,'purchaseid_','') = replace(book_id,'bookid_',''); each of the 200 purchase_ids joins exactly its reference book; 1833 of 1833 review rows joined"
+     },
+     "agree": 200,
+     "total": 200,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "The item says 'fuzzy join'; on the built file the link is exact once the prefixes are removed. Scored against the committed reading ('not equal as stored; needs a transformation').",
+     "notes": "No relationships block; the join is built in metric SQL (brief ruling). Suffix string equality is exact here because no suffix has leading zeros. Per-record comparison held in ~/data/dce-held-results/exp7/recovery/bookreview/bookreview-3.per-draw.json."
+    },
+    {
+     "id": "bookreview-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "details is free English prose with publisher, publication date, edition, language, format, page count, ISBN-10/13, weight, dimensions and sometimes reading age / grade level; for some questions the needed information is in categories or details.",
+      "where": "contract.yml domains.books.description; semantic.yml metrics.primary_category, metrics.has_category, metrics.publication_year"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check. Near-verbatim of the hint; also names what each column holds."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "200 rows, 200 distinct book_id values 'bookid_1'..",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "author is a JSON object {avatar, name, about} and is NULL for 51 books; the store column also carries contributor names with roles",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "categories is a JSON list like [\"Books\", ...]; 14 books have an empty list '[]'",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "details ... sometimes reading age / grade level",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "price is a float (10 books have NULL price)",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "rating_number is the total number of ratings received on Amazon (not a count of rows in review)",
+     "where": "contract.yml domains.books.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "rating ... stored as BIGINT 1..5 here; verified_purchase ... stored as BIGINT 0/1 (1 = verified)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review_time ... VARCHAR 'YYYY-MM-DD HH:MM:SS'; all values cast cleanly ...; range 1997-08-15 to 2023-06-14",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "every review matches exactly one book this way (1833 of 1833)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "NULL for 11 of 200 books whose details give no such date",
+     "where": "semantic.yml metrics.publication_year.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "bookreview-1",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Because features, description and categories are strings holding a list/dict representation, filter them with string matching (e.g. ILIKE / contains) or parse them explicitly; they are not native DuckDB LIST/STRUCT columns.",
+      "where": "contract.yml domains.books.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check."
+    },
+    {
+     "id": "bookreview-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "purchase_id (unique identifier linking to book_id in books_database.books_info)",
+      "where": "contract.yml domains.reviews.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check. The link is stated; that it is implemented as plain equality is scored under bookreview-3."
+    },
+    {
+     "id": "bookreview-3",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": {
+      "quote": "JOIN: review_database.review.purchase_id = books_database.books_info.book_id.",
+      "where": "contract.yml domains.reviews.description; also rules.join_reviews_to_books_on_purchase_id"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships[0] (purchase_id -> book_id, no transformation); metrics.book_review_count.from_sql; metrics.book_average_rating.from_sql",
+      "summary": "plain equality r.purchase_id = b.book_id; joins 0 review rows, so none of the 200 purchase_ids reaches its book (book_review_count = 0, book_average_rating = NULL)"
+     },
+     "agree": 0,
+     "total": 200,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": "The item says 'fuzzy join'; on the built file the link is exact once the prefixes are removed. Scored against the committed reading ('not equal as stored; needs a transformation').",
+     "notes": "The text gives a reading, but not the reference reading: it states plain equality. No data access, so the prefix mismatch could not be seen. This is the item itself, so it is not a correctable error."
+    },
+    {
+     "id": "bookreview-4",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "categories (book categories, stored as a string representation of a list/dict), details (additional book details)",
+      "where": "contract.yml domains.books.description; semantic.yml tables.books_info.columns"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": "categories, named as holding the book's categories; details is named only as 'additional book details' (the db_description label), not as holding publication facts",
+     "class_note": null,
+     "notes": "The references record no computation for this item (computation=false), so there is no SQL to check. Both column texts repeat the db_description labels, and nothing points to them as sources for queries. A stricter reading (labels alone state nothing) would score this missed."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "rating ... stored as BIGINT here",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "verified_purchase (whether the purchase was verified; documented as boolean, stored as BIGINT 1 = verified, 0 = not verified)",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review_time ... stored as a VARCHAR string",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Both databases are schemas of one DuckDB database, so cross-database joins are ordinary DuckDB joins with schema-qualified table names.",
+     "where": "contract.yml domains.reviews.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "review.title is the review's title, not the book's",
+     "where": "contract.yml rules.join_reviews_to_books_on_purchase_id",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  }
+ }
+}

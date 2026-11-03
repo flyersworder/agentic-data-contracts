@@ -1,0 +1,826 @@
+{
+ "dataset": "crmarenapro",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "crmarenapro-1",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "DIRTY IDS. About a quarter of all Salesforce Id values and foreign-key values carry a leading '#' (e.g. '#001Wt00000PFluoIAD'), and some carry surrounding whitespace; the same entity appears with and without '#'. ... ALWAYS compare, join, group and count-distinct on ltrim(trim(<id>), '#'), on both sides of every join, and return cleaned IDs.",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cases_per_issue; semantic.yml metrics.clean_id; semantic.yml metrics.closed_opportunity_count; semantic.yml metrics.open_case_count; semantic.yml metrics.opportunity_count; semantic.yml metrics.order_revenue_by_account",
+      "summary": "5 touched column(s) read by metric or relationship SQL; 566 records agree, 0 disagree, 15867 in columns no metric or relationship reads"
+     },
+     "agree": 566,
+     "total": 16433,
+     "computation_check": null,
+     "right_part": "Case.id 44/44 (LTRIM(TRIM(X), '#')); Opportunity.Id 294/294 (LTRIM(TRIM(X), '#')); Order.Id 35/35 (LTRIM(TRIM(X), '#')); OrderItem.OrderId 187/187 (LTRIM(TRIM(X), '#')); issue__c.id 6/6 (LTRIM(TRIM(X), '#'))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "DIRTY TEXT. Status / StageName / Name / Subject / Email values carry trailing or leading spaces (e.g. 'Activated  ', 'Waiting on Customer   ', 'Precision Circuit Systems '). Always trim() categorical and name values before comparing or grouping.",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.closed_opportunity_count; semantic.yml metrics.open_case_count",
+      "summary": "2 touched column(s) read by metric or relationship SQL; 266 records agree, 0 disagree, 6312 in columns no metric or relationship reads"
+     },
+     "agree": 266,
+     "total": 6578,
+     "computation_check": null,
+     "right_part": "Case.status 20/20 (TRIM(X)); Opportunity.StageName 246/246 (TRIM(X))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "About a quarter of all Salesforce Id values and foreign-key values carry a leading '#' ... Status / StageName / Name / Subject / Email values carry trailing or leading spaces",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cases_per_issue; semantic.yml metrics.clean_id; semantic.yml metrics.closed_opportunity_count; semantic.yml metrics.open_case_count; semantic.yml metrics.opportunity_count; semantic.yml metrics.order_revenue_by_account",
+      "summary": "5 corrupted named columns read with the matching clean-up (products_orders.Order.Id, sales_pipeline.Opportunity.Id, support.Case.id, support.Case.status, support.issue__c.id); the 3 clean named columns agree by silence; 57 corrupted named columns unread"
+     },
+     "agree": 8,
+     "total": 65,
+     "computation_check": null,
+     "right_part": "SQL: products_orders.Order.Id, sales_pipeline.Opportunity.Id, support.Case.id, support.Case.status, support.issue__c.id plus the 3 clean columns; text names Id, AccountId and ContactId (all Id and foreign-key values), Name, Subject, Email and Status: 7 of the 9; FirstName and LastName are not named",
+     "class_note": null,
+     "notes": "Text names Id, AccountId and ContactId (all Id and foreign-key values), Name, Subject, Email and Status: 7 of the 9; FirstName and LastName are not named."
+    },
+    {
+     "id": "crmarenapro-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Every Id/foreign-key comparison, join, GROUP BY or COUNT DISTINCT must use ltrim(trim(col), '#') on both sides; raw joins silently drop ~25-40% of rows.",
+      "where": "contract.yml semantic.rules.clean_ids_before_joining.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cases_per_issue.from_sql; semantic.yml metrics.order_revenue_by_account.from_sql",
+      "summary": "2 of the 47 reference id relationships built; 2 strip '#' on both sides and join every child row to the reference parent"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "built_joins": 2,
+      "of_reference_relationships": 47,
+      "agree_child_rows": 842,
+      "child_rows": 842,
+      "joins_agreeing": 2,
+      "per_join": "OrderItem.OrderId -> Order.Id 689/689 (raw 434) [semantic.yml metrics.order_revenue_by_account.from_sql]; Case.issueid__c -> issue__c.Id 153/153 (raw 93) [semantic.yml metrics.cases_per_issue.from_sql]"
+     },
+     "right_part": null,
+     "class_note": null,
+     "notes": "Every built join agrees with the reference; the other relationships are not built, read as recovered (the coordinator's ruling makes a draw partial only when its built joins strip on some relationships and not others)."
+    },
+    {
+     "id": "crmarenapro-5",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Core CRM data (Salesforce CRMArena) ... There is no separate won/lost stage. ... IsConverted = 1 (885 leads) is the conversion flag, consistent with ConvertedDate.",
+      "where": "contract.yml semantic.allowed_tables[core_crm].description; semantic.domains.sales.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": "Encodes specific Salesforce/CRM conventions (IsConverted as the conversion flag, single 'Closed' stage, Salesforce ids); never says in general that CRM domain knowledge governs the reading.",
+     "class_note": "Thin item (a general caution); scored on the reading fixed in the references' notes before any draw.",
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "NUMBERS AS TEXT. Quantity, UnitPrice, TotalPrice, Discount, Probability, DurationInMinutes, ContractTerm, PricebookEntry.UnitPrice are VARCHAR; cast with CAST(x AS DOUBLE) (all values parse). Opportunity.Amount is already DOUBLE.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "DATES AS TEXT. Timestamps are ISO strings like '2024-07-27T09:30:00.000+0000' (UTC) and dates like '2024-02-15'; CAST(x AS TIMESTAMP) / CAST(x AS DATE) parse all of them. Empty values are NULL, not ''.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "RESERVED TABLE NAMES. support.\"Case\", products_orders.\"Order\" and core_crm.\"User\" must be double-quoted.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "no (schema-qualified, they run unquoted in DuckDB; quoting is harmless)"
+    },
+    {
+     "quote": "Opportunity.StageName values (trimmed): Qualification, Discovery, Quote, Negotiation, Closed. There is no separate won/lost stage.",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Opportunity.ContractID__c links a deal to its Contract (163 filled).",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "384 leads have Status 'Converted' but IsConverted = 0 and no ConvertedDate/ConvertedContactId; IsConverted = 1 (885 leads) is the conversion flag",
+     "where": "contract.yml semantic.domains.sales.description; semantic.yml metrics.lead_conversion_rate",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Quote.Status values: Draft, Needs Review, Need Review (1 row, a variant spelling), In Review, Presented, Approved, Accepted, Rejected, Denied.",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Contract.Status: Activated only; ContractTerm is in months.",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes (values 12, 24, 36; the unit cannot be checked)"
+    },
+    {
+     "quote": "QuoteLineItem.TotalPrice = Quantity * UnitPrice * (1 - Discount/100) exactly (verified on all 2966 rows); Discount is a percent (0-30).",
+     "where": "contract.yml semantic.domains.sales.description; semantic.yml metrics.quote_line_total",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Case.status values (trimmed): Working, Waiting on Customer, Closed. Every Closed case has a closeddate; open cases have NULL closeddate. priority: High, Medium, Low.",
+     "where": "contract.yml semantic.domains.support_cases.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "casehistory__c.field__c values: 'Case Creation', 'Owner Assignment' (newvalue__c = the new owner User Id), 'Case Closed'.",
+     "where": "contract.yml semantic.domains.support_cases.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "emailmessage: parentid is a Case id (509 rows) or NULL; relatedtoid is an Opportunity id ('006...') or a Case id ('500...'); toids is a JSON-style array text of recipient ids",
+     "where": "contract.yml semantic.domains.support_cases.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "livechattranscript ... body lines are '[timestamp] Name (Customer|Agent): text' with HTML entities such as &#39;. knowledge__kav holds ... competitor briefs titled 'Competitor: ...'",
+     "where": "contract.yml semantic.domains.support_cases.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Order.Status: Activated only. OrderItem.UnitPrice and Quantity are text; line value = Quantity * UnitPrice.",
+     "where": "contract.yml semantic.domains.products_orders.description",
+     "confirmed": "yes (line value is a definition)"
+    },
+    {
+     "quote": "Task.WhatId and Event.WhatId always point to an Opportunity ('006...'). Task.Status: Not Started, In Progress, Deferred, Waiting, Completed; Task.Priority: High, Normal, Low. ... Location: Office, Client Site, Virtual. VoiceCallTranscript__c links to an Opportunity (OpportunityId__c) or, for 579 rows, a Lead (LeadId__c).",
+     "where": "contract.yml semantic.domains.activities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Territory2.Description is a comma-separated list of US state codes ... an account falls in the territory whose list contains its state. UserTerritory2Association assigns users to territories (a user may have several).",
+     "where": "contract.yml semantic.domains.territory.description; semantic.yml metrics.account_territory_match",
+     "confirmed": "yes (87 of 101 accounts fall in exactly one territory; users hold up to 3)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "crmarenapro-1",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "(1) Roughly a quarter of Salesforce Id values -- both primary keys and foreign keys (e.g. Opportunity.Id 294 of 1170, Opportunity.AccountId 286 of 1170, Case.ownerid 38 of 153) -- carry a spurious leading '#'. Always compare IDs as ltrim(trim(x), '#') on both sides, and strip it when returning an Id.",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.accounts_per_territory; semantic.yml metrics.case_count; semantic.yml metrics.cases_per_issue; semantic.yml metrics.open_case_count; semantic.yml metrics.opportunity_amount_by_owner",
+      "summary": "5 touched column(s) read by metric or relationship SQL; 400 records agree, 0 disagree, 16033 in columns no metric or relationship reads"
+     },
+     "agree": 400,
+     "total": 16433,
+     "computation_check": null,
+     "right_part": "Account.Id 29/29 (LTRIM(TRIM(X), '#')); Case.id 44/44 (LTRIM(TRIM(X), '#')); Opportunity.OwnerId 259/259 (LTRIM(TRIM(X), '#')); User.Id 62/62 (LTRIM(TRIM(X), '#')); issue__c.id 6/6 (LTRIM(TRIM(X), '#'))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "(2) Text categoricals and names carry trailing/leading spaces (e.g. Case.status 'Waiting on Customer   ', Contract.Status 'Activated  ', Account.Name 'NaviCorp Tech '). Always trim() before comparing or grouping.",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.avg_case_handle_time_hours; semantic.yml metrics.open_case_count",
+      "summary": "1 touched column(s) read by metric or relationship SQL; 20 records agree, 0 disagree, 6558 in columns no metric or relationship reads"
+     },
+     "agree": 20,
+     "total": 6578,
+     "computation_check": null,
+     "right_part": "Case.status 20/20 (TRIM(X))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Roughly a quarter of Salesforce Id values -- both primary keys and foreign keys ... carry a spurious leading '#'. ... Text categoricals and names carry trailing/leading spaces",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.accounts_per_territory; semantic.yml metrics.avg_case_handle_time_hours; semantic.yml metrics.case_count; semantic.yml metrics.cases_per_issue; semantic.yml metrics.open_case_count; semantic.yml metrics.opportunity_amount_by_owner",
+      "summary": "5 corrupted named columns read with the matching clean-up (core_crm.Account.Id, core_crm.User.Id, support.Case.id, support.Case.status, support.issue__c.id); the 3 clean named columns agree by silence; 57 corrupted named columns unread"
+     },
+     "agree": 8,
+     "total": 65,
+     "computation_check": null,
+     "right_part": "SQL: core_crm.Account.Id, core_crm.User.Id, support.Case.id, support.Case.status, support.issue__c.id plus the 3 clean columns; text names Id, AccountId and ContactId (all primary and foreign keys), Status, and Name/FirstName/LastName (as 'names'): 7 of the 9; Subject and Email are not named",
+     "class_note": null,
+     "notes": "Text names Id, AccountId and ContactId (all primary and foreign keys), Status, and Name/FirstName/LastName (as 'names'): 7 of the 9; Subject and Email are not named."
+    },
+    {
+     "id": "crmarenapro-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Join and filter on Ids only after ltrim(trim(id), '#') on both sides; a leading '#' is a storage artifact.",
+      "where": "contract.yml semantic.rules.normalize_ids.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cases_per_issue.from_sql; semantic.yml metrics.opportunity_amount_by_owner.from_sql",
+      "summary": "2 of the 47 reference id relationships built; 2 strip '#' on both sides and join every child row to the reference parent"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "built_joins": 2,
+      "of_reference_relationships": 47,
+      "agree_child_rows": 1323,
+      "child_rows": 1323,
+      "joins_agreeing": 2,
+      "per_join": "Case.issueid__c -> issue__c.Id 153/153 (raw 93) [semantic.yml metrics.cases_per_issue.from_sql]; Opportunity.OwnerId -> User.Id 1170/1170 (raw 765) [semantic.yml metrics.opportunity_amount_by_owner.from_sql]"
+     },
+     "right_part": null,
+     "class_note": null,
+     "notes": "Every built join agrees with the reference; the other relationships are not built, read as recovered (the coordinator's ruling makes a draw partial only when its built joins strip on some relationships and not others)."
+    },
+    {
+     "id": "crmarenapro-5",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "(4) Salesforce Id prefixes identify object type: 001 Account, 003 Contact, 005 User, 006 Opportunity, ... Polymorphic columns (Event/Task.WhatId, emailmessage.relatedtoid/parentid/toids) point at whichever object the prefix shows. ... IsConverted = 1 (885 leads) is the flag with conversion details",
+      "where": "contract.yml semantic.domains.data_quality.description; semantic.domains.sales.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": "Encodes specific Salesforce conventions (id key prefixes, polymorphic lookups, IsConverted); no general statement that CRM domain knowledge is required.",
+     "class_note": "Thin item (a general caution); scored on the reading fixed in the references' notes before any draw.",
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "All six logical databases are schemas of one DuckDB database (<db_name>.<table_name>); cross-database joins are plain DuckDB SQL.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "(3) Many numeric and date columns are VARCHAR: Quantity, UnitPrice, TotalPrice, Discount, Probability, ContractTerm, DurationInMinutes -- CAST to DOUBLE. Timestamps are ISO strings like '2024-07-27T09:30:00.000+0000' (UTC) -- CAST to TIMESTAMPTZ; dates like '2024-02-15' -- CAST to DATE. All values checked cast cleanly.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "(4) Salesforce Id prefixes identify object type: 001 Account, 003 Contact, 005 User, 006 Opportunity, 00Q Lead, 500 Case, 800 Contract, 801 Order, 802 OrderItem, 0Q0 Quote, 01t Product2, 01s Pricebook2, 01u PricebookEntry, a03 issue__c.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Opportunity.StageName values (trimmed): Qualification, Discovery, Quote, Negotiation, Closed. There is no separate won/lost stage. ... Opportunity.ContractID__c links a deal to its Contract (163 filled).",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Quote.Status values: Draft, Needs Review, Need Review (1 row, variant spelling), In Review, Approved, Presented, Accepted, Rejected, Denied. QuoteLineItem.Discount is a percent (0-30): TotalPrice = Quantity * UnitPrice * (1 - Discount/100), verified on all 2966 rows.",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "CAUTION: 384 leads have Status 'Converted' but IsConverted = 0 and no ConvertedDate; IsConverted = 1 (885 leads) is the flag with conversion details",
+     "where": "contract.yml semantic.domains.sales.description; semantic.yml metrics.lead_conversion_rate",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Contract.Status is always 'Activated'; ContractTerm is months (12, 24, 36).",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes (the unit cannot be checked)"
+    },
+    {
+     "quote": "closeddate is filled exactly for the 75 Closed cases. Case.priority: High, Medium, Low. casehistory__c.field__c values: Case Creation, Owner Assignment (newvalue__c = new owner User Id), Case Closed.",
+     "where": "contract.yml semantic.domains.support.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "About 7.5 h over the 75 closed cases.",
+     "where": "semantic.yml metrics.avg_case_handle_time_hours.description",
+     "confirmed": "yes (7.51 h)"
+    },
+    {
+     "quote": "Chat and voice transcripts contain HTML entities such as &#39;.",
+     "where": "contract.yml semantic.domains.support.description",
+     "confirmed": "no (chat yes, 57 of 58; voice transcripts contain none)"
+    },
+    {
+     "quote": "Order.Status is always 'Activated'. Task.Status: Not Started, In Progress, Deferred, Waiting, Completed; Task.Priority: High, Normal, Low.",
+     "where": "contract.yml semantic.domains.products_orders / activities_territory descriptions",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Territory2.Description is a comma-separated list of US state codes (e.g. 'MO,KS,OK') that matches core_crm.Account.ShippingState",
+     "where": "contract.yml semantic.domains.activities_territory.description; semantic.yml metrics.accounts_per_territory",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "Text states that voice transcripts contain HTML entities; none of the 4033 VoiceCallTranscript__c bodies does (chat bodies do). No hint item touches transcript text.",
+     "where": "contract.yml semantic.domains.support.description",
+     "smallest_fix": "Change 'Chat and voice transcripts contain HTML entities such as &#39;.' to 'Chat transcripts (livechattranscript.body) contain HTML entities such as &#39;.'"
+    }
+   ]
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "crmarenapro-1",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "ID NOISE: roughly a quarter of Salesforce Id values and foreign keys in every table carry a spurious leading '#' (e.g. '#006Wt000007BAEXIA4'); the same record may appear with '#' in one table and without it in another. ... ALWAYS compare and join Ids through ltrim(x, '#') on both sides, and return Ids in that cleaned form.",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.account_territory; semantic.yml metrics.cases_per_issue; semantic.yml metrics.user_territory_assignment_count",
+      "summary": "6 touched column(s) read by metric or relationship SQL; 167 records agree, 0 disagree, 16266 in columns no metric or relationship reads"
+     },
+     "agree": 167,
+     "total": 16433,
+     "computation_check": null,
+     "right_part": "Account.Id 29/29 (LTRIM(X, '#')); Case.id 44/44 (LTRIM(X, '#')); Territory2.Id 2/2 (LTRIM(X, '#')); UserTerritory2Association.Territory2Id 49/49 (LTRIM(X, '#')); UserTerritory2Association.UserId 37/37 (LTRIM(X, '#')); issue__c.id 6/6 (LTRIM(X, '#'))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "TEXT NOISE: names, subjects, statuses and emails often carry trailing spaces (e.g. 'Activated  ', 'US-Northwest   ', 'Converted  '). Compare categorical/text values with trim(x).",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.open_case_count; semantic.yml metrics.opportunity_pipeline_amount; semantic.yml metrics.weighted_pipeline_amount",
+      "summary": "2 touched column(s) read by metric or relationship SQL; 266 records agree, 0 disagree, 6312 in columns no metric or relationship reads"
+     },
+     "agree": 266,
+     "total": 6578,
+     "computation_check": null,
+     "right_part": "Case.status 20/20 (TRIM(X)); Opportunity.StageName 246/246 (TRIM(X))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Salesforce Id values and foreign keys in every table carry a spurious leading '#' ... names, subjects, statuses and emails often carry trailing spaces",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.account_territory; semantic.yml metrics.cases_per_issue; semantic.yml metrics.open_case_count; semantic.yml metrics.opportunity_pipeline_amount; semantic.yml metrics.user_territory_assignment_count; semantic.yml metrics.weighted_pipeline_amount",
+      "summary": "5 corrupted named columns read with the matching clean-up (core_crm.Account.Id, support.Case.id, support.Case.status, support.issue__c.id, territory.Territory2.Id); the 3 clean named columns agree by silence; 57 corrupted named columns unread"
+     },
+     "agree": 8,
+     "total": 65,
+     "computation_check": null,
+     "right_part": "SQL: core_crm.Account.Id, support.Case.id, support.Case.status, support.issue__c.id, territory.Territory2.Id plus the 3 clean columns; text names Id, AccountId and ContactId (all ids and foreign keys), Name/FirstName/LastName (as 'names'), Subject, Status and Email: all 9",
+     "class_note": null,
+     "notes": "Text names Id, AccountId and ContactId (all ids and foreign keys), Name/FirstName/LastName (as 'names'), Subject, Status and Email: all 9."
+    },
+    {
+     "id": "crmarenapro-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Join and filter on Salesforce Ids only via ltrim(col, '#') on both sides; about 25% of Ids carry a spurious leading '#'.",
+      "where": "contract.yml semantic.rules.normalize_ids.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cases_per_issue.from_sql; semantic.yml metrics.user_territory_assignment_count.from_sql",
+      "summary": "2 of the 47 reference id relationships built; 2 strip '#' on both sides and join every child row to the reference parent"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "built_joins": 2,
+      "of_reference_relationships": 47,
+      "agree_child_rows": 337,
+      "child_rows": 337,
+      "joins_agreeing": 2,
+      "per_join": "Case.issueid__c -> issue__c.Id 153/153 (raw 93) [semantic.yml metrics.cases_per_issue.from_sql]; UserTerritory2Association.Territory2Id -> Territory2.Id 184/184 (raw 108) [semantic.yml metrics.user_territory_assignment_count.from_sql]"
+     },
+     "right_part": null,
+     "class_note": null,
+     "notes": "Every built join agrees with the reference; the other relationships are not built, read as recovered (the coordinator's ruling makes a draw partial only when its built joins strip on some relationships and not others)."
+    },
+    {
+     "id": "crmarenapro-5",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "there is no won/lost distinction, 'Closed' is the only terminal stage ... IsConverted=1 is the reliable conversion flag",
+      "where": "contract.yml semantic.domains.sales.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": "Encodes specific CRM conventions (stage semantics, lead conversion flag); no general statement that CRM domain knowledge is required.",
+     "class_note": "Thin item (a general caution); scored on the reading fixed in the references' notes before any draw.",
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Reserved-word tables must be quoted: support.\"Case\", products_orders.\"Order\", core_crm.\"User\".",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "no (schema-qualified, they run unquoted in DuckDB; quoting is harmless)"
+    },
+    {
+     "quote": "Ids have no surrounding whitespace. Stripping the '#' leaves Ids unique (checked: Opportunity 1170/1170, Case 153/153, Account 101/101, User 212/212, Lead 1465/1465).",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "TYPES: most numbers (Quantity, UnitPrice, TotalPrice, Discount, Probability, ContractTerm, DurationInMinutes) are VARCHAR ... All cast cleanly. Opportunity.Amount and Account.NumberOfEmployees are DOUBLE. Timestamps ... cast cleanly to TIMESTAMPTZ; dates like '2024-02-15' cast to DATE. Boolean flags (IsConverted, IsActive, IsAllDayEvent) are BIGINT 0/1.",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Opportunity.StageName in Qualification, Discovery, Quote, Negotiation, Closed -- there is no won/lost distinction ... Quote.Status in Draft, Needs Review, Need Review (1 row ...), In Review, Presented, Approved, Accepted, Denied, Rejected.",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "885 leads have Status 'Converted' with IsConverted=1 and a ConvertedDate, while 384 have Status 'Converted' but IsConverted=0 and no ConvertedDate/ConvertedAccountId",
+     "where": "contract.yml semantic.domains.sales.description; semantic.yml metrics.lead_conversion_rate",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Contract.Status is always 'Activated'; ContractTerm is in months ('12','24','36'). Opportunity.ContractID__c links an opportunity to its contract (163 opportunities have one). QuoteLineItem.TotalPrice = Quantity * UnitPrice * (1 - Discount/100); Discount is a percentage (0-30), verified on every row.",
+     "where": "contract.yml semantic.domains.sales.description",
+     "confirmed": "yes (the month unit cannot be checked)"
+    },
+    {
+     "quote": "Case.status in Closed, Working, Waiting on Customer; closeddate is populated exactly for Closed cases. ... casehistory__c.field__c in 'Case Creation', 'Owner Assignment' (newvalue__c = new owner User Id), 'Case Closed'.",
+     "where": "contract.yml semantic.domains.support_cases.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "emailmessage rows with parentid set belong to a Case (parentid = Case id, relatedtoid also a Case id); others have relatedtoid = an Opportunity Id. ... livechattranscript ... body ... HTML entities such as &#39;.",
+     "where": "contract.yml semantic.domains.support_cases.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Task.WhatId and Event.WhatId all reference Opportunities (prefix 006). Task.Status observed values include Not Started, In Progress, Waiting, Deferred (Completed is almost absent).",
+     "where": "contract.yml semantic.domains.activities.description",
+     "confirmed": "yes (Completed: 1 row)"
+    },
+    {
+     "quote": "Order.Status is always 'Activated'.",
+     "where": "contract.yml semantic.domains.products_orders.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Territory2.Description is a comma-separated list of US state codes covered (e.g. 'MO,KS,OK'), matching core_crm.Account.ShippingState. ... Ten territories exist; names may have trailing spaces.",
+     "where": "contract.yml semantic.domains.territory.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "crmarenapro-1",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "about 25% of ID-like fields may include a leading '#' (e.g. '#001Wt00000PFj4zIAD') ... RULE: every ID comparison or join must normalize BOTH sides with ltrim(trim(x), '#') (metric `normalized_id`)",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.agent_territories; semantic.yml metrics.case_count; semantic.yml metrics.case_issue; semantic.yml metrics.case_product; semantic.yml metrics.normalized_id; semantic.yml metrics.opportunity_count; semantic.yml metrics.order_revenue_by_account",
+      "summary": "13 touched column(s) read by metric or relationship SQL; 1381 records agree, 0 disagree, 15052 in columns no metric or relationship reads"
+     },
+     "agree": 1381,
+     "total": 16433,
+     "computation_check": null,
+     "right_part": "Case.id 44/44 (LTRIM(TRIM(X), '#')); Opportunity.AccountId 286/286 (LTRIM(TRIM(X), '#')); Opportunity.Id 294/294 (LTRIM(TRIM(X), '#')); Order.Id 35/35 (LTRIM(TRIM(X), '#')); OrderItem.Id 196/196 (LTRIM(TRIM(X), '#')); OrderItem.OrderId 187/187 (LTRIM(TRIM(X), '#')); OrderItem.Product2Id 168/168 (LTRIM(TRIM(X), '#')); Product2.Id 15/15 (LTRIM(TRIM(X), '#')); Territory2.Id 2/2 (LTRIM(TRIM(X), '#')); User.Id 62/62 (LTRIM(TRIM(X), '#')); UserTerritory2Association.Territory2Id 49/49 (LTRIM(TRIM(X), '#')); UserTerritory2Association.UserId 37/37 (LTRIM(TRIM(X), '#')); issue__c.id 6/6 (LTRIM(TRIM(X), '#'))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "about 20% of text fields may contain trailing whitespace (e.g. 'Company Name ') ... every comparison, grouping or display of a text/status value must use trim(x) (metric `clean_text`)",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.account_in_territory; semantic.yml metrics.agent_territories; semantic.yml metrics.case_issue; semantic.yml metrics.case_product; semantic.yml metrics.clean_text; semantic.yml metrics.closed_opportunity_amount; semantic.yml metrics.opportunity_win_rate",
+      "summary": "4 touched column(s) read by metric or relationship SQL; 260 records agree, 0 disagree, 6318 in columns no metric or relationship reads"
+     },
+     "agree": 260,
+     "total": 6578,
+     "computation_check": null,
+     "right_part": "Opportunity.StageName 246/246 (TRIM(X)); Product2.Name 11/11 (TRIM(X)); Territory2.Name 1/1 (TRIM(X)); issue__c.name 2/2 (TRIM(X))",
+     "class_note": null,
+     "notes": "Every touched record a metric reads is read as the reference reads it; the rest lie in columns no metric reads."
+    },
+    {
+     "id": "crmarenapro-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "corruption may appear in Id, AccountId, ContactId, Name, FirstName, LastName, Email, Subject and Status (and, as observed, in OwnerId, WhatId, OpportunityId, Product2Id, Pricebook2Id, QuoteId, caseid fields etc.)",
+      "where": "contract.yml semantic.domains.data_quality.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.account_in_territory; semantic.yml metrics.agent_territories; semantic.yml metrics.case_count; semantic.yml metrics.case_issue; semantic.yml metrics.case_product; semantic.yml metrics.clean_text; semantic.yml metrics.closed_opportunity_amount; semantic.yml metrics.normalized_id; semantic.yml metrics.opportunity_count; semantic.yml metrics.opportunity_win_rate; semantic.yml metrics.order_revenue_by_account",
+      "summary": "12 corrupted named columns read with the matching clean-up (core_crm.User.Id, products_orders.Order.Id, products_orders.OrderItem.Id, products_orders.Product2.Id, products_orders.Product2.Name, sales_pipeline.Opportunity.AccountId, sales_pipeline.Opportunity.Id, support.Case.id, support.issue__c.id, support.issue__c.name, territory.Territory2.Id, territory.Territory2.Name); the 3 clean named columns agree by silence; 50 corrupted named columns unread"
+     },
+     "agree": 15,
+     "total": 65,
+     "computation_check": null,
+     "right_part": "SQL: core_crm.User.Id, products_orders.Order.Id, products_orders.OrderItem.Id, products_orders.Product2.Id, products_orders.Product2.Name, sales_pipeline.Opportunity.AccountId, sales_pipeline.Opportunity.Id, support.Case.id, support.issue__c.id, support.issue__c.name, territory.Territory2.Id, territory.Territory2.Name plus the 3 clean columns; text names all 9, verbatim, plus columns outside the list (an addition)",
+     "class_note": null,
+     "notes": "Text names all 9, verbatim, plus columns outside the list (an addition)."
+    },
+    {
+     "id": "crmarenapro-4",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Every join or filter on an ID column must apply ltrim(trim(col), '#') to both sides; raw ID equality silently drops ~25% of matches.",
+      "where": "contract.yml semantic.rules.normalize_ids_in_joins.description; also data_quality: 'corruption handling is needed for reliable joins'"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.agent_territories.from_sql; semantic.yml metrics.case_issue.from_sql; semantic.yml metrics.case_product.from_sql; semantic.yml metrics.order_revenue_by_account.from_sql",
+      "summary": "6 of the 47 reference id relationships built; 6 strip '#' on both sides and join every child row to the reference parent"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "built_joins": 6,
+      "of_reference_relationships": 47,
+      "agree_child_rows": 2052,
+      "child_rows": 2052,
+      "joins_agreeing": 6,
+      "per_join": "OrderItem.OrderId -> Order.Id 689/689 (raw 434) [semantic.yml metrics.order_revenue_by_account.from_sql]; Case.issueid__c -> issue__c.Id 153/153 (raw 93) [semantic.yml metrics.case_issue.from_sql]; Case.orderitemid__c -> OrderItem.Id 153/153 (raw 107) [semantic.yml metrics.case_product.from_sql]; OrderItem.Product2Id -> Product2.Id 689/689 (raw 387) [semantic.yml metrics.case_product.from_sql]; UserTerritory2Association.Territory2Id -> Territory2.Id 184/184 (raw 108) [semantic.yml metrics.agent_territories.from_sql]; UserTerritory2Association.UserId -> User.Id 184/184 (raw 123) [semantic.yml metrics.agent_territories.from_sql]"
+     },
+     "right_part": null,
+     "class_note": null,
+     "notes": "Every built join agrees with the reference; the other relationships are not built, read as recovered (the coordinator's ruling makes a draw partial only when its built joins strip on some relationships and not others)."
+    },
+    {
+     "id": "crmarenapro-5",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "the Salesforce flag IsConverted = 1 is used as the authoritative conversion signal ... Some User rows are system users (e.g. 'Integration User', 'Automated Process', 'Platform Integration User') and are not agents.",
+      "where": "contract.yml semantic.domains.sales_pipeline.description; semantic.domains.accounts_and_people.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": "Encodes specific Salesforce conventions (IsConverted, system users, id prefixes, 'Closed' read as won); the item 'Domain-specific CRM knowledge is required' is not carried as a general statement.",
+     "class_note": "Thin item (a general caution); scored on the reading fixed in the references' notes before any draw.",
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "TYPES: many numeric fields are stored as VARCHAR (Probability, Quantity, UnitPrice, TotalPrice, Discount, DurationInMinutes, ContractTerm); CAST(... AS DOUBLE) ... all values were verified castable. Timestamps are VARCHAR in the form '2024-07-27T09:30:00.000+0000' (UTC) ... Date-only fields (CloseDate, ActivityDate, ..., EndTime__c) are 'YYYY-MM-DD' strings",
+     "where": "contract.yml semantic.domains.data_quality.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "OwnerId fields on Opportunity, Lead, Order, Task, Event, Case and livechattranscript, and UserId in UserTerritory2Association, reference User.Id. Some User rows are system users (e.g. 'Integration User', 'Automated Process', 'Platform Integration User') and are not agents.",
+     "where": "contract.yml semantic.domains.accounts_and_people.description",
+     "confirmed": "yes (every owner key joins to User after normalising; system users present under these and similar names)"
+    },
+    {
+     "quote": "OBSERVED: 384 leads show Status 'Converted' but IsConverted = 0 and no ConvertedDate ... 1269 leads have Status 'Converted' but only 885 have IsConverted = 1",
+     "where": "contract.yml semantic.domains.sales_pipeline.description; semantic.yml metrics.lead_conversion_rate",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Opportunity.StageName values (trimmed): Qualification, Discovery, Quote, Negotiation, Closed. There is no 'Closed Won'/'Closed Lost' split ... Amount is DOUBLE, never null.",
+     "where": "contract.yml semantic.domains.sales_pipeline.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "INTERPRETATION: with no won/lost split, 'Closed' is read as a closed (won) deal.",
+     "where": "semantic.yml metrics.opportunity_win_rate.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "Opportunity.ContactId is the deal's primary contact.",
+     "where": "contract.yml semantic.domains.sales_pipeline.description",
+     "confirmed": "cannot be checked (every ContactId is a contact of the deal's own account, 1170/1170)"
+    },
+    {
+     "quote": "Quote.Status values (trimmed): Draft, Needs Review, Need Review, In Review, Approved, Presented, Accepted, Denied, Rejected ... QuoteLineItem.Discount is a percentage: TotalPrice = Quantity * UnitPrice * (1 - Discount/100) (verified to the cent). OpportunityLineItem.TotalPrice likewise already reflects any discount.",
+     "where": "contract.yml semantic.domains.sales_pipeline.description",
+     "confirmed": "yes (OpportunityLineItem.TotalPrice equals the linked QuoteLineItem.TotalPrice on all 2966 links)"
+    },
+    {
+     "quote": "Contract.Status is always 'Activated' (after trim); ContractTerm is in months (12, 24, 36).",
+     "where": "contract.yml semantic.domains.sales_pipeline.description",
+     "confirmed": "yes (the unit cannot be checked)"
+    },
+    {
+     "quote": "Order ... Status always 'Activated'; OrderItem lines carry Quantity and the actual (possibly discounted) UnitPrice",
+     "where": "contract.yml semantic.domains.products_orders.description",
+     "confirmed": "yes (529 of 689 lines below the list price)"
+    },
+    {
+     "quote": "closeddate is set exactly for Closed cases ... casehistory__c.field__c values: 'Case Creation', 'Owner Assignment' (newvalue__c = new owner User Id, oldvalue__c = previous owner or empty for the first assignment), 'Case Closed'.",
+     "where": "contract.yml semantic.domains.support.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "emailmessage: parentid is a Case Id for case emails (509 rows) ... relatedtoid is an Opportunity Id (prefix 006) or Case Id (prefix 500); toids is a JSON- style array string ... body ... HTML entities such as &#39;. knowledge__kav holds ... competitor briefs titled 'Competitor: ...'. ID prefixes: 001 Account, 003 Contact, 005 User, 006 Opportunity, 00Q Lead, 500 Case, 800 Contract, 801 Order, 802 OrderItem, 0Q0 Quote.",
+     "where": "contract.yml semantic.domains.support.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Task and Event WhatId reference Opportunity Ids (all observed values have prefix 006). ... Location: Office, Client Site, Virtual; IsAllDayEvent 0/1. VoiceCallTranscript__c is linked to either an opportunity (OpportunityId__c) or a lead (LeadId__c), never both; Body__c lines are '[timestamp] Speaker: text'.",
+     "where": "contract.yml semantic.domains.activities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "An account belongs to the territory whose list contains its trimmed Account.ShippingState ...; 14 of 101 accounts have states not in any territory. ... a user may hold several territories.",
+     "where": "contract.yml semantic.domains.territory.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Agent full name is trim(FirstName) || ' ' || trim(LastName).",
+     "where": "contract.yml semantic.domains.accounts_and_people.description",
+     "confirmed": "yes for agents (4 system users have a NULL FirstName, giving NULL)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "crmarenapro-1",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml relationships",
+      "summary": "19 touched column(s) read by metric or relationship SQL; 0 records agree, 3864 disagree, 12569 in columns no metric or relationship reads"
+     },
+     "agree": 0,
+     "total": 16433,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No metrics; the declared relationships read their key columns raw, so every touched record they read disagrees."
+    },
+    {
+     "id": "crmarenapro-2",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": 0,
+     "total": 6578,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "crmarenapro-3",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml relationships",
+      "summary": "0 corrupted named columns read with the matching clean-up; 11 read raw (core_crm.Account.Id, core_crm.Contact.AccountId, core_crm.User.Id, products_orders.Order.Id, products_orders.Product2.Id, sales_pipeline.Opportunity.AccountId, sales_pipeline.Opportunity.Id, sales_pipeline.Quote.Id, support.Case.id, support.issue__c.id, territory.Territory2.Id); the 3 clean named columns agree by silence; 51 corrupted named columns unread"
+     },
+     "agree": 3,
+     "total": 65,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Text names none of the 9 as corrupted."
+    },
+    {
+     "id": "crmarenapro-4",
+     "cls": "guidance",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": {
+      "where": "semantic.yml relationships",
+      "summary": "12 of the 47 reference id relationships built; 0 strip '#' on both sides and join every child row to the reference parent"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "built_joins": 12,
+      "of_reference_relationships": 47,
+      "agree_child_rows": 8504,
+      "child_rows": 13475,
+      "joins_agreeing": 0,
+      "per_join": "Contact.AccountId -> Account.Id 547/886 (raw 547) [semantic.yml relationships]; Opportunity.AccountId -> Account.Id 728/1170 (raw 728) [semantic.yml relationships]; Opportunity.OwnerId -> User.Id 765/1170 (raw 765) [semantic.yml relationships]; OpportunityLineItem.OpportunityId -> Opportunity.Id 3061/4926 (raw 3061) [semantic.yml relationships]; Quote.OpportunityId -> Opportunity.Id 424/704 (raw 424) [semantic.yml relationships]; QuoteLineItem.QuoteId -> Quote.Id 1910/2966 (raw 1910) [semantic.yml relationships]; OrderItem.OrderId -> Order.Id 434/689 (raw 434) [semantic.yml relationships]; PricebookEntry.Product2Id -> Product2.Id 30/50 (raw 30) [semantic.yml relationships]; casehistory__c.caseid__c -> Case.Id 281/393 (raw 281) [semantic.yml relationships]; Case.issueid__c -> issue__c.Id 93/153 (raw 93) [semantic.yml relationships]; UserTerritory2Association.Territory2Id -> Territory2.Id 108/184 (raw 108) [semantic.yml relationships]; UserTerritory2Association.UserId -> User.Id 123/184 (raw 123) [semantic.yml relationships]"
+     },
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "crmarenapro-5",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "The core_crm database holds core CRM data from Salesforce CRMArena. ... Lead holds sales leads (IsConverted marks a converted lead, which has ConvertedContactId / ConvertedAccountId / ConvertedDate) ... Event.WhatId and Task.WhatId point at the related record (for example an opportunity or account).",
+      "where": "contract.yml semantic.domains.core_crm/sales_pipeline/activities descriptions"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": "Encodes Salesforce conventions (lead conversion fields, polymorphic WhatId) without a general statement that CRM domain knowledge is required.",
+     "class_note": "Thin item (a general caution); scored on the reading fixed in the references' notes before any draw.",
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Owner fields elsewhere (OwnerId, ownerid, UserId) refer to core_crm.User.Id.",
+     "where": "contract.yml semantic.domains.core_crm.description",
+     "confirmed": "yes (after normalising the keys)"
+    },
+    {
+     "quote": "Dates and numbers other than Opportunity.Amount are stored as VARCHAR; cast them (TRY_CAST(... AS TIMESTAMP / DATE / DOUBLE))",
+     "where": "contract.yml semantic.domains.sales_pipeline.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "The table name Case is a reserved word in SQL: always write it quoted, support.\"Case\". ... Order is a reserved word: always write it quoted",
+     "where": "contract.yml semantic.domains.support / products_orders descriptions; rules.quote_reserved_table_names",
+     "confirmed": "no (schema-qualified, they run unquoted in DuckDB; quoting is harmless)"
+    },
+    {
+     "quote": "Event.WhatId and Task.WhatId point at the related record (for example an opportunity or account).",
+     "where": "contract.yml semantic.domains.activities.description",
+     "confirmed": "yes in part (every WhatId is an opportunity; no account occurs)"
+    },
+    {
+     "quote": "Column names in this schema are lower case.",
+     "where": "contract.yml semantic.domains.support.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "12 declared many_to_one relationships (e.g. core_crm.Contact.AccountId -> core_crm.Account.Id, support.casehistory__c.caseid__c -> support.Case.id) on raw keys",
+     "where": "semantic.yml relationships",
+     "confirmed": "yes as to the targets (each joins its parent after normalising); raw they drop rows, scored under item 4"
+    }
+   ],
+   "correctable_errors": []
+  }
+ }
+}

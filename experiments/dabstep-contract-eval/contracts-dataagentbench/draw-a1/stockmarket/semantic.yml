@@ -1,0 +1,164 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockmarket, author: claudeopus5.5
+metrics:
+- name: is_etf
+  description: True when the security is an ETF. ETF is stored as 'Y'/'N'.
+  sql_expression: s.ETF = 'Y'
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one security (stockinfo row)
+  domains:
+  - securities
+- name: is_nasdaq_listed
+  description: 'True when the security is listed on NASDAQ (Listing Exchange = ''Q''). Distinct from ''Nasdaq
+    Traded'', which is ''Y'' for every row here.
+
+    '
+  sql_expression: s."Listing Exchange" = 'Q'
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one security (stockinfo row)
+  domains:
+  - securities
+- name: has_financial_issue
+  description: 'True when the Financial Status flags a problem (delinquent, deficient, bankrupt, or a
+    combination) - any non-null value other than ''N'' (Normal). In this data the problem values present
+    are ''D'' (Deficient) and ''H'' (Deficient and Delinquent). NULL status (non-Nasdaq-listed) is not
+    an issue.
+
+    '
+  sql_expression: COALESCE(s."Financial Status" NOT IN ('N'), FALSE)
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one security (stockinfo row)
+  domains:
+  - securities
+- name: security_count
+  description: Number of distinct securities in stockinfo; combine with filters such as is_etf.
+  sql_expression: COUNT(DISTINCT s.Symbol)
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one security (stockinfo row)
+  domains:
+  - securities
+- name: trading_date
+  description: 'Date of the trading day as a DATE. Written against ITI as the example; replace the table
+    with any ticker table (stocktrade_database.<Symbol>).
+
+    '
+  sql_expression: CAST(t.Date AS DATE)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one trading day of one ticker
+  domains:
+  - prices
+- name: daily_price_range
+  description: 'Intraday range: High minus Low for one trading day. ITI is the example source.'
+  sql_expression: t.High - t.Low
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one trading day of one ticker
+  domains:
+  - prices
+- name: daily_return
+  description: 'Day-over-day return on adjusted close: Adj Close / previous trading day''s Adj Close -
+    1, ordered by Date within one ticker table. NULL on the first day. Exclude rows with NULL Close first.
+    ITI is the example source.
+
+    '
+  sql_expression: t."Adj Close" / LAG(t."Adj Close") OVER (ORDER BY t.Date) - 1
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one trading day of one ticker
+  domains:
+  - prices
+- name: total_volume
+  description: 'Total number of shares traded over the selected days. Cast to BIGINT because Volume is
+    DOUBLE in 38 tables. ITI is the example source.
+
+    '
+  sql_expression: SUM(CAST(t.Volume AS BIGINT))
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one trading day of one ticker
+  domains:
+  - prices
+- name: average_daily_volume
+  description: Average shares traded per trading day (rows with NULL Volume ignored). ITI is the example
+    source.
+  sql_expression: AVG(t.Volume)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one trading day of one ticker
+  domains:
+  - prices
+- name: trading_day_count
+  description: Number of trading days with a price (Close not NULL). ITI is the example source.
+  sql_expression: COUNT(t.Close)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one trading day of one ticker
+  domains:
+  - prices
+tables:
+- schema: stockinfo_database
+  table: stockinfo
+  columns:
+  - name: Nasdaq Traded
+    type: VARCHAR
+    description: 'Whether stock is traded on NASDAQ: ''Y''/''N'' (all ''Y'' here).'
+  - name: Symbol
+    type: VARCHAR
+    description: Stock ticker symbol; equals the table name in stocktrade_database.
+  - name: Listing Exchange
+    type: VARCHAR
+    description: 'Exchange where stock is listed: A NYSE MKT, N NYSE, P NYSE ARCA, Q NASDAQ, Z BATS, V
+      IEX.'
+  - name: Market Category
+    type: VARCHAR
+    description: 'Market category classification: Q Global Select, G Global Market, S Capital Market;
+      ''Not applicable or not NASDAQ-listed'' otherwise.'
+  - name: ETF
+    type: VARCHAR
+    description: 'Whether security is an ETF: ''Y''/''N''.'
+  - name: Round Lot Size
+    type: DOUBLE
+    description: Standard trading unit size (e.g. 100.0).
+  - name: Test Issue
+    type: VARCHAR
+    description: 'Whether this is a test issue: ''Y''/''N'' (all ''N'' here).'
+  - name: Financial Status
+    type: VARCHAR
+    description: Financial status (delinquent, deficient, etc.); NULL for non-Nasdaq-listed. N Normal,
+      D Deficient, E Delinquent, Q Bankrupt, G Deficient+Bankrupt, H Deficient+Delinquent, J Delinquent+Bankrupt,
+      K all three.
+  - name: NextShares
+    type: VARCHAR
+    description: 'NextShares designation: ''Y''/''N''.'
+  - name: Company Description
+    type: VARCHAR
+    description: Company name and description; free text beginning with the company name.
+- schema: stocktrade_database
+  table: ITI
+  columns:
+  - name: Date
+    type: VARCHAR
+    description: Trading date as 'YYYY-MM-DD' text. Same columns in every ticker table.
+  - name: Open
+    type: DOUBLE
+    description: Opening price.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day.
+  - name: Close
+    type: DOUBLE
+    description: Closing price.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price (split/dividend adjusted).
+  - name: Volume
+    type: BIGINT
+    description: Number of shares traded; DOUBLE in 38 of the tables.

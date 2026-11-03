@@ -1,0 +1,96 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+version: '1.0'
+name: music-brainz-20k
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: tracks_database
+    description: Detailed information about music tracks; the primary source for the content of each track
+      (title, artist, album, ...). Documented as stored in SQLite, but queried here as a schema of one
+      DuckDB database, in DuckDB SQL.
+    tables:
+    - tracks
+  - schema: sales_database
+    description: 'Sales information for the tracks in tracks_database: individual sales transactions with
+      units sold and revenue generated.'
+    tables:
+    - sales
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: tracks
+    summary: Track records from several sources, including potential duplicates
+    description: "tracks_database.tracks contains all the tracks, including potential duplicates generated\
+      \ from different sources. Each row is a single track record with a unique track_id (verified: 19,375\
+      \ rows, 19,375 distinct track_id). source_id identifies the source the record comes from (5 sources,\
+      \ ids 1-5, ~3,800-3,900 records each). source_track_id is the original identifier from the source\
+      \ and uniqueness is NOT guaranteed (19,208 distinct values for 19,375 rows). The same real-world\
+      \ song can appear under several track_ids from different sources; the documentation gives no deduplication\
+      \ rule, so count track records (track_id) unless a question explicitly asks for distinct songs,\
+      \ and say so when it matters.\nALL TEXT COLUMNS ARE VARCHAR AND DIRTY, and each source formats them\
+      \ differently (checked with run_sql): * year: source 1 and 5 four-digit ('1996'); source 2 two-digit\
+      \ without\n  apostrophe ('75', '06', sometimes one digit '9'); source 3 two-digit\n  with apostrophe\
+      \ (\"'11\"); source 4 mostly empty, some four-digit.\n  Noise everywhere: empty strings (~7,700),\
+      \ stray spaces ('19 89',\n  ' 2009'), 'unk.', 'n.a.', 'unknown', 'null' with spaces, and\n  implausible\
+      \ 4-digit values (2090, 9198, 0028, 1007 ...). Use metric\n  track_release_year.\n* length: source\
+      \ 1 'mm:ss' ('04:04'); source 2 plain seconds ('219');\n  source 3 decimal minutes ('4.367'); source\
+      \ 4 'Xm Ysec' ('1m 58sec');\n  source 5 milliseconds ('100000'). Noise: spaces, letter O for zero,\n\
+      \  'unk.', 'n.a.', 'unknown', empty. Parsed per source, each source has a\n  median of ~212-222\
+      \ seconds, which confirms the units. Use metric\n  track_length_seconds.\n* language: full names\
+      \ ('English'), abbreviations ('Eng.', 'Ger.',\n  'Spa.', 'Fre.', 'Jap.', 'Ita.', 'Por.', 'Fin.',\
+      \ 'Rus.', 'Swe.',\n  'Dut.'), many misspellings ('Englsih', 'nEglish', 'En.g', 'egrman'),\n  case\
+      \ variants ('ENGLISH'), and unknown markers ('', 'unknown',\n  'unk.', 'n.a.', '[Multiple languages]').\
+      \ Use metrics\n  track_language_normalized / track_is_english.\n* title/artist/album: source 2 leaves\
+      \ artist empty and writes title as\n  'Artist - Title'; source 3 leaves album empty and writes title\
+      \ as\n  'Title - Album'; source 4 prefixes titles with a track number\n  ('002-Particle/Wave') and\
+      \ suffixes album with '(year)'; source 1\n  suffixes title with ' (Album)'. '[unknown]' is used\
+      \ as an unknown\n  artist. Use metrics track_artist_clean and track_title_clean.\n"
+    tables:
+    - tracks_database.tracks
+  - name: sales
+    summary: Individual sales transactions per track, units and USD revenue
+    description: 'sales_database.sales holds individual sales transactions. Each row is a single sale
+      record (unique sale_id) for one track_id, which links to tracks_database.tracks.track_id. Checked:
+      58,049 sales, every track_id exists in tracks (no orphans) and every one of the 19,375 tracks has
+      at least one sale. country is one of Canada, France, Germany, UK, USA; store is one of Amazon Music,
+      Apple Music, Google Play, Spotify, iTunes. units_sold ranges 1-499; revenue_usd (USD) ranges 0.99-641.82;
+      neither has NULLs. Revenue is in USD; never sum units as revenue or vice versa. Because tracks may
+      be duplicated across sources, sales of the same song can be spread over several track_ids.
+
+      '
+    tables:
+    - sales_database.sales
+    - tracks_database.tracks
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: parse_dirty_track_fields_with_metrics
+    description: 'year, length and language in tracks are free-form strings whose format depends on source_id;
+      never CAST them directly or compare them as strings for numeric questions. Use track_release_year,
+      track_length_seconds and track_language_normalized / track_is_english.
+
+      '
+    enforcement: warn
+  - name: join_sales_on_track_id
+    description: 'Join sales to tracks only on sales.track_id = tracks.track_id (never on source_track_id,
+      which is not unique). Aggregate sales before joining to tracks when attaching track attributes,
+      to avoid fan-out.
+
+      '
+    enforcement: warn

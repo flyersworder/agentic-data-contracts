@@ -1,0 +1,674 @@
+{
+ "dataset": "stockmarket",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockmarket-1",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Listing Exchange A = NYSE MKT (NYSE American), N = New York Stock Exchange, P = NYSE ARCA, Q = NASDAQ, Z = BATS (Cboe BZX), V = IEX.",
+      "where": "contract.yml domains.securities.description (CODE MEANINGS); also semantic.yml tables.stockinfo.columns.Listing Exchange.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.is_nasdaq_listed.sql_expression",
+      "summary": "s.\"Listing Exchange\" = 'Q' on 2,752 rows: 710 true, i.e. all NASDAQ tiers; not a decode of the other codes"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Wording for Q: 'Q = NASDAQ'. No metric filters Q as Global Select only (is_nasdaq_listed treats Q as all of NASDAQ, 710 rows). All six codes stated; IEX for IEXG and 'NYSE American' as gloss on NYSE MKT are the same meaning."
+    },
+    {
+     "id": "stockmarket-2",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Financial Status N = Normal (not deficient, delinquent or bankrupt), D = Deficient, E = Delinquent, Q = Bankrupt, G = Deficient and Bankrupt, H = Deficient and Delinquent, J = Delinquent and Bankrupt, K = Deficient, Delinquent and Bankrupt.",
+      "where": "contract.yml domains.securities.description (CODE MEANINGS); also semantic.yml tables.stockinfo.columns.Financial Status.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "All eight codes stated as the item gives them."
+    },
+    {
+     "id": "stockmarket-3",
+     "cls": "definition",
+     "category": "partial",
+     "text_reading": {
+      "quote": "True when the Financial Status flags a problem (delinquent, deficient, bankrupt, or a combination) - any non-null value other than 'N' (Normal).",
+      "where": "semantic.yml metrics.has_financial_issue.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.has_financial_issue.sql_expression",
+      "summary": "COALESCE(s.\"Financial Status\" NOT IN ('N'), FALSE): true for any non-null code other than N"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "metric": "has_financial_issue",
+      "result": "25 true; the same 25 symbols as the reference; 2,752 of 2,752 rows agree",
+      "reference": "reference: 25 symbols (Financial Status D 24, H 1)",
+      "agree": true
+     },
+     "right_part": "The predicate includes deficient, delinquent and both (D, E, H) and, run on the built file, returns exactly the reference's 25 symbols. Wrong part: the stated definition also counts bankrupt-only (Q) as a problem, which the item does not, and the concept is not named financially troubled. The difference lies only in codes absent from the built file.",
+     "class_note": null,
+     "notes": "No 'financially troubled' term anywhere in the contract; has_financial_issue is the nearest statement. Scored partial: text states a broader definition than the item, metric agrees on the data."
+    },
+    {
+     "id": "stockmarket-4",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Market Category Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market.",
+      "where": "contract.yml domains.securities.description (CODE MEANINGS); also semantic.yml tables.stockinfo.columns.Market Category.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No metric decodes or filters Market Category."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Flags 'Nasdaq Traded', ETF, 'Test Issue', NextShares are VARCHAR 'Y'/'N' (not booleans). In this data every row has Nasdaq Traded = 'Y' and Test Issue = 'N'.",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Market Category values: 'Q', 'G', 'S' for Nasdaq-listed (Listing Exchange = 'Q') securities and the literal string 'Not applicable or not NASDAQ-listed' otherwise.",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Financial Status is NULL (true SQL NULL, never '') for all non-Nasdaq-listed securities (2042 rows) and is 'N', 'D' or 'H' for Nasdaq-listed ones.",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Company Description ... (the description text starts with the company name).",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes (on a sample; not checkable in full)"
+    },
+    {
+     "quote": "table name = stockinfo.Symbol. 2752 of the 2753 tables match a Symbol exactly; the one extra table is \"CARR#\" (no stockinfo row).",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Date is VARCHAR in ISO 'YYYY-MM-DD' form; CAST(Date AS DATE) works, and string comparison / min / max on it sort chronologically.",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes (every Date in all 2,753 tables matches YYYY-MM-DD and casts)"
+    },
+    {
+     "quote": "Volume is BIGINT in 2715 tables and DOUBLE in 38 (e.g. ADP, BPOPN, CAE, CMA, CMI); the DOUBLE tables hold whole numbers and contain at least one all-NULL price row (e.g. ADP on 2001-09-12)",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes (all 38 DOUBLE tables have all-NULL rows, none fractional; no BIGINT table has NULL rows)"
+    },
+    {
+     "quote": "Prices are DOUBLE with float noise (12.300000190734863)",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes (float noise present, e.g. ITI; the quoted value itself was not located)"
+    },
+    {
+     "quote": "Use Adj Close for returns spanning splits/dividends, Close for the raw traded price.",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "Join metadata to prices by table name; to query many tickers, build a UNION ALL over the per-symbol tables; there is no combined table.",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Rule skip_null_price_rows: some price tables contain rows where all prices and Volume are NULL.",
+     "where": "contract.yml rules.skip_null_price_rows",
+     "confirmed": "yes (70 such rows in 38 tables)"
+    },
+    {
+     "quote": "Metrics is_etf, security_count, trading_date, daily_price_range, daily_return (Adj Close / LAG - 1), total_volume, average_daily_volume, trading_day_count.",
+     "where": "semantic.yml metrics",
+     "confirmed": "yes (they run; security_count 2,752)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockmarket-1",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Listing Exchange A = NYSE MKT (NYSE American), N = New York Stock Exchange (NYSE), P = NYSE ARCA, Q = NASDAQ, Z = BATS (Cboe BZX), V = IEX.",
+      "where": "contract.yml domains.securities.description (INTERPRETATION); also semantic.yml tables.stockinfo.columns.Listing Exchange.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.nasdaq_listed_count.sql_expression",
+      "summary": "COUNT(*) FILTER (WHERE \"Listing Exchange\" = 'Q') = 710, all NASDAQ tiers"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Wording for Q: 'Q = NASDAQ'. No metric filters Q as Global Select only (nasdaq_listed_count counts all 710 Q rows)."
+    },
+    {
+     "id": "stockmarket-2",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Financial Status N = Normal (not deficient, delinquent or bankrupt), D = Deficient, E = Delinquent, Q = Bankrupt, G = Deficient and Bankrupt, H = Deficient and Delinquent, J = Delinquent and Bankrupt, K = Deficient, Delinquent and Bankrupt.",
+      "where": "contract.yml domains.securities.description (INTERPRETATION); also semantic.yml tables.stockinfo.columns.Financial Status.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "All eight codes stated."
+    },
+    {
+     "id": "stockmarket-3",
+     "cls": "definition",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Number of securities whose Financial Status is set and not 'N' (Normal), i.e. deficient, delinquent and/or bankrupt (observed: D = Deficient, 24; H = Deficient and Delinquent, 1).",
+      "where": "semantic.yml metrics.non_normal_financial_status_count.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.non_normal_financial_status_count.sql_expression",
+      "summary": "COUNT(*) FILTER (WHERE \"Financial Status\" IS NOT NULL AND \"Financial Status\" <> 'N') = 25"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "metric": "non_normal_financial_status_count",
+      "result": "25 (its predicate selects the reference's 25 symbols)",
+      "reference": "reference: 25 symbols (Financial Status D 24, H 1)",
+      "agree": true
+     },
+     "right_part": "The count covers deficient, delinquent and both (D, E, H) and gives the reference's 25 on the built file. Wrong part: it is defined as any non-normal status including bankrupt-only (Q), and the concept is not named financially troubled. The difference lies only in codes absent from the built file.",
+     "class_note": null,
+     "notes": "No 'financially troubled' term in the contract. Scored partial: broader definition, agreeing count on the data."
+    },
+    {
+     "id": "stockmarket-4",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Market Category Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market.",
+      "where": "contract.yml domains.securities.description (INTERPRETATION); also semantic.yml tables.stockinfo.columns.Market Category.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No metric decodes or filters Market Category."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "all yes/no flags (Nasdaq Traded, ETF, Test Issue, NextShares) are VARCHAR 'Y'/'N' ... Nasdaq Traded all 'Y' (2752); Test Issue all 'N'; ETF 'Y' 2165 / 'N' 587; NextShares 'Y' 1 / 'N' 2751; Round Lot Size 100.0 for every row.",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Listing Exchange codes observed: A (28), N (234), P (1444), Q (710), Z (336). Market Category observed: Q (173), G (451), S (86) and the literal string 'Not applicable or not NASDAQ-listed' (2042) - not NULL. Financial Status observed: NULL (2042, exactly the non-NASDAQ-listed rows), N (685), D (24), H (1).",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "\"NASDAQ-listed\" means Listing Exchange = 'Q'; \"traded on NASDAQ\" is the Nasdaq Traded flag, which is a different thing.",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes (Nasdaq Traded is 'Y' on all 2,752 rows, Listing Exchange Q on 710)"
+    },
+    {
+     "quote": "Company Description starts with the company/fund name followed by a prose description; there is no separate name column.",
+     "where": "contract.yml domains.securities.description",
+     "confirmed": "yes (on a sample; not checkable in full)"
+    },
+    {
+     "quote": "Date is VARCHAR in ISO 'YYYY-MM-DD' form ... string comparison against 'YYYY-MM-DD' literals also orders correctly.",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Volume is BIGINT in 2715 tables and DOUBLE in 38 (e.g. ADP, BPOPN, CAE, CMA, CMI); the DOUBLE tables contain rows where Volume and the prices are NULL",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Data runs up to 2020-04-01 in the tables checked; start dates vary by ticker (e.g. 1980 for ADP, 1994 for ITI).",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "yes (2,750 of 2,753 tables end 2020-04-01; GLT ends 2020-04-02, CARR# and FDG earlier; ADP starts 1980-03-17, ITI 1994-01-04)"
+    },
+    {
+     "quote": "Adj Close = adjusted closing price (adjusted for splits and dividends - use it for returns across long periods)",
+     "where": "contract.yml domains.prices.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "all 2752 stockinfo symbols have a price table; one price table, \"CARR#\", has no stockinfo row.",
+     "where": "contract.yml domains.cross_database.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Rule quote_identifiers: column names with spaces and ticker table names must be double-quoted.",
+     "where": "contract.yml rules.quote_identifiers",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Metrics etf_count (2165), nasdaq_listed_count (710), trading_date, daily_price_range, daily_return, average_daily_volume, total_volume, trading_day_count.",
+     "where": "semantic.yml metrics",
+     "confirmed": "yes (they run; counts as stated)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockmarket-1",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Listing Exchange A = NYSE MKT (NYSE American), N = NYSE, P = NYSE Arca, Q = NASDAQ, Z = BATS/Cboe BZX, V = IEX.",
+      "where": "contract.yml domains.security_metadata.description (CODE MEANINGS); also semantic.yml tables.stockinfo.columns.Listing Exchange.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.nasdaq_listed.sql_expression",
+      "summary": "\"Listing Exchange\" = 'Q': 710 true, all NASDAQ tiers"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Wording for Q: 'Q = NASDAQ'. No metric filters Q as Global Select only (nasdaq_listed is true on all 710 Q rows)."
+    },
+    {
+     "id": "stockmarket-2",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Financial Status N = Normal (not deficient, delinquent or bankrupt), D = Deficient, E = Delinquent, Q = Bankrupt, G = Deficient and Bankrupt, H = Deficient and Delinquent, J = Delinquent and Bankrupt, K = Deficient, Delinquent and Bankrupt.",
+      "where": "contract.yml domains.security_metadata.description (CODE MEANINGS); also semantic.yml tables.stockinfo.columns.Financial Status.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "All eight codes stated."
+    },
+    {
+     "id": "stockmarket-3",
+     "cls": "definition",
+     "category": "partial",
+     "text_reading": {
+      "quote": "financially_troubled: True when Financial Status marks the issuer as anything other than Normal ('N'), i.e. deficient, delinquent and/or bankrupt (data has 'D' and 'H').",
+      "where": "semantic.yml metrics.financially_troubled.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.financially_troubled.sql_expression",
+      "summary": "\"Financial Status\" IS NOT NULL AND \"Financial Status\" <> 'N': true for any non-null code other than N"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "metric": "financially_troubled",
+      "result": "25 true; the same 25 symbols as the reference; 2,752 of 2,752 rows agree",
+      "reference": "reference: 25 symbols (Financial Status D 24, H 1)",
+      "agree": true
+     },
+     "right_part": "Names the concept financially troubled; the predicate includes D, E and H and returns the reference's 25 symbols on the built file. Wrong part: the definition adds bankrupt-only (Q) as troubled, which the item does not. The difference lies only in codes absent from the built file.",
+     "class_note": null,
+     "notes": "Scored partial: the term is used with a broader definition than the item's; the metric agrees on the data."
+    },
+    {
+     "id": "stockmarket-4",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Market Category Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market.",
+      "where": "contract.yml domains.security_metadata.description (CODE MEANINGS); also semantic.yml tables.stockinfo.columns.Market Category.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No metric decodes or filters Market Category."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "flags (Nasdaq Traded, ETF, Test Issue, NextShares) are stored as the strings 'Y'/'N' ... Every row has Nasdaq Traded = 'Y' and Test Issue = 'N'; NextShares = 'Y' for one row. 2165 of 2752 rows have ETF = 'Y'. Round Lot Size is 100.0 for every row.",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Market Category is 'Q','G','S' for Nasdaq-listed (Listing Exchange 'Q') securities and the literal string 'Not applicable or not NASDAQ-listed' otherwise. Financial Status is NULL (SQL NULL, not empty string) for all non-Nasdaq-listed securities and 'N','D','H' for Nasdaq-listed ones.",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Company names are not a separate column: search Company Description",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Date is VARCHAR in 'YYYY-MM-DD' form; CAST(Date AS DATE) works and string comparison sorts chronologically",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Volume is BIGINT in 2715 tables and DOUBLE in 38 (e.g. ADP, MS, CMA, PGR, XRAY, SDOW); the DOUBLE ones contain rows with all prices and Volume NULL (e.g. ADP on 2001-09-12)",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Data ranges vary by symbol (e.g. ADP 1980-03-17 to 2020-04-01).",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "table names equal stockinfo.Symbol for all 2752 symbols; one extra table, \"CARR#\" (2007-12-27..2018-02-28), has no stockinfo row.",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Adj Close (adjusted closing price, adjusted for splits and dividends - use it for returns across time)",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "Metrics is_etf, etf_count (2165), nasdaq_listed, trading_date, daily_price_range, daily_return, intraday_change, average_close, total_volume, dollar_volume (Close * Volume).",
+     "where": "semantic.yml metrics",
+     "confirmed": "yes (they run)"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockmarket-1",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "LISTING EXCHANGE CODES (\"Listing Exchange\"): A = NYSE MKT; N = New York Stock Exchange (NYSE); P = NYSE ARCA; Z = BATS Global Markets (BATS); V = Investors' Exchange, LLC (IEXG); Q = NASDAQ Global Select Market (top-tier NASDAQ market).",
+      "where": "contract.yml domains.security_metadata.description; also semantic.yml metrics.listing_exchange_name.description and tables.stockinfo.columns.Listing Exchange.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.listing_exchange_name.sql_expression",
+      "summary": "CASE decode of Listing Exchange: A, N, P, Z, V as the item; Q -> 'NASDAQ Global Select Market' on all 710 Q rows"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Wording for Q: the hint's 'Q = NASDAQ Global Select Market', counted as equivalent per the coordinator's ruling. The same domain text adds that 'the 710 rows with Listing Exchange Q are exactly the NASDAQ-listed rows and carry Market Category Q, G or S, so to distinguish NASDAQ tiers use \"Market Category\"'. No metric filters Q as Global Select only. listing_exchange_name is a decode label, not a filter, but it labels all 710 Q rows 'NASDAQ Global Select Market' while market_category_name gives that label to only 173 of them: the two metrics disagree on 537 rows (Market Category G or S)."
+    },
+    {
+     "id": "stockmarket-2",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "FINANCIAL STATUS CODES (\"Financial Status\"): D = Deficient ...; E = Delinquent ...; Q = Bankrupt ...; N = Normal ...; G = Deficient and bankrupt; H = Deficient and delinquent; J = Delinquent and bankrupt; K = Deficient, delinquent, and bankrupt.",
+      "where": "contract.yml domains.security_metadata.description; also semantic.yml metrics.financial_status_name and tables.stockinfo.columns.Financial Status.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.financial_status_name.sql_expression",
+      "summary": "CASE decode of all eight codes as the item gives them; on the data D 24 -> Deficient, H 1 -> Deficient and delinquent, N 685 -> Normal, NULL stays NULL"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "All eight codes stated and decoded by a metric."
+    },
+    {
+     "id": "stockmarket-3",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "FINANCIALLY TROUBLED: a company is considered financially troubled if it is deficient, delinquent, or both, i.e. Financial Status in ('D','E','H').",
+      "where": "contract.yml domains.security_metadata.description; also contract.yml rules.financially_troubled_definition and semantic.yml metrics.is_financially_troubled.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.is_financially_troubled.sql_expression; metrics.financially_troubled_count.sql_expression",
+      "summary": "COALESCE(s.\"Financial Status\" IN ('D','E','H'), false) and COUNT(*) FILTER (WHERE s.\"Financial Status\" IN ('D','E','H'))"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": {
+      "metric": "is_financially_troubled; financially_troubled_count",
+      "result": "is_financially_troubled true on the reference's 25 symbols, 2,752 of 2,752 rows agree; financially_troubled_count = 25",
+      "reference": "reference: 25 symbols (Financial Status D 24, H 1)",
+      "agree": true
+     },
+     "right_part": null,
+     "class_note": null,
+     "notes": "Also notes that G, J, K do not occur, so including them would change nothing here (matches the reference's reading)."
+    },
+    {
+     "id": "stockmarket-4",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "MARKET CATEGORY CODES (\"Market Category\"): Q = NASDAQ Global Select Market; G = NASDAQ Global Market; S = NASDAQ Capital Market.",
+      "where": "contract.yml domains.security_metadata.description; also semantic.yml metrics.market_category_name and tables.stockinfo.columns.Market Category.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.market_category_name.sql_expression",
+      "summary": "CASE decode Q/G/S as the item, else the stored literal; on the data Q 173, G 451, S 86 decoded as the item"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Flag columns \"Nasdaq Traded\", ETF, \"Test Issue\", NextShares hold 'Y'/'N' strings ... every row has \"Nasdaq Traded\"='Y' and \"Test Issue\"='N'; 2165 rows are ETFs; \"Round Lot Size\" is 100.0 for every row.",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Observed: P 1444, Q 710, Z 336, N 234, A 28 (no V rows). ... the 710 rows with Listing Exchange 'Q' are exactly the NASDAQ-listed rows and carry Market Category Q, G or S",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Non-NASDAQ rows hold the literal string 'Not applicable or not NASDAQ-listed' (not NULL). Observed: G 451, Q 173, S 86, not-applicable 2042.",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "D = Deficient (issuer failed to meet NASDAQ continued listing requirements); E = Delinquent (issuer missed regulatory filing deadline); Q = Bankrupt (issuer has filed for bankruptcy)",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "cannot be checked (glosses beyond the item's code meanings)"
+    },
+    {
+     "quote": "The column is SQL NULL (not '') for the 2042 non-NASDAQ rows; NULL means no status reported, not 'N'. Observed: N 685, D 24, H 1, NULL 2042.",
+     "where": "contract.yml domains.security_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Table names match stockinfo.Symbol exactly for all 2752 symbols; one extra table, \"CARR#\", has no stockinfo row.",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Date is VARCHAR in 'YYYY-MM-DD' format ... (string comparison also orders correctly).",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Data ranges at most to 2020-04-01.",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "no (GLT runs to 2020-04-02; 2,750 tables end 2020-04-01)"
+    },
+    {
+     "quote": "Prices are DOUBLE with float noise (e.g. 11.729999542236328)",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes (float noise present; the quoted value itself was not located in ITI)"
+    },
+    {
+     "quote": "Volume ... BIGINT in 2715 tables and DOUBLE in 38 (e.g. ADP, BPOPN, CAE, CMA, CMI); the DOUBLE tables contain rows with NULL Open/High/Low/Close/Volume ... Volume can be 0 on some days.",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "yes (zero-volume days in 1,951 tables)"
+    },
+    {
+     "quote": "\"Adj Close\" is adjusted for splits/dividends; Close is the raw closing price.",
+     "where": "contract.yml domains.daily_prices.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "Join pattern: stockinfo s JOIN stocktrade_database.ITI t ON s.Symbol = 'ITI' (Symbol equal to the table name as a literal).",
+     "where": "semantic.yml metrics.ticker_metadata_with_prices",
+     "confirmed": "yes (runs; 6,608 ITI rows)"
+    },
+    {
+     "quote": "Metrics is_etf, trade_date, daily_price_range, average_daily_volume, total_volume, average_close, max_high_price.",
+     "where": "semantic.yml metrics",
+     "confirmed": "yes (they run)"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "A stated data range is wrong: 'Data ranges at most to 2020-04-01', but table GLT has a row dated 2020-04-02. No hint item touches price dates.",
+     "where": "contract.yml domains.daily_prices.description",
+     "smallest_fix": "Replace with 'Data ends on 2020-04-01 in almost every table (GLT runs to 2020-04-02).'"
+    }
+   ]
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "stockmarket-1",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The contract says only 'Listing Exchange (str), the exchange where the stock is listed' and 'The documentation does not list the code values ... Check them with SELECT DISTINCT'. No code meanings; no wording for Q; no metric reads Listing Exchange."
+    },
+    {
+     "id": "stockmarket-2",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Only the documented 'Financial Status (str or null), the financial status (delinquent, deficient, etc.)'; no code meanings; no metric reads it."
+    },
+    {
+     "id": "stockmarket-3",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No troubled/deficient/delinquent definition and no metric on Financial Status (security_count counts all 2,752 symbols)."
+    },
+    {
+     "id": "stockmarket-4",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Only 'Market category classification. Code values are not documented. Check the distinct values.'"
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Described as stored in SQLite, but it is queried as a schema of the same DuckDB database, in DuckDB SQL.",
+     "where": "contract.yml allowed_tables[stockinfo_database].description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "All 2,753 tables have the same columns. Volume is BIGINT in 2,715 of them and DOUBLE in 38.",
+     "where": "contract.yml allowed_tables[stocktrade_database].description; domains.daily_trading.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Date is stored as VARCHAR. Cast it (TRY_CAST(\"Date\" AS DATE)) before you compare dates ... A string comparison is not safe.",
+     "where": "contract.yml domains.daily_trading.description",
+     "confirmed": "no (every Date is ISO YYYY-MM-DD, so string comparison orders correctly; the cast is harmless)"
+    },
+    {
+     "quote": "Always double-quote them (stocktrade_database.\"ALL\"), because some symbols are SQL keywords or contain characters that are not valid in an identifier.",
+     "where": "contract.yml domains.daily_trading.description",
+     "confirmed": "yes in substance (CARR# needs quoting); the example table ALL does not exist"
+    },
+    {
+     "quote": "Not every symbol in stockinfo is guaranteed to have a price table.",
+     "where": "contract.yml domains.daily_trading.description",
+     "confirmed": "no (all 2,752 symbols have a table; a hedge, not wrong in effect)"
+    },
+    {
+     "quote": "A trade table's name is the value of stockinfo.\"Symbol\" for the same security ... Price tables have no Symbol column",
+     "where": "contract.yml domains.daily_trading.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Rule no_select_star (block).",
+     "where": "contract.yml rules.no_select_star",
+     "confirmed": "cannot be checked (a policy, not a data property)"
+    },
+    {
+     "quote": "Metrics trading_date, daily_price_range, daily_open_to_close_change, total_volume (cast to DOUBLE), average_close on EMTY; security_count.",
+     "where": "semantic.yml metrics",
+     "confirmed": "yes (they run; security_count 2,752)"
+    }
+   ],
+   "correctable_errors": []
+  }
+ }
+}

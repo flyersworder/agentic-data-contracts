@@ -1,0 +1,143 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockmarket, author: claudeopus5.5
+metrics:
+- name: is_etf
+  description: True when the security is an ETF. ETF column stores 'Y'/'N'; 2165 of 2752 rows are 'Y'.
+  sql_expression: ETF = 'Y'
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - security_metadata
+- name: etf_count
+  description: Number of securities flagged ETF = 'Y'.
+  sql_expression: COUNT(*) FILTER (WHERE ETF = 'Y')
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - security_metadata
+- name: nasdaq_listed
+  description: True when the security is listed on NASDAQ (Listing Exchange = 'Q'). Distinct from Nasdaq
+    Traded, which is 'Y' for every row.
+  sql_expression: '"Listing Exchange" = ''Q'''
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - security_metadata
+- name: financially_troubled
+  description: 'True when Financial Status marks the issuer as anything other than Normal (''N''), i.e.
+    deficient, delinquent and/or bankrupt (data has ''D'' and ''H''). NULL Financial Status (non-Nasdaq-listed
+    securities) is not counted as troubled.
+
+    '
+  sql_expression: '"Financial Status" IS NOT NULL AND "Financial Status" <> ''N'''
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - security_metadata
+- name: trading_date
+  description: Trading date as a DATE; Date is stored as VARCHAR 'YYYY-MM-DD'. Substitute the symbol's
+    table for ADP.
+  sql_expression: CAST(Date AS DATE)
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+- name: daily_price_range
+  description: 'Intraday range: highest minus lowest price of the day.'
+  sql_expression: High - Low
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+- name: daily_return
+  description: 'Day-over-day return on adjusted close: Adj Close / previous trading day''s Adj Close -
+    1, ordered by Date. Rows with NULL prices (present in some DOUBLE-Volume tables) should be filtered
+    out first.
+
+    '
+  sql_expression: '"Adj Close" / LAG("Adj Close") OVER (ORDER BY Date) - 1'
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+- name: intraday_change
+  description: Close minus Open for the day (positive = the stock closed up on the day).
+  sql_expression: Close - Open
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+- name: average_close
+  description: Mean closing price over the selected rows (NULL rows are ignored by AVG).
+  sql_expression: AVG(Close)
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+- name: total_volume
+  description: Total number of shares traded over the selected rows. Volume is DOUBLE in 38 tables; cast
+    to BIGINT if an integer is needed.
+  sql_expression: SUM(Volume)
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+- name: dollar_volume
+  description: Traded value approximated as Close * Volume per day.
+  sql_expression: Close * Volume
+  source_model: stocktrade_database.ADP
+  domains:
+  - daily_prices
+tables:
+- schema: stockinfo_database
+  table: stockinfo
+  columns:
+  - name: Nasdaq Traded
+    type: VARCHAR
+    description: Whether the stock is traded on NASDAQ ('Y'/'N'; 'Y' in every row).
+  - name: Symbol
+    type: VARCHAR
+    description: Stock ticker symbol; unique; equals the name of its price table in stocktrade_database.
+  - name: Listing Exchange
+    type: VARCHAR
+    description: 'Exchange where the stock is listed: A=NYSE MKT, N=NYSE, P=NYSE Arca, Q=NASDAQ, Z=BATS
+      (V=IEX not present).'
+  - name: Market Category
+    type: VARCHAR
+    description: 'Market category: Q=NASDAQ Global Select, G=NASDAQ Global Market, S=NASDAQ Capital Market;
+      ''Not applicable or not NASDAQ-listed'' otherwise.'
+  - name: ETF
+    type: VARCHAR
+    description: Whether the security is an ETF ('Y'/'N').
+  - name: Round Lot Size
+    type: DOUBLE
+    description: Standard trading unit size (100.0 for all rows).
+  - name: Test Issue
+    type: VARCHAR
+    description: Whether this is a test issue ('Y'/'N'; 'N' in every row).
+  - name: Financial Status
+    type: VARCHAR
+    description: 'Financial status: N=Normal, D=Deficient, E=Delinquent, Q=Bankrupt, G=Deficient and Bankrupt,
+      H=Deficient and Delinquent, J=Delinquent and Bankrupt, K=Deficient, Delinquent and Bankrupt. NULL
+      for non-Nasdaq-listed securities.'
+  - name: NextShares
+    type: VARCHAR
+    description: NextShares designation ('Y'/'N').
+  - name: Company Description
+    type: VARCHAR
+    description: Company name and description (free text; search with ILIKE).
+- schema: stocktrade_database
+  table: ADP
+  columns:
+  - name: Date
+    type: VARCHAR
+    description: Trading date, 'YYYY-MM-DD' text. Same layout in every per-symbol table.
+  - name: Open
+    type: DOUBLE
+    description: Opening price.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day.
+  - name: Close
+    type: DOUBLE
+    description: Closing price.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price (split/dividend adjusted).
+  - name: Volume
+    type: DOUBLE
+    description: Number of shares traded. BIGINT in 2715 tables, DOUBLE in 38 (including this one), where
+      all-NULL rows occur.

@@ -1,0 +1,246 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+metrics:
+- name: clinical_participant_barcode
+  description: 'The patient''s 12-character TCGA barcode (e.g. TCGA-31-1953), extracted from clinical_info.Patient_description.
+    DATA CHECK: present in every row, unique per row. This is the join key to molecular ParticipantBarcode.
+
+    '
+  sql_expression: regexp_extract(Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}')
+  source_model: clinical_database.clinical_info
+  domains:
+  - clinical
+- name: cancer_type_acronym
+  description: 'TCGA cancer type acronym derived from the study name embedded in Patient_description (case-insensitive
+    match). Order matters: Uterine Carcinosarcoma (UCS) is tested before Sarcoma (SARC). DATA CHECK: all
+    10,761 rows map; 32 types (no LAML rows exist). When joined, prefix the column with the clinical alias
+    (c.Patient_description).
+
+    '
+  sql_expression: "CASE\n WHEN Patient_description ILIKE '%Adrenocortical carcinoma%' THEN 'ACC'\n WHEN\
+    \ Patient_description ILIKE '%Bladder urothelial carcinoma%' THEN 'BLCA'\n WHEN Patient_description\
+    \ ILIKE '%Brain lower grade glioma%' THEN 'LGG'\n WHEN Patient_description ILIKE '%Breast invasive\
+    \ carcinoma%' THEN 'BRCA'\n WHEN Patient_description ILIKE '%Cervical squamous cell carcinoma and\
+    \ endocervical adenocarcinoma%' THEN 'CESC'\n WHEN Patient_description ILIKE '%Cholangiocarcinoma%'\
+    \ THEN 'CHOL'\n WHEN Patient_description ILIKE '%Colon adenocarcinoma%' THEN 'COAD'\n WHEN Patient_description\
+    \ ILIKE '%Esophageal carcinoma%' THEN 'ESCA'\n WHEN Patient_description ILIKE '%Glioblastoma multiforme%'\
+    \ THEN 'GBM'\n WHEN Patient_description ILIKE '%Head and Neck squamous cell carcinoma%' THEN 'HNSC'\n\
+    \ WHEN Patient_description ILIKE '%Kidney Chromophobe%' THEN 'KICH'\n WHEN Patient_description ILIKE\
+    \ '%Kidney renal clear cell carcinoma%' THEN 'KIRC'\n WHEN Patient_description ILIKE '%Kidney renal\
+    \ papillary cell carcinoma%' THEN 'KIRP'\n WHEN Patient_description ILIKE '%Acute Myeloid Leukemia%'\
+    \ THEN 'LAML'\n WHEN Patient_description ILIKE '%Liver hepatocellular carcinoma%' THEN 'LIHC'\n WHEN\
+    \ Patient_description ILIKE '%Lung adenocarcinoma%' THEN 'LUAD'\n WHEN Patient_description ILIKE '%Lung\
+    \ squamous cell carcinoma%' THEN 'LUSC'\n WHEN Patient_description ILIKE '%Diffuse Large B-cell Lymphoma%'\
+    \ THEN 'DLBC'\n WHEN Patient_description ILIKE '%Mesothelioma%' THEN 'MESO'\n WHEN Patient_description\
+    \ ILIKE '%Ovarian serous cystadenocarcinoma%' THEN 'OV'\n WHEN Patient_description ILIKE '%Pancreatic\
+    \ adenocarcinoma%' THEN 'PAAD'\n WHEN Patient_description ILIKE '%Pheochromocytoma and Paraganglioma%'\
+    \ THEN 'PCPG'\n WHEN Patient_description ILIKE '%Prostate adenocarcinoma%' THEN 'PRAD'\n WHEN Patient_description\
+    \ ILIKE '%Rectum adenocarcinoma%' THEN 'READ'\n WHEN Patient_description ILIKE '%Uterine Carcinosarcoma%'\
+    \ THEN 'UCS'\n WHEN Patient_description ILIKE '%Sarcoma%' THEN 'SARC'\n WHEN Patient_description ILIKE\
+    \ '%Skin Cutaneous Melanoma%' THEN 'SKCM'\n WHEN Patient_description ILIKE '%Stomach adenocarcinoma%'\
+    \ THEN 'STAD'\n WHEN Patient_description ILIKE '%Testicular Germ Cell Tumors%' THEN 'TGCT'\n WHEN\
+    \ Patient_description ILIKE '%Thyroid carcinoma%' THEN 'THCA'\n WHEN Patient_description ILIKE '%Thymoma%'\
+    \ THEN 'THYM'\n WHEN Patient_description ILIKE '%Uterine Corpus Endometrial Carcinoma%' THEN 'UCEC'\n\
+    \ WHEN Patient_description ILIKE '%Uveal Melanoma%' THEN 'UVM'\nEND\n"
+  source_model: clinical_database.clinical_info
+  domains:
+  - clinical
+- name: patient_gender
+  description: 'Gender from Patient_description: ''FEMALE'' or ''MALE'' (upper case, as stored), matched
+    on word boundaries so FEMALE is not read as MALE.
+
+    '
+  sql_expression: regexp_extract(Patient_description, '\b(FEMALE|MALE)\b', 1)
+  source_model: clinical_database.clinical_info
+  domains:
+  - clinical
+- name: vital_status
+  description: 'Vital status from Patient_description: ''Alive'' or ''Dead''. NULL for the 5 rows whose
+    text says ''nan'' or ''[Discrepancy]''.
+
+    '
+  sql_expression: NULLIF(regexp_extract(Patient_description, '\b(Alive|Dead)\b', 1), '')
+  source_model: clinical_database.clinical_info
+  domains:
+  - clinical
+- name: overall_survival_days
+  description: 'Days of survival observation: days_to_death for dead patients, otherwise days_to_last_followup.
+    Both columns are VARCHAR with placeholders (''[Not Applicable]'', ''[Discrepancy]'', NULL), so they
+    are TRY_CAST to DOUBLE; unusable values give NULL. INTERPRETATION: the standard TCGA overall-survival
+    construction; the documentation names survival status but gives no formula.
+
+    '
+  sql_expression: "CASE WHEN regexp_extract(Patient_description, '\\b(Alive|Dead)\\b', 1) = 'Dead'\n \
+    \    THEN TRY_CAST(days_to_death AS DOUBLE)\n     ELSE TRY_CAST(days_to_last_followup AS DOUBLE) END\n"
+  source_model: clinical_database.clinical_info
+  domains:
+  - clinical
+- name: pass_mutation_count
+  description: 'Number of reliable mutation calls: rows with FILTER = ''PASS'' (the documented marker
+    of reliable calls).
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE FILTER = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  domains:
+  - mutations
+- name: mutated_patient_count
+  description: 'Number of distinct patients with at least one reliable (FILTER = ''PASS'') mutation call
+    in the rows being aggregated (e.g. filter Hugo_Symbol = ''TP53''). Counted per patient because a patient
+    can have several calls in one gene.
+
+    '
+  sql_expression: COUNT(DISTINCT ParticipantBarcode) FILTER (WHERE FILTER = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  domains:
+  - mutations
+- name: patients_with_mutation_by_cancer_type
+  description: 'Mutation data joined to clinical data on the participant barcode, so mutation counts can
+    be grouped by cancer type (cancer_type_acronym on c.Patient_description), gender, vital status, etc.
+    Counts distinct PASS-mutated patients; filter m.Hugo_Symbol as needed.
+
+    '
+  sql_expression: COUNT(DISTINCT m.ParticipantBarcode) FILTER (WHERE m.FILTER = 'PASS')
+  source_model: molecular_database.Mutation_Data
+  from_sql: "molecular_database.Mutation_Data m JOIN clinical_database.clinical_info c\n  ON m.ParticipantBarcode\
+    \ = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}')\n"
+  grain: one mutation call joined to its patient's clinical row
+  domains:
+  - mutations
+  - clinical
+- name: mean_normalized_count
+  description: 'Average normalized RNA expression value over the rows aggregated. NULL normalized_count
+    rows (177,196) are ignored by AVG. Restrict sample type (e.g. SampleTypeLetterCode = ''TP'' for primary
+    solid tumor) and exclude Symbol = ''?'' when grouping by gene symbol.
+
+    '
+  sql_expression: AVG(normalized_count)
+  source_model: molecular_database.RNASeq_Expression
+  domains:
+  - expression
+- name: tumor_expression_with_clinical
+  description: 'Primary-tumor (SampleTypeLetterCode = ''TP'') expression joined to clinical data on participant
+    barcode, for comparing expression across cancer types or clinical groups. Average normalized_count;
+    group by r.Symbol and the cancer_type_acronym expression on c.Patient_description. A patient may have
+    more than one TP aliquot; average per participant first if per-patient weighting is required.
+
+    '
+  sql_expression: AVG(r.normalized_count) FILTER (WHERE r.SampleTypeLetterCode = 'TP')
+  source_model: molecular_database.RNASeq_Expression
+  from_sql: "molecular_database.RNASeq_Expression r JOIN clinical_database.clinical_info c\n  ON r.ParticipantBarcode\
+    \ = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}')\n"
+  grain: one (aliquot, gene) expression value joined to its patient's clinical row
+  domains:
+  - expression
+  - clinical
+tables:
+- schema: clinical_database
+  table: clinical_info
+  columns:
+  - name: Patient_description
+    type: VARCHAR
+    description: Free-text sentence holding the TCGA barcode, UUID, gender (FEMALE/MALE), cancer type
+      full name and vital status (Alive/Dead). Use metrics clinical_participant_barcode, cancer_type_acronym,
+      patient_gender, vital_status.
+  - name: patient_id
+    type: VARCHAR
+    description: Only the last four characters of the TCGA barcode (e.g. '1953', 'A852'). Not a join key
+      to molecular data.
+  - name: days_to_birth
+    type: DOUBLE
+    description: Days from birth to diagnosis, negative.
+  - name: days_to_death
+    type: VARCHAR
+    description: Days to death; '[Not Applicable]' for living patients, also '[Discrepancy]'/NULL. TRY_CAST
+      to DOUBLE.
+  - name: days_to_last_followup
+    type: VARCHAR
+    description: Days to last follow-up; VARCHAR with NULL and '[Discrepancy]'. TRY_CAST to DOUBLE.
+  - name: age_at_initial_pathologic_diagnosis
+    type: DOUBLE
+    description: Age in years at initial pathologic diagnosis.
+  - name: race
+    type: VARCHAR
+    description: Upper-case race (WHITE, BLACK OR AFRICAN AMERICAN, ASIAN, ...); '[Not Evaluated]', '[Unknown]',
+      NULL are missing.
+  - name: ethnicity
+    type: VARCHAR
+    description: HISPANIC OR LATINO / NOT HISPANIC OR LATINO; '[Unknown]', '[Not Evaluated]', NULL are
+      missing.
+  - name: person_neoplasm_cancer_status
+    type: VARCHAR
+    description: WITH TUMOR / TUMOR FREE; '[Unknown]', '[Discrepancy]', NULL are missing.
+  - name: pathologic_stage
+    type: VARCHAR
+    description: AJCC pathologic stage such as 'Stage IIA'; '[Not Applicable]', '[Unknown]', '[Discrepancy]',
+      empty/NULL are missing.
+  - name: histological_type
+    type: VARCHAR
+    description: Histological type text; NULL and '[Discrepancy]' are missing.
+- schema: molecular_database
+  table: Mutation_Data
+  columns:
+  - name: ParticipantBarcode
+    type: VARCHAR
+    description: Patient identifier (12-char TCGA barcode).
+  - name: Tumor_SampleBarcode
+    type: VARCHAR
+    description: Tumor sample identifier.
+  - name: Tumor_AliquotBarcode
+    type: VARCHAR
+    description: Tumor aliquot identifier.
+  - name: Normal_SampleBarcode
+    type: VARCHAR
+    description: Normal control sample identifier.
+  - name: Normal_AliquotBarcode
+    type: VARCHAR
+    description: Normal control aliquot identifier.
+  - name: Normal_SampleTypeLetterCode
+    type: VARCHAR
+    description: 'Sample type abbreviation for the normal sample: NB, NT, NBC.'
+  - name: Hugo_Symbol
+    type: VARCHAR
+    description: Gene symbol of the mutation (e.g. TP53, CDH1).
+  - name: HGVSp_Short
+    type: VARCHAR
+    description: Protein-level mutation annotation (e.g. p.S351P).
+  - name: Variant_Classification
+    type: VARCHAR
+    description: Classification of the mutation (e.g. Missense_Mutation, Nonsense_Mutation).
+  - name: HGVSc
+    type: VARCHAR
+    description: Coding DNA sequence mutation annotation.
+  - name: CENTERS
+    type: VARCHAR
+    description: Contributing sequencing center / callers, pipe-separated (e.g. MUTECT|MUSE).
+  - name: FILTER
+    type: VARCHAR
+    description: Mutation filter status; 'PASS' = reliable call. Other values are comma-separated flags
+      (wga, oxog, common_in_exac, ...).
+- schema: molecular_database
+  table: RNASeq_Expression
+  columns:
+  - name: ParticipantBarcode
+    type: VARCHAR
+    description: Patient identifier (12-char TCGA barcode).
+  - name: SampleBarcode
+    type: VARCHAR
+    description: Sample identifier.
+  - name: AliquotBarcode
+    type: VARCHAR
+    description: Aliquot identifier.
+  - name: SampleTypeLetterCode
+    type: VARCHAR
+    description: 'Sample type abbreviation: TP, NT, TM, TR, TB, TAP, TAM.'
+  - name: SampleType
+    type: VARCHAR
+    description: Sample type description, e.g. 'Primary solid Tumor', 'Solid Tissue Normal'.
+  - name: Symbol
+    type: VARCHAR
+    description: Gene symbol; '?' for 29 Entrez IDs without a symbol.
+  - name: Entrez
+    type: BIGINT
+    description: Entrez gene ID (documented as str, stored as BIGINT).
+  - name: normalized_count
+    type: DOUBLE
+    description: Normalized RNA expression value; NULL in some rows.

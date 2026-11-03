@@ -1,0 +1,105 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: GITHUB_REPOS, author: claudeopus5.5
+version: '1.0'
+name: github-repos
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: metadata_database
+    description: 'Metadata about GitHub repositories: their declared programming languages, licenses,
+      and repository-level statistics (watch counts). Described as stored in SQLite, but queried here
+      as a DuckDB schema in DuckDB SQL. Three tables: languages, licenses, repos.'
+    tables:
+    - languages
+    - licenses
+    - repos
+  - schema: artifacts_database
+    description: 'GitHub repository artifacts: file contents, commit history, and file-level metadata.
+      Stored in DuckDB. Three tables: contents, commits, files.'
+    tables:
+    - commits
+    - contents
+    - files
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: repository_metadata
+    summary: Repository languages, licenses and watch counts (metadata_database)
+    description: 'metadata_database holds repository-level metadata in three tables. languages: repo_name
+      (name of the GitHub repository in `owner/repo` format) and language_description (programming language(s)
+      used in the repository, represented in natural language format — free text, so match languages with
+      text search such as ILIKE rather than equality). licenses: repo_name (`owner/repo`) and license
+      (license identifier associated with the repository, e.g. `apache-2.0`, `mit`). repos: repo_name
+      (`owner/repo`) and watch_count (number of users watching the repository on GitHub). All three tables
+      key on repo_name in `owner/repo` format, which is also the repository key used throughout artifacts_database
+      (commits.repo_name, files.repo_name, contents.sample_repo_name).
+
+      '
+    tables:
+    - metadata_database.languages
+    - metadata_database.licenses
+    - metadata_database.repos
+  - name: repository_artifacts
+    summary: File contents, commit history and file-level metadata (artifacts_database)
+    description: 'artifacts_database holds repository artifacts in three tables. contents: id (identifier
+      of the file blob in the repository); content (the file content, textual data — for large or binary
+      files this may contain placeholders or truncated values, so do not treat it as complete for such
+      files); sample_repo_name (repository where the file resides, `owner/repo`); sample_ref (reference
+      name, e.g. branch or commit SHA); sample_path (path of the file within the repository); sample_symlink_target
+      (if the file is a symlink, the symlink target path); repo_data_description (natural language description
+      summarizing the file''s metadata, derived from the original size, binary, copies and mode fields
+      — those fields exist only inside this text). commits: commit (unique identifier, SHA, of the commit);
+      tree (SHA of the commit''s associated tree object); parent (one or more parent commit SHAs, JSON-like
+      format for merge commits); author and committer (JSON-like objects containing name, email, timestamp);
+      subject (short subject line of the commit message); message (full commit message); trailer (additional
+      metadata fields attached to the commit, JSON-like); difference (JSON-like structure representing
+      the file changes introduced by the commit); difference_truncated (indicator whether the difference
+      data is truncated — documented as boolean, stored as DOUBLE, so 1 means truncated); repo_name (`owner/repo`);
+      encoding (encoding format of the commit data, if applicable). files: repo_name (`owner/repo`); ref
+      (reference name, branch or commit SHA, at which the file metadata is recorded); path (path of the
+      file within the repository); mode (file mode, e.g. normal file, executable, symlink); id (identifier
+      of the file blob); symlink_target (if the file is a symlink, the target path it points to). files.id
+      and contents.id are both the file blob identifier and join the two tables.
+
+      '
+    tables:
+    - artifacts_database.contents
+    - artifacts_database.commits
+    - artifacts_database.files
+  rules:
+  - name: repo_name_is_owner_slash_repo
+    description: 'Repository names are in `owner/repo` format in every table (languages.repo_name, licenses.repo_name,
+      repos.repo_name, commits.repo_name, files.repo_name, contents.sample_repo_name). Join across databases
+      on these columns; the owner is the part before ''/''.
+
+      '
+    enforcement: warn
+  - name: json_like_fields
+    description: 'commits.parent, author, committer, trailer and difference are JSON-like text; parse
+      them with DuckDB JSON functions (e.g. json_extract) rather than assuming a fixed column layout.
+      parent may hold several SHAs for merge commits.
+
+      '
+    enforcement: warn
+  - name: truncated_content_and_differences
+    description: 'contents.content may contain placeholders or truncated values for large or binary files,
+      and commits.difference may be truncated when difference_truncated is true (1). Results derived from
+      these fields for such rows are incomplete.
+
+      '
+    enforcement: warn
+  - name: use_declared_metrics
+    description: Use the metric definitions in semantic.yml where one applies.
+    enforcement: warn

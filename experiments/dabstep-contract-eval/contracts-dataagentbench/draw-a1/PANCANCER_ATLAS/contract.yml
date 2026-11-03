@@ -1,0 +1,137 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+version: '1.0'
+name: pancancer-atlas
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: clinical_database
+    description: 'Clinical information for patients in the PanCancer Atlas (described as stored in Postgres,
+      queried here as a DuckDB schema): patient identifiers, cancer type, demographics, diagnosis records,
+      treatment outcomes, survival status and other clinical annotations. One table, clinical_info, one
+      row per patient (10,761 rows, all distinct patient barcodes).'
+    tables:
+    - clinical_info
+  - schema: molecular_database
+    description: 'Molecular profiling data of PanCancer Atlas patients: somatic mutation calls (Mutation_Data)
+      and normalized RNA-seq gene expression (RNASeq_Expression).'
+    tables:
+    - Mutation_Data
+    - RNASeq_Expression
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: clinical
+    summary: Patients, cancer type, demographics, diagnosis, treatment and survival
+    description: 'clinical_database.clinical_info holds one row per patient with over one hundred clinical
+      attributes. IMPORTANT, verified in the data: the patient barcode, the cancer type, the gender and
+      the vital status are NOT separate columns. They are embedded in the free-text column Patient_description,
+      written in ~8 different sentence templates, e.g. "Patient TCGA-36-1576 (UUID ...) is a FEMALE diagnosed
+      with Ovarian serous cystadenocarcinoma. Current vital status: Alive." Always extract them with the
+      metrics clinical_participant_barcode, cancer_type_acronym, patient_gender and patient_vital_status.
+
+      PATIENT BARCODE: extract with regexp_extract(Patient_description, ''TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'').
+      Do NOT build it as ''TCGA-''||tissue_source_site|| ''-''||patient_id: for the 7 Uterine Carcinosarcoma
+      patients of site ''NA'' the tissue_source_site was loaded as NULL, so the concatenation fails for
+      them.
+
+      CANCER TYPE: the description carries the full TCGA study name (e.g. "Breast invasive carcinoma");
+      the documentation calls these "cancer type acronyms" (BRCA, LUAD, ...). cancer_type_acronym maps
+      the 32 study names present (no LAML patients exist) to the TCGA acronyms. Note "Uterine Carcinosarcoma"
+      contains the substring "sarcoma", so UCS must be tested before SARC.
+
+      GENDER: ''FEMALE'' or ''MALE'' (5,623 / 5,138 rows). VITAL STATUS: ''Alive'' or ''Dead''; 5 rows
+      read ''nan'' or ''[Discrepancy]'' and are treated as unknown (NULL).
+
+      PLACEHOLDER VALUES: many VARCHAR clinical columns use bracketed TCGA placeholders ''[Not Applicable]'',
+      ''[Not Available]'', ''[Unknown]'', ''[Not Evaluated]'', ''[Discrepancy]'' as well as SQL NULL;
+      these are missing/unknown, not categories, and must be excluded (or reported separately) when counting
+      categories or averaging. days_to_death, days_to_last_followup and other day/count columns are VARCHAR
+      because of these placeholders: convert with TRY_CAST(... AS DOUBLE). days_to_birth is negative (days
+      before diagnosis); age_at_initial_pathologic_ diagnosis is in years (10-90, 49 NULL).
+
+      '
+    tables:
+    - clinical_database.clinical_info
+  - name: mutations
+    summary: Somatic mutation calls per patient and gene
+    description: 'molecular_database.Mutation_Data: one row per somatic mutation call of a tumor aliquot
+      versus a matched normal. ParticipantBarcode is the patient identifier (12 characters, ''TCGA-XX-XXXX'',
+      10,063 patients); Tumor_SampleBarcode / Tumor_AliquotBarcode identify the tumor sample/aliquot;
+      Normal_SampleBarcode / Normal_AliquotBarcode the normal control; Normal_SampleTypeLetterCode the
+      normal sample type abbreviation (NB = blood normal, NT = solid tissue normal, NBC = buccal cell
+      normal). Hugo_Symbol is the gene (e.g. TP53, CDH1); HGVSp_Short the protein-level annotation (e.g.
+      p.R175H); HGVSc the coding DNA annotation; Variant_Classification the mutation class (values present:
+      Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Frame_Shift_Ins, Splice_Site, In_Frame_Del,
+      In_Frame_Ins, Translation_Start_Site, Nonstop_Mutation); CENTERS the contributing callers/centers,
+      pipe-separated; FILTER the filter status.
+
+      RELIABLE CALLS: FILTER = ''PASS'' marks reliable calls (1,780,124 of 2,127,885 rows). Other values
+      are failure reasons (wga, oxog, common_in_exac, native_wga_mix, nonpreferredpair, filterr, ndp,
+      and comma-joined combinations). Use only FILTER = ''PASS'' unless the question explicitly asks otherwise.
+
+      COUNTING: a patient can have several mutations in one gene and several tumor samples, so "patients
+      with a mutation in gene X" is COUNT(DISTINCT ParticipantBarcode), never COUNT(*).
+
+      JOIN TO CLINICAL: Mutation_Data.ParticipantBarcode = the barcode extracted from clinical_info.Patient_description
+      (metric clinical_participant_barcode); 9,854 mutation patients match a clinical row.
+
+      '
+    tables:
+    - molecular_database.Mutation_Data
+  - name: expression
+    summary: Normalized RNA-seq gene expression per sample and gene
+    description: 'molecular_database.RNASeq_Expression: one row per (aliquot, gene). ParticipantBarcode
+      = patient, SampleBarcode = sample, AliquotBarcode = aliquot, Symbol = gene symbol, Entrez = Entrez
+      gene ID (stored as BIGINT), normalized_count = normalized RNA expression value. SampleTypeLetterCode
+      / SampleType pairs present: TP Primary solid Tumor, TM Metastatic, TR Recurrent Solid Tumor, TB
+      Primary Blood Derived Cancer - Peripheral Blood, TAP Additional - New Primary, TAM Additional Metastatic,
+      NT Solid Tissue Normal. Tumor vs normal comparisons must filter on these codes; "tumor expression"
+      usually means TP (or TB for blood cancers). DATA FINDINGS: normalized_count has 177,196 NULLs (ignored
+      by AVG), ranges from about -0.99 to 9.2 million, median ~199; Symbol ''?'' (14,142 rows) is an unannotated
+      gene and should be excluded from gene-level results; about 6,300 (SampleBarcode, Symbol) pairs appear
+      more than once (multiple aliquots or duplicate symbols), so aggregate per sample before per-patient
+      statistics if exact per-patient values matter. The join key to clinical is ParticipantBarcode (9,711
+      of 9,921 expression patients match a clinical row).
+
+      '
+    tables:
+    - molecular_database.RNASeq_Expression
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: extract_identity_from_description
+    description: 'Patient barcode, cancer type, gender and vital status must be derived from clinical_info.Patient_description
+      with the declared metrics (clinical_participant_barcode, cancer_type_acronym, patient_gender, patient_vital_status),
+      not from tissue_source_site/patient_id concatenation or guessed columns.
+
+      '
+    enforcement: warn
+  - name: pass_filter_mutations
+    description: 'Mutation analyses use only reliable calls, FILTER = ''PASS'', unless the question explicitly
+      asks for unfiltered calls.
+
+      '
+    enforcement: warn
+  - name: distinct_patients
+    description: 'Patient counts across molecular tables use COUNT(DISTINCT ParticipantBarcode); bracketed
+      placeholders (''[Not Available]'', ''[Unknown]'', ''[Not Applicable]'', ''[Discrepancy]'', ''[Not
+      Evaluated]'') and NULLs are treated as missing.
+
+      '
+    enforcement: warn

@@ -1,0 +1,93 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+version: '1.0'
+name: music-brainz-20k
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: tracks_database
+    description: Detailed information about music tracks. The primary source for the content of each track
+      (title, artist, album, etc.). Described as stored in SQLite, but queried here as a schema of one
+      DuckDB database.
+    tables:
+    - tracks
+  - schema: sales_database
+    description: 'Sales information for the tracks in tracks_database: individual sales transactions,
+      including the number of units sold and the revenue generated. Queried as a schema of the same DuckDB
+      database.'
+    preferred: true
+    tables:
+    - sales
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: tracks
+    summary: Track records, including potential duplicates from different sources
+    description: 'tracks_database.tracks contains all the tracks, including potential duplicates generated
+      from different sources. Each row represents a single track record with a unique track_id. track_id
+      is the unique identifier for the track record in this database; source_id identifies the source
+      from which the record originates; source_track_id is the original track identifier from the source
+      and its uniqueness is NOT guaranteed (do not use it as a key, and do not assume it is unique even
+      within one source). Because the same real-world track may appear as several records (several track_ids)
+      from different sources, counting rows or distinct track_ids counts track RECORDS, not distinct songs;
+      a question about distinct songs requires deduplication (e.g. on normalized title + artist, possibly
+      album), and the documentation does not define a deduplication key. All fields are text except track_id
+      and source_id: year (year of publication) is a string, and length is the length of the track either
+      in seconds or as a formatted string, so it must be parsed before arithmetic (see metric track_length_seconds).
+      language is the language of the track.
+
+      '
+    tables:
+    - tracks_database.tracks
+  - name: sales
+    summary: 'Individual sales transactions: units sold and USD revenue by country and store'
+    description: 'sales_database.sales contains individual sales transactions for tracks. Each row represents
+      a single sale record for a specific track_id. sale_id is the unique identifier for the sale record;
+      track_id links the sale to a track in tracks_database.tracks; country is the country in which the
+      sale occurred; store is the store or platform where the sale occurred; units_sold is the number
+      of units sold in this transaction; revenue_usd is the revenue generated in USD from this sale. Units
+      sold and revenue are totals by summing the per-sale values (not by counting rows). To report sales
+      by track attributes (title, artist, album, year, language), join sales.track_id = tracks.track_id.
+      Since duplicate track records exist, sales of one real-world song may be spread across several track_ids;
+      aggregate across duplicates when the question is about a song or artist rather than a track record.
+
+      '
+    tables:
+    - sales_database.sales
+    - tracks_database.tracks
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: source_track_id_not_unique
+    description: 'source_track_id is the original identifier from the source and its uniqueness is not
+      guaranteed; never use it as a unique key. Use track_id to identify a track record.
+
+      '
+    enforcement: warn
+  - name: tracks_may_be_duplicated
+    description: 'tracks contains potential duplicates generated from different sources; a count of track
+      rows is a count of track records, not of distinct songs. Say which one an answer reports.
+
+      '
+    enforcement: warn
+  - name: use_declared_sales_metrics
+    description: 'Units and revenue are computed by summing units_sold and revenue_usd as in the declared
+      metrics, not by counting sale rows.
+
+      '
+    enforcement: warn

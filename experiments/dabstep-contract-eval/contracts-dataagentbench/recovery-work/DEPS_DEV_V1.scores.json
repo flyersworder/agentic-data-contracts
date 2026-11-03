@@ -1,0 +1,572 @@
+{
+ "dataset": "DEPS_DEV_V1",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "DEPS_DEV_V1-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Join on System, Name and Version together; both sides contain duplicates. / JOINS: project_packageversion -> packageinfo on System, Name, Version (both sides duplicated, so dedupe).",
+      "where": "semantic.yml relationships[0].description; contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_package_version_count.from_sql",
+      "summary": "joins packageinfo to project_packageversion ON p.System = pv.System AND p.Name = pv.Name AND p.Version = pv.Version (exact equality on all three columns)"
+     },
+     "agree": 325940,
+     "total": 325940,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The relationships entry holds one column per side (project_packageversion.Name -> packageinfo.Name); its own description gives the composite key. Read as: the format cannot hold a composite key, so the entry with its description specifies (System, Name, Version), and the from_sql builds that join. Under a strict reading that takes only the from/to columns as the declared keys, the relationship would be a second, wrong join and the item would be partial. Scored on the join condition as specified, applied to every key. The from_sql as written also inner-joins project_info, so the metric itself reaches only 7,430 of the 325,940 keys; the keys it reaches are joined as the reference joins them."
+    },
+    {
+     "id": "DEPS_DEV_V1-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "project_info -> project_packageversion on project_packageversion.ProjectName = project_name (lowercased extracted owner/repo); 768 of 770 projects match.",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_package_version_count.from_sql",
+      "summary": "ProjectName = lower(regexp_extract(Project_Information, first owner/repo token ending in a non-dot character)); the one record that phrases its name as 'The project <repo> ... under the organization <owner>' yields '' and finds no ProjectName"
+     },
+     "agree": 8381,
+     "total": 8382,
+     "computation_check": null,
+     "right_part": "8,381 of 8,382 records agree: the 768 ProjectNames whose name is an owner/repo token find their record, the 7,612 that have none find none, and the record no ProjectName finds stays unmatched; reactjs-ui/reactjs-pull-refresh finds no record where the reference finds the 'organization' record.",
+     "class_note": null,
+     "notes": "The text gives the same mechanism and reports 768 matches; the reference finds 769. Metric project_name gives the same extraction."
+    },
+    {
+     "id": "DEPS_DEV_V1-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Project_Information is free English text containing the repository path in owner/repo form plus open issues, stars and forks counts",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_name.sql_expression, semantic.yml metrics.project_stars.sql_expression, semantic.yml metrics.project_forks.sql_expression",
+      "summary": "regex extraction per record: first owner/repo token (lowercased); stars from 'N stars' / 'stars count of N' / 'starred by N'; forks from 'N forks' / 'forks count of N' / 'forked N times'; commas removed"
+     },
+     "agree": 769,
+     "total": 770,
+     "computation_check": null,
+     "right_part": "Stars and forks agree on all 770 records (open issues also agree on 770); the name agrees on 769 and is wrong for the one record phrased 'The project <repo> ... under the organization <owner>'.",
+     "class_note": null,
+     "notes": "The record that disagrees is the 'organization' one (name ''); its stars and forks are right."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "661,372 rows hold only 325,940 distinct (System, Name, Version) triples",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Duplicates are identical except sometimes Hashes/Links ordering and occasionally DependencyError.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "no"
+    },
+    {
+     "quote": "Only System = 'NPM' occurs in the data.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "in this data every array has at most one element, some elements are '' or 'non-standard'",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "no"
+    },
+    {
+     "quote": "Links is an array of {Label, URL} with Label in ORIGIN, HOMEPAGE, SOURCE_REPO, ISSUE_TRACKER, ATTESTATION.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Hashes is an array of {Hash, Type} with Type in MD5, SHA1, SHA256, SHA512.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Registries and UpstreamIdentifiers are always '[]' here; SLSAProvenance and Purl are always NULL.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "the stored values (1.43e15 .. 1.70e15) are MICROSECONDS since epoch (2015-04 .. 2023-11) ... about 11.6k rows are NULL",
+     "where": "contract.yml domains.packages.description; semantic.yml metrics.upstream_published_at",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "DependenciesProcessed ... and DependencyError ... are booleans stored as BIGINT 0/1",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "project_info: one row per project (770 rows). It has no project-name column",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Homepage is NULL for most rows; OSSFuzz (OSSFuzz status indicator) is always NULL.",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "ProjectName is the repository path 'owner/repo', always lowercase",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "A version often maps to the same project twice (once per RelationType) and the table has exact duplicate rows (597,602 rows, 565,717 distinct)",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "Text says some Licenses elements are ''; no row has an empty-string license.",
+     "where": "contract.yml domains.packages.description",
+     "smallest_fix": "Delete \"''\" from \"some elements are '' or 'non-standard'\"."
+    },
+    {
+     "cause": "Text says duplicate packageinfo rows differ only in Hashes/Links ordering and occasionally DependencyError; they also differ in Links content (8,850 keys), VersionInfo (5,220 keys) and DependenciesProcessed (36 keys).",
+     "where": "contract.yml domains.packages.description",
+     "smallest_fix": "Replace the sentence with: 'Most duplicates are identical; some differ in Hashes, Links, VersionInfo (Ordinal/IsRelease) or the dependency flags.'"
+    }
+   ]
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "DEPS_DEV_V1-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Join on System, Name and Version together; packageinfo has duplicate rows per key. / JOINS: project_packageversion (System, Name, Version) = packageinfo (System, Name, Version)",
+      "where": "semantic.yml relationships[0].description; contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.package_project_stars.from_sql",
+      "summary": "joins packageinfo to project_packageversion ON pkg.System = ppv.System AND pkg.Name = ppv.Name AND pkg.Version = ppv.Version (exact equality on all three columns)"
+     },
+     "agree": 325940,
+     "total": 325940,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The relationships entry holds one column per side (project_packageversion.Name -> packageinfo.Name); its own description gives the composite key. Read as: the format cannot hold a composite key, so the entry with its description specifies (System, Name, Version), and the from_sql builds that join. Under a strict reading that takes only the from/to columns as the declared keys, the relationship would be a second, wrong join and the item would be partial. Scored on the join condition as specified, applied to every key. The from_sql as written also inner-joins project_info, so the metric itself reaches only 7,430 of the 325,940 keys; the keys it reaches are joined as the reference joins them."
+    },
+    {
+     "id": "DEPS_DEV_V1-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "project_packageversion.ProjectName = project_name extracted from project_info.Project_Information.",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.package_project_stars.from_sql",
+      "summary": "ProjectName = regexp_extract(Project_Information, first owner/repo token ending in a non-dot character); the one record that phrases its name as 'The project <repo> ... under the organization <owner>' yields '' and finds no ProjectName"
+     },
+     "agree": 8381,
+     "total": 8382,
+     "computation_check": null,
+     "right_part": "8,381 of 8,382 records agree: the 768 ProjectNames whose name is an owner/repo token find their record, the 7,612 that have none find none, and the record no ProjectName finds stays unmatched; reactjs-ui/reactjs-pull-refresh finds no record where the reference finds the 'organization' record.",
+     "class_note": null,
+     "notes": "The text names the 'organization' record and says it yields '' (metric project_name description: 769 of 770 rows yield a name, 768 found in ProjectName); it does not read that record as reactjs-ui/reactjs-pull-refresh."
+    },
+    {
+     "id": "DEPS_DEV_V1-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Project_Information is free text describing the project, including its repository name (owner/repo), open issues, stars and forks, in varying phrasing",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_name.sql_expression, semantic.yml metrics.project_stars.sql_expression, semantic.yml metrics.project_forks.sql_expression",
+      "summary": "regex extraction per record: first owner/repo token; stars and forks from the same three phrasings as the reference plus a loose fallback ('stars?[^0-9.]{0,25}?N'), commas removed"
+     },
+     "agree": 769,
+     "total": 770,
+     "computation_check": null,
+     "right_part": "Stars and forks agree on all 770 records (open issues also agree on 770); the name agrees on 769 and is wrong for the one record phrased 'The project <repo> ... under the organization <owner>'.",
+     "class_note": null,
+     "notes": "The text says the 'organization' record yields ''."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "packageinfo has 661,372 rows but only 325,940 distinct (System, Name, Version) keys; most duplicates are exact copies, some differ in Ordinal/Hashes/DependenciesProcessed.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "in this data every row is NPM",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "labels present: ORIGIN, SOURCE_REPO, HOMEPAGE, ISSUE_TRACKER, ATTESTATION",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "the stored values (1.43e15 .. 1.70e15) are MICROSECONDS since the epoch (2015-2023) ... ~11.6k rows have it NULL",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "SLSAProvenance ... and Purl ... are entirely NULL.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Registries and UpstreamIdentifiers are JSON-like lists (here always empty/NULL).",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "VersionInfo.Ordinal ... Values 1..1946. The latest version of a package is the one with the highest Ordinal.",
+     "where": "semantic.yml metrics.version_ordinal.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "project_info: one row per project (770 rows) ... There is NO project name column",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Homepage is the homepage URL, if available (NULL for most). OSSFuzz ... (all NULL here).",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "A package version usually appears twice (one SOURCE_REPO_TYPE and one ISSUE_TRACKER_TYPE row)",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "DEPS_DEV_V1-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Join on (System, Name, Version) together; both sides have multiple rows per key. / JOINS: project_packageversion -> packageinfo on (System, Name, Version)",
+      "where": "semantic.yml relationships[0].description; contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.package_versions_with_project.from_sql",
+      "summary": "joins packageinfo to project_packageversion ON pv.System = p.System AND pv.Name = p.Name AND pv.Version = p.Version (exact equality on all three columns)"
+     },
+     "agree": 325940,
+     "total": 325940,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The relationships entry holds one column per side (project_packageversion.Name -> packageinfo.Name); its own description gives the composite key. Read as: the format cannot hold a composite key, so the entry with its description specifies (System, Name, Version), and the from_sql builds that join. Under a strict reading that takes only the from/to columns as the declared keys, the relationship would be a second, wrong join and the item would be partial."
+    },
+    {
+     "id": "DEPS_DEV_V1-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "project_packageversion.ProjectName -> project_info via the owner/repo extracted from Project_Information (metric project_name_from_info; 768 of 770 match exactly).",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_package_version_count.from_sql",
+      "summary": "ProjectName = regexp_extract(Project_Information, first owner/repo token ending in a non-dot character); the one record that phrases its name as 'The project <repo> ... under the organization <owner>' yields '' and finds no ProjectName"
+     },
+     "agree": 8381,
+     "total": 8382,
+     "computation_check": null,
+     "right_part": "8,381 of 8,382 records agree: the 768 ProjectNames whose name is an owner/repo token find their record, the 7,612 that have none find none, and the record no ProjectName finds stays unmatched; reactjs-ui/reactjs-pull-refresh finds no record where the reference finds the 'organization' record.",
+     "class_note": null,
+     "notes": "The text names the 'organization' record and says it carries no owner/repo token; it does not read it as reactjs-ui/reactjs-pull-refresh."
+    },
+    {
+     "id": "DEPS_DEV_V1-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Project_Information is free text describing the project, including its owner/repo name and its open issues, stars and forks counts",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_name_from_info.sql_expression, semantic.yml metrics.project_stars.sql_expression, semantic.yml metrics.project_forks.sql_expression",
+      "summary": "regex extraction per record: first owner/repo token; stars from 'N stars' / 'stars count of N' / 'starred by N' / 'N star'; forks from 'N forks' / 'forks count of N' / 'forked N times' / 'N fork'; commas removed"
+     },
+     "agree": 769,
+     "total": 770,
+     "computation_check": null,
+     "right_part": "Stars and forks agree on all 770 records (open issues also agree on 770); the name agrees on 769 and is wrong for the one record phrased 'The project <repo> ... under the organization <owner>'.",
+     "class_note": null,
+     "notes": "The text says the 'organization' record carries no owner/repo token."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "the table has 661,372 rows but only 325,940 distinct (System, Name, Version); most duplicates are identical, some differ in VersionInfo Ordinal, Links or Hashes",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "labels found: HOMEPAGE, ISSUE_TRACKER, SOURCE_REPO, ORIGIN, ATTESTATION",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "the stored values (e.g. 1699345351000000) are MICROSECONDS since epoch ... (range 2015-04 .. 2023-11); ~11.6k rows are NULL",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "SLSAProvenance ... and Purl ... are entirely NULL in this data.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "NULL when absent (593,165 rows have one).",
+     "where": "semantic.yml metrics.source_repo_link.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Duplicate rows for the same version may carry different ordinals.",
+     "where": "semantic.yml metrics.version_ordinal.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "project_info: one row per project (770 rows) ... Homepage is a URL if available (178 non-null); OSSFuzz ... is entirely NULL.",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "A version may map to several rows (both relation types)",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "DEPS_DEV_V1-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Match packageinfo to project_packageversion on the shared attributes System, Name and Version / Packages link to projects on (System, Name, Version) jointly",
+      "where": "contract.yml domains.package_project_linkage.description; semantic.yml relationships[0].description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.package_project_stars.from_sql",
+      "summary": "joins packageinfo to project_packageversion ON p.System = pv.System AND p.Name = pv.Name AND p.Version = pv.Version (exact equality on all three columns)"
+     },
+     "agree": 325940,
+     "total": 325940,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The relationships entry holds one column per side (packageinfo.System -> project_packageversion.System); its own description gives the composite key. Read as: the format cannot hold a composite key, so the entry with its description specifies (System, Name, Version), and the from_sql builds that join. Under a strict reading that takes only the from/to columns as the declared keys, the relationship would be a second, wrong join and the item would be partial. Scored on the join condition as specified, applied to every key. The from_sql as written also inner-joins project_info, so the metric itself reaches only 7,430 of the 325,940 keys; the keys it reaches are joined as the reference joins them. Metric linked_package_version_count's from_sql uses the same join."
+    },
+    {
+     "id": "DEPS_DEV_V1-2",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "then take ProjectName from project_packageversion and find the corresponding project_info record (by the owner/repo name extracted from Project_Information — see project_info_repo_name) / one row states the name as \"The project <repo> ... under the organization <owner>\", handled by the fallback. Joins to project_packageversion.ProjectName (769 of 770 rows match a mapping).",
+      "where": "contract.yml domains.package_project_linkage.description; semantic.yml metrics.project_info_repo_name.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.package_project_stars.from_sql",
+      "summary": "ProjectName = coalesce(first owner/repo token, organization-fallback '<owner>/<repo>'); the fallback captures the sentence period after the owner, giving 'reactjs-ui./reactjs-pull-refresh', which matches no ProjectName"
+     },
+     "agree": 8381,
+     "total": 8382,
+     "computation_check": null,
+     "right_part": "8,381 of 8,382 records agree: the 768 ProjectNames whose name is an owner/repo token find their record, the 7,612 that have none find none, and the record no ProjectName finds stays unmatched; reactjs-ui/reactjs-pull-refresh finds no record where the reference finds the 'organization' record (the fallback's captured period).",
+     "class_note": null,
+     "notes": "The text gives the reference reading for every record, including the 'organization' record, and claims 769 matches; the SQL does not deliver it for that record. Metric linked_package_version_count uses the same join and reports 7,430 linked versions; the reference join gives 7,431."
+    },
+    {
+     "id": "DEPS_DEV_V1-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "it contains the project name (owner/repo) and repository metrics such as GitHub stars count, fork count and open issues count",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.project_info_repo_name.sql_expression, semantic.yml metrics.project_stars.sql_expression, semantic.yml metrics.project_forks.sql_expression",
+      "summary": "regex extraction per record: owner/repo token with an 'organization' fallback; stars and forks from the same three phrasings as the reference, commas removed"
+     },
+     "agree": 769,
+     "total": 770,
+     "computation_check": null,
+     "right_part": "Stars and forks agree on all 770 records (open issues also agree on 770); the name agrees on 769 and is wrong for the one record (fallback yields 'reactjs-ui./reactjs-pull-refresh') phrased 'The project <repo> ... under the organization <owner>'.",
+     "class_note": null,
+     "notes": "The text claims the fallback handles the 'organization' record; the SQL keeps the sentence period."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Only System = 'NPM' is present (661,372 rows, 16,614 distinct names).",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "there are only 325,940 distinct (System, Name, Version) triples; the same version appears 2-4 times, rows differing only in Hashes and/or DependencyError.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "no"
+    },
+    {
+     "quote": "values are ~1.7e15, i.e. MICROSECONDS since epoch",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "to_timestamp returns TIMESTAMPTZ, which fails to fetch in this environment; avoid it.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "DependenciesProcessed / DependencyError are stored as BIGINT 0/1",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "SLSAProvenance and Purl are NULL in every row.",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "compound expressions like \"EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0\" appear as one string",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "labels seen: ORIGIN, HOMEPAGE, SOURCE_REPO, ISSUE_TRACKER, ATTESTATION",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "ProjectType values: GITHUB, GITLAB, BITBUCKET. RelationType values: SOURCE_REPO_TYPE, ISSUE_TRACKER_TYPE. RelationProvenance values: UNVERIFIED_METADATA, SLSA_ATTESTATION.",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "3,649 versions map to more than one ProjectName",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "OSSFuzz is NULL in every row; Homepage is present in 178 of 770.",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "Text says a version appears 2-4 times in packageinfo and duplicates differ only in Hashes and/or DependencyError; keys repeat up to 8 times, and duplicates also differ in Links (8,850 keys), VersionInfo (5,220 keys) and DependenciesProcessed (36 keys).",
+     "where": "contract.yml domains.packages.description",
+     "smallest_fix": "Replace with: 'the same version appears 2-8 times; duplicate rows can differ in Hashes, Links, VersionInfo or the dependency flags.'"
+    }
+   ]
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "DEPS_DEV_V1-1",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "It joins to package_database.packageinfo on System, Name and Version together. / joins between packageinfo and project_packageversion must match on all three columns.",
+      "where": "contract.yml domains.projects.description; contract.yml rules.package_version_key; semantic.yml relationships[0].description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.linked_project_count.from_sql",
+      "summary": "joins packageinfo to project_packageversion ON p.System = pp.System AND p.Name = pp.Name AND p.Version = pp.Version (exact equality on all three columns)"
+     },
+     "agree": 325940,
+     "total": 325940,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The relationships entry holds one column per side (project_packageversion.Name -> packageinfo.Name); its own description gives the composite key. Read as: the format cannot hold a composite key, so the entry with its description specifies (System, Name, Version), and the from_sql builds that join. Under a strict reading that takes only the from/to columns as the declared keys, the relationship would be a second, wrong join and the item would be partial. The item restates the description's shared columns; the control gets it from the description alone."
+    },
+    {
+     "id": "DEPS_DEV_V1-2",
+     "cls": "data-discoverable",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "project_info has no ProjectName column; the documentation states no join key to project_packageversion, so any link (e.g. matching owner/repo text inside Project_Information) must be established by inspecting the data.",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": null,
+     "agree": 0,
+     "total": 8382,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No metric, from_sql or relationship joins project_info. The text offers the reference mechanism (ProjectName as owner/repo text inside Project_Information) as an unverified example; scored stated, not built because the matching it names is the reference's. A stricter reading of a hedged example would score missed. agree is 0: no metric reads the records."
+    },
+    {
+     "id": "DEPS_DEV_V1-3",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": {
+      "quote": "Project_Information is a textual description of the project (may include name, owner and general purpose)",
+      "where": "contract.yml domains.projects.description"
+     },
+     "sql_reading": null,
+     "agree": 0,
+     "total": 770,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The text repeats the description (name and owner possibly); it says nothing of stars or forks, and no metric extracts any field. agree is 0: no metric reads the records."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "DependenciesProcessed is a boolean (stored as BIGINT 0/1) ... DependencyError is a boolean (stored as BIGINT 0/1)",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Purl ... (typed DOUBLE in the schema, typically null)",
+     "where": "contract.yml domains.packages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "project_info has no ProjectName column",
+     "where": "contract.yml domains.projects.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "UpstreamPublishedAt is read as Unix milliseconds (from the description); the stored values are microseconds, so to_timestamp(UpstreamPublishedAt / 1000) gives dates in the years 47262-55856 instead of 2015-2023.",
+     "where": "semantic.yml metrics.upstream_published_at; contract.yml rules.timestamp_milliseconds; contract.yml domains.packages.description",
+     "smallest_fix": "sql_expression make_timestamp(CAST(UpstreamPublishedAt AS BIGINT)), and say microseconds in the rule and the domain description."
+    }
+   ]
+  }
+ }
+}

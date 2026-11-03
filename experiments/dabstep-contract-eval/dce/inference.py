@@ -165,12 +165,12 @@ def inverted_interval(
     every task difference by delta."""
     sums, sizes = shape_sums(diffs, shape_of)
     n = len(diffs)
-    est = sums.sum() / n
+    est = float(sums.sum() / n)
     values = list(diffs.values())
     alpha = 1 - level
     return (
-        _edge(sums, sizes, n, alpha, est, min(values)),
-        _edge(sums, sizes, n, alpha, est, max(values)),
+        float(_edge(sums, sizes, n, alpha, est, min(values))),
+        float(_edge(sums, sizes, n, alpha, est, max(values))),
     )
 
 
@@ -258,13 +258,13 @@ def bound_p(
 
 def non_superior(c: Contrast, bound: float = BOUND) -> bool:
     """a does not lead b by `bound` or more: the 90% upper end is below it."""
-    return c.ci90[1] < bound
+    return bool(c.ci90[1] < bound)
 
 
 def non_inferior(c: Contrast, bound: float = BOUND) -> bool:
     """a is not worse than b by `bound` or more: the 90% lower end is above
     minus it."""
-    return c.ci90[0] > -bound
+    return bool(c.ci90[0] > -bound)
 
 
 def reading(c: Contrast, bound: float = BOUND) -> str:

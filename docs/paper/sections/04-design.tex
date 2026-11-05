@@ -32,9 +32,7 @@ PostgreSQL's NULL ordering and integer division, and compares the result
 with the frozen PostgreSQL gold. Executing each gold query 20 times in
 DuckDB, 302 reproduce exactly (the \emph{primary} tasks), 73 reproduce only as a set
 and are reported apart, and 36 are excluded, as not reproducible or
-because they read the clock. Its knowledge is mostly composite (dependent
-formulas, bands, a change of grain) rather than one procedure that many
-tasks share.
+because they read the clock.
 
 \textbf{Constructed questions,} a third test bed. Three experiments
 (Sections~\ref{sec:procedures}, \ref{sec:gaps} and~\ref{sec:scale}) need
@@ -62,6 +60,7 @@ matched shapes.
 \ref{sec:alike} & facts alike & 5c & both facts stated alike in prose and in the contract's text & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 1/3 \\
 \ref{sec:tools-add} & text or tools & 5 & the contract's text in the prompt against its governed tools & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 4/4 \\
 \ref{sec:tools-add} & governed with notes & 5d & both facts added to the governed contract & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 2/4 \\
+\ref{sec:tools-add} & facts in the contract & 5e & both facts written into the contract, looked up or pasted; the prose KB at 22 databases & DABStep, 401; constructed, 60 & \mLuna{}, \mQwen{} & 3 & 4/6 \\
 \ref{sec:procedures} & load ratings & load & is the gain where the knowledge is procedural? & both, 401 + 302 & (existing runs) & --- & 3/4 \\
 \ref{sec:procedures} & constructed procedures & 4 & a rule-matching procedure and a composite, plain and styled & constructed, 60 & \mLuna{}, \mSol{}; \mQwen{} & 3 & 2/8 \\
 \midrule
@@ -77,9 +76,9 @@ matched shapes.
 \caption{The experiments, in the order the paper reports them. \emph{ID}:
 the label the run commits and the prediction index use; the runs went
 roughly in the order panels, one fact, LSB 1--3, load, 4, 5, 5b, 5c, 4b,
-6, 5d. \emph{Held}: registered predictions that held, of those fixed;
+6, 5d, 5e. \emph{Held}: registered predictions that held, of those fixed;
 ``+$n$'' counts predictions that held in part (LSB 1, compiler) or were
-read as equivalent (scale). \appref{app:predictions} lists all 57.}
+read as equivalent (scale). \appref{app:predictions} lists all 63.}
 \label{tab:experiments}
 \end{table*}
 
@@ -216,8 +215,7 @@ Three models carry the repeated experiments (Table~\ref{tab:models}):
 \mSol{}, a frontier model; \mLuna{}, the small tier of its family on the
 same deployment, which varies capability alone; and \mQwen{}, an
 open-weight model served at FP8 with thinking on, temperature~0 and
-seed~0, which varies vendor, family and serving stack. The GPT-6 models
-accept only their default temperature. Serving is not deterministic even
+seed~0, which varies vendor, family and serving stack. Serving is not deterministic even
 for \mQwen{}: between any two repeats 12.5 to 14.2\% of its task-arm
 verdicts change (8.3 to 9.7\% on \mSol{}, about 12\% on \mLuna{}), so the
 repeats measure variance on every model. Reasoning effort is
@@ -236,10 +234,10 @@ predictions; every result row stamps the commit it ran on. One commit,
 LiveSQLBench's (6), came after two repeats' per-arm totals were seen but
 before the statistic it predicts, and says so. The single runs and the
 panels fixed a design but no predictions, so the headline decomposition
-(Section~\ref{sec:decomposition}) has no registered outcome. Of the 57
-predictions, fixed in 16 commits, 24 directional ones held, 7 ties were
-not rejected, one was read as equivalent as its commit allowed, 3 held in
-part and 22 failed (\appref{app:predictions}). Analyses chosen after a
+(Section~\ref{sec:decomposition}) has no registered outcome. Of the 63
+predictions, fixed in 17 commits, 25 directional ones held, 7 ties were
+not rejected, 3 one-sided bounds held, one was read as equivalent as its
+commit allowed, 3 held in part and 24 failed (\appref{app:predictions}). Analyses chosen after a
 result was seen are exploratory.
 
 The unit is the task. With $k$ repeats a task scores 0 to $k$ for each
@@ -254,7 +252,11 @@ into 22 databases, and the constructed questions into six pieces of
 knowledge (five gap clusters in the gaps experiment). Every effect is
 therefore given in points with a 95\% bootstrap interval over those
 clusters, and where a task-level test and its cluster-level counterpart
-disagree, the text says so. On DABStep the primary clustering is the
+disagree, the text says so. Experiment~5e registered one engine for
+DABStep's rule-matching tasks, which Section~\ref{sec:delivery} uses
+throughout: the task-weighted mean difference, a two-sided sign-flip test
+over the per-shape sums, and 90\% and 95\% intervals by inverting that
+test; applied to earlier contrasts it is exploratory. On DABStep the primary clustering is the
 question shapes (38 over the hard tasks, 25 over the rule-matching ones, of
 very unequal size); fee families, mostly single tasks, are reported beside
 it and are close to task-level. In-text $p$-values are two-sided and quoted no
@@ -267,8 +269,9 @@ registered sidedness, one-sided where a direction was predicted. A
 registered tie holds when the gap is within 5 points and the sign test
 gives $p \geq 0.10$; we call that \emph{not rejected}, which does not show
 equivalence. A registered equivalence holds when the interval of the
-difference lies within $\pm$5 points. Accuracy is \emph{strict}: a run
-that ends in an error or at the turn limit counts as wrong. There is no multiplicity correction; Section~\ref{sec:threats} says which results would not survive one.
+difference lies within $\pm$5 points, and a one-sided bound when the 90\%
+interval's end lies inside it. Accuracy is \emph{strict}: a run
+that ends in an error or at the turn limit counts as wrong. Apart from Holm within experiment~5e there is no multiplicity correction; Section~\ref{sec:threats} says which results would not survive one.
 
 \subsection{Grading}
 \label{sec:grading}

@@ -10,9 +10,10 @@ data semantics the manual omits: an empty list that means ``all'', and fees
 that add up when several rules match. Stated in prose, they recover most of
 the lead on GPT-6 luna and, end-to-end, all of it on Qwen~3.8; the second
 lifts accuracy by 19 and 34 points on tasks outside the transcripts read
-to find it. With the facts held equal, the contract's representation still
-leads on the rule-matching tasks (+3.7 and +5.5 points, provisional).
-Looking the contract up shows no advantage end-to-end once both arms state
-the two facts, though on Qwen's official scoring it leads; on LiveSQLBench
-the route makes no detectable difference. Lookup also works where pasting
+to find it. With the facts held equal and stated once, the contract's
+representation still leads on the rule-matching tasks (+6.5 and +4.9
+points, unregistered). Written into the contract, the two facts are
+delivered no better by lookup than by pasting the contract, though on
+Qwen's official scoring lookup leads; on LiveSQLBench the route makes no
+detectable difference. Lookup also works where pasting
 the contract's YAML would not fit, and logs what each answer consulted.

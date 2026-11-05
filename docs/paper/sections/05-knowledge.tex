@@ -60,10 +60,9 @@ $+0.2$ on the repeated panels.} In the single runs the step is $+0.0$ on
 shapes $-16$ to $-2$); on \mQwen{} the step is $-5.5$ under the official
 verdicts and $+0.2$ end-to-end. Empty tools can mislead: the agent calls
 \texttt{lookup\_domain}, is told nothing is available, and searches harder
-(\appref{app:efficiency}). On every one of the six models the knowledge
-step exceeds the scaffolding step. A contract that helped by narrowing the
-tables, imposing a procedure or slowing the agent down would show the
-opposite.
+(\appref{app:efficiency}). On all six models the knowledge step exceeds
+the scaffolding step, the opposite of what a contract that helped by
+narrowing the tables or imposing a procedure would show.
 
 \subsection{The contract's lead over the manual}
 \label{sec:panel-gaps}
@@ -166,9 +165,11 @@ should.
 \textbf{Stated in prose, the two facts recover most of the contract's
 lead on \mLuna{}, and on \mQwen{} all of it end-to-end}
 (Table~\ref{tab:facts}). On \mLuna{}'s rule-matching tasks \armMws{}
-reaches 82.4\% against the contract's 82.2\% (separate runs; 84.1\% in a
-later run); over all 401 it recovers 82\% of the lead (74.8\% against 45.3\% and
-81.1\%, across runs). On \mQwen{}, in one co-run block, the
+reaches 82.4\% against the contract's 82.2\% (separate runs); over all 401
+it recovers 82\% of the lead (74.8\% against 45.3\% and 81.1\%, across
+runs). Run together in experiment~5e, the two score 82.4\% and 81.9\%
+($+0.5$, 90\% interval $-6.9$ to $+8.2$ over shapes): level in estimate,
+but too wide for the registered non-inferiority (51), which fails. On \mQwen{}, in one co-run block, the
 prose with both facts \emph{outscores} the governed contract end-to-end:
 86.1\% against 79.6\% on the rule-matching tasks and 80.0\% against 67.7\%
 over all 401. On the official view the contract keeps a lead on the

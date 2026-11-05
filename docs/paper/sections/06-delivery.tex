@@ -4,13 +4,12 @@
 Section~\ref{sec:knowledge} held the delivery fixed and varied the
 knowledge. This section holds the knowledge fixed and varies the delivery,
 in two contrasts on \mLuna{} and \mQwen{}. \emph{Form} compares the
-contract's text with prose, both carrying the two notes. \emph{Route}
+contract's text with prose stating the same two facts. \emph{Route}
 compares the same contract looked up through the governed tools with the
 same contract pasted into the prompt over plain tools. Each contrast is
 read only between arms that ran together in the same repeats
-(Table~\ref{tab:ladder}). \mSol{}'s knowledge-equal evidence is on the
-constructed questions (Section~\ref{sec:gaps}) and the scale experiment
-(Section~\ref{sec:scale}).
+(Table~\ref{tab:ladder}), with the shape-level engine of
+Section~\ref{sec:prereg}.
 
 \begin{table}[t]
 \centering
@@ -27,12 +26,20 @@ constructed questions (Section~\ref{sec:gaps}) and the scale experiment
 5d & \armC{} & contract, tools & 82.2 & 79.7 \\
    & \armTws{} & files+2f, prompt & 88.1 & 88.9 \\
    & \armCws{} & contract+2f, tools & 86.3 & 86.8 \\
+\midrule
+5e & \armMws{} & 2 facts, prose & 82.4 & 84.8 \\
+   & \armC{} & contract, tools & 81.9 & 79.1 \\
+   & \armCp{} & 2f in contract, tools & 86.4 & 83.8 \\
+   & \armTp{} & 2f in files, prompt & 88.9 & 89.6 \\
+   & \armCws{} & contract+2f, tools & 85.3 & 87.4 \\
 \bottomrule
 \end{tabular}
 \caption{Accuracy (\%) on the 199 rule-matching DABStep tasks, $k{=}3$,
 end-to-end (on \mLuna{} identical to official). Arms within a block ran
-together in each repeat; comparisons are read within a block. Rerun arms
-stayed within 3 points of their earlier runs on every subset.}
+together in each repeat; comparisons are read within a block. +2f: the two
+facts as notes in the prompt; (2f): written into the contract where each
+is used, in the notes' words, and in no prompt. Rerun arms stayed within 3
+points of their earlier runs on every subset.}
 \label{tab:ladder}
 \end{table}
 
@@ -40,107 +47,80 @@ stayed within 3 points of their earlier runs on every subset.}
 \label{sec:alike}
 
 \armTws{} is the contract's text plus the same two notes as \armMws{},
-word for word, so the two state the same facts and differ in form. The run
-registered a tie, (30) and (30Q), and fixed in advance that a failure with
-the contract's text ahead would read as the form adding to the facts.
-\textbf{On the rule-matching tasks the contract's text leads}: by 3.7
-points on \mLuna{} (32 tasks to 13; over question shapes $+0.6$ to $+7.9$,
-robust to every rater family) and 5.5 on \mQwen{} (35 to 10; over shapes
-$-0.4$ to $+10.4$, excluding zero only over fee families). On the other
-202 tasks \mLuna{}'s lead is 9.6 points (51 tasks to 14), mostly in the
-fee-average families, and \mQwen{}'s text trails by 5.3 (37 to 47, not
-significant).
+word for word. The run registered a tie, (30) and (30Q), and fixed in
+advance that a failure with the contract's text ahead would read as the
+form adding to the facts. \textbf{On the rule-matching tasks the
+contract's text leads}: by 3.7 points on \mLuna{} (32 tasks to 13) and 5.5
+on \mQwen{} (35 to 10). That estimate was provisional: \armTws{} states
+each fact twice, in the contract and in the note; neither lead clears
+shape clustering on the 165 tasks outside the inspected set; it is close
+to the drift between two runs of one arm ($-2.8$ to $+1.7$ points across
+eight reruns); and under exact matching \mLuna{}'s lead falls to $+1.8$
+($p{=}0.08$).
 
-The rule-matching estimate is provisional, for five reasons. It is a
-package of format, SQL definitions and repetition: \armTws{} states each
-fact twice, once in the contract and once in the note. Neither model's
-lead clears shape clustering on the 165 tasks outside the inspected set,
-and on \mLuna{} it rests largely on the 34 inspected tasks. It is close to
-the drift between two runs of one arm, $-2.8$ to $+1.7$ points across
-eight reruns. And it is sensitive to the scorer's tolerance: requiring an
-exact match to the gold, \mLuna{}'s lead falls to $+1.8$ (22 tasks to 11,
-$p{=}0.08$; over shapes $-2.0$ to $+6.6$), while \mQwen{}'s keeps its
-direction, $+9.7$ on the whole message and $+4.7$ on the recovered final
-paragraph (both $p{<}0.05$). On the other 202 tasks \mLuna{}'s lead
-survives exact matching ($+7.9$, 50 tasks to 18).
+Experiment~5e removes the repetition. \armTp{} pastes a contract with each
+fact written once, in the notes' words, where it is used; beside
+\armMws{}, run together, the two state the same facts in the same words
+and differ in form. The contract's text again leads (expl.): $+6.5$ points
+on \mLuna{} (90\% interval $+2.0$ to $+11.5$, shape $p{=}0.014$; under
+exact matching $+4.4$, $p{=}0.012$) and $+4.9$ on \mQwen{} ($+0.9$ to
+$+8.4$, $p{=}0.059$; $+2.2$ on its recovered final paragraph). It remains a
+package of format and SQL definitions, and it was not registered.
 
 \subsection{Route: looked up or pasted}
 \label{sec:tools-add}
 
-\begin{table}[t]
-\centering
-\footnotesize
-\setlength{\tabcolsep}{2.4pt}
-\begin{tabular}{@{}llrr@{}}
-\toprule
-\tabhead{Contrast} & \tabhead{View} & \mLuna{} & \mQwen{} \\
-\midrule
-original wording (5) & end-to-end & $-0.7$ & $+10.1$ \\
-                     & official   &        & $+10.1$ \\
-notes in both (5d)   & end-to-end & $-1.8$ & $-2.2$ \\
-                     & official   &        & $+5.4$ \\
-constructed (4b)     & Soft-EX    & \multicolumn{2}{r}{$+0.5$, pooled} \\
-LiveSQLBench         & Soft-EX    & $-0.9$ & $0.0$ \\
-\bottomrule
-\end{tabular}
-\caption{Route effects: governed lookup minus the same knowledge in the
-prompt, in points, on DABStep's rule-matching tasks or the benchmark's
-primary tasks. \mLuna{}'s two DABStep views coincide. 4b pools three
-models.}
-\label{tab:route}
-\end{table}
-
 \armT{} and \armC{} hold one contract and differ in route: its files in
 the prompt over plain tools, or the governed lookups, which also bring the
-validator, the tool interface and the instruction to look things up
-(Table~\ref{tab:route}). With the contract's original wording, the route
+validator, the tool interface and the instruction to look things up.
+With the contract's original wording, the route
 makes no detectable difference on \mLuna{}'s rule-matching tasks ($-0.7$,
 15 tasks to 18) and adds 10.1 points on \mQwen{}'s, as registered in (27)
-(64 tasks to 16; over shapes $+3$ to $+17$, though the shapes' own sign
-test does not reject). On the other 202 tasks it gives $+5.1$ on \mLuna{}
-and $-6.9$ on \mQwen{}, neither surviving clustering. In \mLuna{}'s
-fee-average families the 50 runs the governed arm won all match what
-dropping the wildcard rules gives; the governed arm got the rule from a
-call just before its first fee query, and the validator played no part.
+(64 tasks to 16; shape $p{=}0.02$). Rerun in experiment~5e it gives $+1.5$
+and $+7.0$ (shape $p{=}0.056$). In \mLuna{}'s fee-average families the 50
+runs the governed arm won all match what dropping the wildcard rules gives;
+the governed arm got the rule from a call just before its first fee query,
+and the validator played no part.
 
-Experiment~5d asks whether the route still matters once both arms state
-the two facts plainly. \armCws{} is the governed contract plus the two
-notes, run together with \armC{} and \armTws{}. It tests governed delivery
-of the rest of the contract with the deciding facts pasted in both arms,
-not whether the facts reach the agent better by lookup. End-to-end on the
-rule-matching tasks, \textbf{the route shows no advantage}: $-1.8$ on
-\mLuna{} (16 tasks to 23, $p{=}0.34$; registered tie (41) holds) and
-$-2.2$ on \mQwen{} (10 to 21, $p{=}0.071$). The latter fails the
-registered tie (41Q), which required $p{\geq}0.10$, with the text ahead;
-its shape interval is $-6.9$ to $+1.9$. Experiment~5's $+10.1$ does not
-survive the plain wording end-to-end. On \mQwen{}'s official view,
-however, the governed arm leads, 57.8\% against 52.4\% (75 tasks to 49,
-$p{=}0.024$). The notes lift the governed contract on both models: $+4.0$
-on \mLuna{} (22 tasks to 6; the registered (42) predicted no difference
-and failed) and $+7.0$ on \mQwen{} ((42Q) holds).
+With both facts as notes in both prompts (5d, \armCws{} against
+\armTws{}), the governed route delivers the rest of the contract no
+better: $-1.8$ points on \mLuna{} (tie (41) holds) and $-2.2$ on \mQwen{}
+(tie (41Q) fails, text ahead); the notes lift the governed contract by 4.0
+and 7.0 ((42) fails, (42Q) holds). Experiment~5e asks whether lookup
+delivers the deciding facts themselves better. \armCp{} writes them into the contract
+and states them in no prompt, so the agent reaches them only by lookup:
+one \texttt{lookup\_domain("fees")} returns both. \textbf{The route does
+not deliver the facts better}: against its paste \armTp{}, $-2.5$ points
+on \mLuna{} (90\% interval $-8.3$ to $+3.1$, shape $p{=}0.61$) and $-5.9$
+on \mQwen{} ($-12.8$ to $-0.4$, $p{=}0.077$; 5 tasks to 30). The
+registered non-superiority predictions (49) and (49Q), that the governed
+route does not lead by 5 points, both hold after Holm correction; neither
+is an equivalence. The governed losses are not failures to fetch: every
+wrong governed run on a task lost to the paste had looked up the fees
+domain before its first fee query.
 
-\textbf{On \mQwen{}, the views split by which text is scored.} Of
-\mQwen{}'s answers that are right end-to-end on the rule-matching tasks,
-the governed arm gives the value alone, as the prompt asks, in 67\%,
-against 59\% for the text (65\% against 60\% in experiment~5). Scoring the
-whole message rewards that compliance; scoring the recovered final
-paragraph does not. Part of every \mQwen{} route effect under the official
-view is answer format, not a more often correct value (descriptive, not
-predicted). \mLuna{} gives the value alone in every arm.
+The plain wording lifts the governed contract by 4.5 points on \mLuna{}
+and 4.7 on \mQwen{} (shape $p{=}0.059$; (50Q) fails), and the paste more:
+on \mQwen{} the route's $+7.0$ in the original wording becomes $-5.9$
+(interaction shape $p{=}0.016$; expl.). Placed in the contract, the facts
+lift \mQwen{}'s governed arm less than as prompt notes beside it ($-3.7$
+points; $-9.3$ over all 401, $p{=}0.012$).
 
-The other route contrasts point the same way. On the constructed
-questions an authored contract by its two routes differs by $+0.5$ points
-(2 tasks to 0), and the share of its gain that its prose notes reproduce
-is 1.03 (Section~\ref{sec:gaps}). On LiveSQLBench, compiled knowledge in
-the prompt or behind the tools scores 36.8\% against 35.9\% on \mLuna{}
-(25 tasks to 22) and 37.7\% against 37.7\% on \mQwen{} (24 to 22);
-registered prediction (3) had the tools ahead and failed.
+\textbf{On \mQwen{}, the views split by which text is scored.} Of its
+answers right end-to-end on the rule-matching tasks, the governed arm gives
+the value alone, as the prompt asks, in 67\%, the text in 59\%. The
+official scorer reads the whole message and rewards that compliance, so
+under it the governed arm leads in 5d ($+5.4$, $p{=}0.024$) and 5e
+($+7.5$): partly answer format, not a more often correct value (expl.).
+\mLuna{} gives the value alone in every arm.
 
-\paragraph{Summary.} With the facts held equal, the contract's form leads
-prose on the rule-matching tasks of both models, provisionally. The route
-shows no advantage end-to-end once both arms state the facts plainly,
-and on LiveSQLBench it makes no detectable difference; on \mQwen{}'s
-official view it leads, largely through answer format. These contrasts
-vary by model, task family and scoring view, and none is offered as a
-bound on what delivery can do. How long a prompt the knowledge sits in is
-a separate question (Section~\ref{sec:scale}).
+The other route contrasts agree: an authored contract on the
+constructed questions (2 tasks to 0; Section~\ref{sec:gaps}), and compiled
+knowledge on LiveSQLBench (25 tasks to 22 on \mLuna{}, 24 to 22 on
+\mQwen{}), where the registered (3) had the tools ahead and failed.
+
+\paragraph{Summary.} With the facts held equal and stated once, the
+contract's form leads prose on the rule-matching tasks (unregistered). The
+route does not deliver the deciding facts better than the paste, and on
+LiveSQLBench makes no detectable difference. These contrasts vary by
+model, task family and scoring view; none bounds what delivery can do.

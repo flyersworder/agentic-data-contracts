@@ -2,29 +2,25 @@
 \label{sec:conclusion}
 
 Context layers are evaluated with and without, which credits their
-machinery with whatever knowledge they add. Holding one fixed while
-varying the other, we find on DABStep that emptying a contract's knowledge
+machinery with whatever knowledge they add. Separating the two, we find on DABStep that emptying a contract's knowledge
 while keeping its tools costs 26 to 50 hard-task points on six models,
 and that its lead over the pasted manual is mostly two pieces of data
 semantics the manual omits: a wildcard stored as an empty list, and fees
 that add up when several rules match. Stated plainly in prose, they
 recover most of that lead on \mLuna{} and, end-to-end, all of it on
 \mQwen{}; how plainly they are stated matters as much as whether they
-are. With the facts held equal, the contract's form leads prose
-provisionally on the rule-matching tasks, and its route shows no
-consistent accuracy difference once both arms state the semantics.
+are. With the facts held equal, the contract's form leads prose on the
+rule-matching tasks (unregistered), and written into the contract the
+facts are delivered no better by lookup than by pasting it.
 Before crediting a context layer's machinery, check that the comparison
 holds its semantics equal.
 
 Delivery is then a choice on other grounds. Against a verbose YAML in the
-prompt, looking the contract up is cheaper from twice a database's size on
-the GPT models, and works where the YAML no longer fits. A prose KB of the
-same knowledge fits too and, on \mQwen{}, lost no accuracy at 22
-databases' worth, at about seven times the input tokens. The governed route leaves a log of the
-definitions each answer consulted. No run whose prompt stated the
-forbidden operations corrupted its database copy, against 50 runs without
-them, nearly all on one model; that is an association, not a test of
-enforcement.
+prompt, lookup is cheaper from twice a database's size on the GPT models
+and works where the YAML no longer fits; a prose KB fits too, at about
+seven times the input. Lookup logs the definitions each answer consulted.
+No run whose prompt stated the forbidden operations corrupted its database
+copy, against 51 without; that is an association, not enforcement.
 
 \ifextended
 \paragraph{Future work.} The knowledge ladder run together on two models,

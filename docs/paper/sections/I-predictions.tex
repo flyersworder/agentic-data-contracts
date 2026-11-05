@@ -80,15 +80,22 @@ DABStep 5d, governed with notes & (41) & \armCws{} and \armTws{} tie on rule-mat
  & (41Q) & the same, on \mQwen{} & \texttt{9cb3643} & fails (text ahead) \\
  & (42Q) & the notes lift \mQwen{}'s \armC{} & \texttt{9cb3643} & holds \\
  & (42) & \armCws{} and \armC{} tie, \mLuna{} & \texttt{9cb3643} & fails (notes ahead) \\
+\midrule
+DABStep 5e, facts in the contract & (49), (49Q) & \armCp{} does not lead \armTp{} by 5 points on rule-matching tasks & \texttt{4897bfe} & hold \\
+ & (50Q) & \armCp{} beats \armC{}, \mQwen{} & \texttt{4897bfe} & fails \\
+ & (51) & \armMws{} is not 5 points below \armC{}, \mLuna{} & \texttt{4897bfe} & fails \\
+LiveSQLBench 5e, scale & (52) & the prose KB at 22 databases is at most 5 points below itself at 1x, \mQwen{} & \texttt{4897bfe} & holds \\
+ & (53) & the governed arm uses fewer input tokens there & \texttt{4897bfe} & holds \\
 \bottomrule
 \end{tabular}
 \caption{The prediction index; totals and notes $a$--$c$ follow the table.}
 \label{tab:predictions}
 \end{table*}
 
-The table holds 57 predictions in 16 commits, 53 before experiment~5d and 4
-for it: 31 held (24 directional, 7 registered ties, which hold by not
-rejecting), 3 held in part (``mostly holds'' is counted here), 22 failed,
+The table holds 63 predictions in 17 commits, 53 before experiment~5d, 4
+for it and 6 for 5e: 35 held (25 directional, 7 registered ties, which hold
+by not rejecting, and 3 one-sided bounds, which hold by an interval), 3
+held in part (``mostly holds'' is counted here), 24 failed,
 and one was read as equivalent, which its commit registered as a separate
 outcome. Rows listing several numbers count each. LiveSQLBench's (6) was fixed after \mQwen{}'s per-arm totals for two
 repeats were seen, before the statistic it predicts. Experiment 4b's

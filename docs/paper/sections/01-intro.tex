@@ -61,8 +61,8 @@ this, not the only possible one. On DABStep~\cite{dabstep} we apply all
 three manipulations; on questions we constructed over three
 LiveSQLBench~\cite{livesqlbench} databases, the notes and the routes; on
 LiveSQLBench itself, the routes. We ran seven models, three of them
-repeated three times, and fixed 57 predictions in commits before
-their runs, of which 22 failed.
+repeated three times, and fixed 63 predictions in commits before
+their runs, of which 24 failed.
 
 \textbf{Knowledge, not scaffolding} (Section~\ref{sec:decomposition}).
 Emptying the contract's descriptions and SQL definitions while keeping its
@@ -85,27 +85,26 @@ they are stated matters too: on Qwen the prose beats the contract's own
 text, which carries both semantics less plainly, by 16.6 points.
 
 \textbf{Delivery at equal knowledge} (Section~\ref{sec:delivery}). With the
-two semantics stated alike, the contract's text leads prose on the
-rule-matching tasks by 3.7 and 5.5 points, provisionally: under exact
-matching luna's lead falls to 1.8. Looked up or pasted, the contract shows
-no advantage end-to-end once both arms state the semantics; on Qwen's
-official scoring the lookup leads, largely because its answers more often
-take the requested format. On LiveSQLBench the route makes no detectable
-difference.
+two semantics stated once, in the same words, the contract's text leads
+prose on the rule-matching tasks by 6.5 points on luna and 4.9 on Qwen
+(unregistered; over question shapes significant on luna only). Written
+into the contract and reachable only by lookup, the two semantics are not
+delivered better than by pasting the same contract: $-2.5$ points on luna
+and $-5.9$ on Qwen, though every lost lookup run had fetched them. On
+Qwen's official scoring the lookup leads, largely because its answers more
+often take the requested format. On LiveSQLBench the route makes no
+detectable difference.
 
 \textbf{Secondary results} (Sections~\ref{sec:authoring}
-and~\ref{sec:buys}). A compiler or author with the data open recovered
-encodings the data shows, and what it got wrong travelled through prose
-and contract alike; the summing convention is settled by neither the
-documentation nor the data. By gold-aware model raters, LiveSQLBench's
-documentation leaves a result-changing choice open on 132 of 302 tasks
-(112 to 146 across rater pairings). At four times a database's size,
-looking definitions up is 1.7 to 2.4 times cheaper than pasting the
-contract's YAML on the GPT models, and about 1.1 times cheaper than a prose
-KB; the lookups leave a log of the definitions each answer consulted. No
-run whose prompt stated the forbidden operations corrupted its database
-copy (0 of 36{,}574, against 50 of 21{,}790), an association rather than a
-test of enforcement.
+and~\ref{sec:buys}). An author with the data open recovered encodings the
+data shows, and its errors travelled through prose and contract alike. By
+gold-aware model raters, LiveSQLBench's documentation leaves a
+result-changing choice open on 132 of 302 tasks. At four times a
+database's size, lookup is 1.7 to 2.4 times cheaper than the pasted YAML
+on the GPT models and leaves a log of what each answer consulted. No run
+whose prompt stated the forbidden operations corrupted its database copy
+(0 of 48{,}604, against 51 of 24{,}196), an association rather than a test
+of enforcement.
 
 \textbf{What a practitioner should take from this.}
 \begin{itemize}

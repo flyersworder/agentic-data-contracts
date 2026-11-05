@@ -2,13 +2,9 @@
 \label{sec:authoring}
 
 If the contract's value is the knowledge it states, its value is its
-author's. Section~\ref{sec:authoring-paths} describes three ways to author
-one: interactively, a model drafting under the author's direction;
-compiled, entry by entry, from the documentation; and written whole by a
-model that reads all of the documentation and explores the data. This
-section asks where the knowledge that did the work came from, on both
-benchmarks. It is secondary to Sections~\ref{sec:knowledge}
-and~\ref{sec:delivery}.
+author's. This section, secondary to Sections~\ref{sec:knowledge}
+and~\ref{sec:delivery}, asks where that knowledge came from, for the three
+ways to author a contract of Section~\ref{sec:authoring-paths}.
 
 \subsection{Data inspection grounds encodings}
 \label{sec:compiled}
@@ -109,22 +105,17 @@ the compiled contract behind the governed tools, and \mQwen{} 37.7\% and
 37.7\% (Section~\ref{sec:tools-add}). The agent reads what it is given,
 looking a metric up in 86 to 93\% of compiled-contract runs.
 
-Observed accuracy is low. Two gold-aware model raters (Section~\ref{sec:threats}),
-each blind to every run and contract, read each task's question, gold SQL
-and result and the KB entries the gold uses, and judged whether the
-question and the KB settle every choice that changes the result. They
-agree on 83\% of tasks ($\kappa{=}0.79$). Both find the KB leaves a
-result-changing choice open on 132 of the 302 tasks; across the four rater
-pairings of two families the count ranges from 112 to 146. No human checked
-the labels. The knowledge arms solve about 60\% of the tasks the KB
-settles and 14\% of those it leaves open (53 to 62\% and 8 to 14\% under
-the other rater families), but the bare schema differs too (39\% against
-6\%). The knowledge's own gain is larger where the KB settles the gold in
-points (expl.), $+20.8$ against $+7.6$ (difference $+13.2$, over databases $+4.8$ to
-$+22.4$), and equal in log-odds ($+0.84$ against $+0.89$): from baselines
-of 39\% and 6\%, a larger effect of knowledge cannot be separated from the
-floor. The open
-choices were most often how a \texttt{NULL} or an unlisted category is
+Observed accuracy is low. Two gold-aware model raters
+(Section~\ref{sec:threats}), blind to every run and contract, judged from
+each task's question, gold SQL and result and the KB entries the gold uses
+whether the question and KB settle every result-changing choice. They agree
+on 83\% of tasks ($\kappa{=}0.79$) and both find a choice left open on 132
+of the 302 (112 to 146 across four pairings of two families); no human
+checked the labels. The knowledge arms solve about 60\% of the tasks the KB
+settles and 14\% of those it leaves open, but the bare schema differs too
+(39\% against 6\%). The knowledge's own gain, $+20.8$ against $+7.6$ points
+(expl.), is equal in log-odds ($+0.84$ against $+0.89$), so a larger effect
+cannot be separated from the floor. The open choices were most often how a \texttt{NULL} or an unlisted category is
 scored, which fields a formula averages, and which of two columns holds a
 quantity.
 

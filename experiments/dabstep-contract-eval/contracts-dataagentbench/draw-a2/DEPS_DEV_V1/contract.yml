@@ -1,0 +1,114 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: DEPS_DEV_V1, author: claudeopus5.5
+version: '1.0'
+name: deps-dev-v1
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: package_database
+    description: 'Metadata of software packages (deps.dev style): licensing information, version release
+      data, dependency details and registry metadata. The documentation says it is stored as SQLite, but
+      it is a schema of the same DuckDB database, so write DuckDB SQL.'
+    tables:
+    - packageinfo
+  - schema: project_database
+    description: GitHub (and GitLab/Bitbucket) project information and mappings between projects and their
+      package versions. Stored in DuckDB.
+    tables:
+    - project_info
+    - project_packageversion
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: packages
+    summary: 'Package versions: licenses, release info, publish time, dependencies, advisories'
+    description: 'One row of package_database.packageinfo describes a package version identified by (System,
+      Name, Version). System is the package ecosystem (e.g. NPM, Maven); in this data every row is NPM.
+      Licenses is a JSON-like array of license strings (e.g. ["EUPL-1.2"]; ''[]'' means no license recorded)
+      — extract with json_extract_string(Licenses,''$[*]'') (VARCHAR[]). Links is a JSON list of {Label,
+      URL}; labels present: ORIGIN, SOURCE_REPO, HOMEPAGE, ISSUE_TRACKER, ATTESTATION. Advisories is a
+      JSON list of security advisories {Source, SourceID} (e.g. Source ''OSV'', SourceID ''GHSA-...'');
+      ''[]'' means none. VersionInfo is a JSON object with IsRelease (boolean) and Ordinal (integer position
+      of the version in the package''s version ordering). Hashes is a JSON list of {Hash, Type} (MD5,
+      SHA1, SHA512, ...). DependenciesProcessed (bool, stored 0/1) — whether dependencies have been processed
+      successfully. DependencyError (bool, stored 0/1) — whether a dependency processing error occurred.
+      UpstreamPublishedAt is when the upstream release was published: the documentation calls it a Unix
+      timestamp in ms, but the stored values (1.43e15 .. 1.70e15) are MICROSECONDS since the epoch (2015-2023);
+      convert with make_timestamp(CAST(UpstreamPublishedAt AS BIGINT)) (metric upstream_published_at).
+      ~11.6k rows have it NULL. Registries and UpstreamIdentifiers are JSON-like lists (here always empty/NULL).
+      SLSAProvenance (SLSA provenance level if available) and Purl (package URL in purl format, if available)
+      are entirely NULL.
+
+      DUPLICATES: packageinfo has 661,372 rows but only 325,940 distinct (System, Name, Version) keys;
+      most duplicates are exact copies, some differ in Ordinal/Hashes/DependenciesProcessed. Count package
+      versions with COUNT(DISTINCT (System, Name, Version)) (metric package_version_count) and deduplicate
+      (SELECT DISTINCT or one row per key) before aggregating per-version attributes. Count packages with
+      COUNT(DISTINCT (System, Name)).
+
+      '
+    tables:
+    - package_database.packageinfo
+  - name: projects
+    summary: Source projects, their stats parsed from text, and package-to-project mappings
+    description: 'project_database.project_info: one row per project (770 rows). Project_Information is
+      free text describing the project, including its repository name (owner/repo), open issues, stars
+      and forks, in varying phrasing ("0 open issues, 0 stars, and 0 forks", "a stars count of 26", "starred
+      by 1835 users", "forked 41 times", numbers sometimes with thousands commas like 38,715). There is
+      NO project name column: derive it with metric project_name (regex for the first owner/repo token;
+      matches 769 of 770 rows, one row phrases it as "project reactjs-pull-refresh ... under the organization
+      reactjs-ui" and yields ''''). Stars, forks and open issues come from metrics project_stars, project_forks,
+      project_open_issues, which parse every row. Licenses is a JSON-like array (may be ''[]'' or e.g.
+      ["non-standard"]). Description is the project description field (may differ from Project_Information).
+      Homepage is the homepage URL, if available (NULL for most). OSSFuzz is an OSSFuzz status indicator,
+      if applicable (all NULL here).
+
+      project_database.project_packageversion maps package versions (System, Name, Version) to projects:
+      ProjectType (GITHUB, GITLAB, BITBUCKET), ProjectName (repository path in owner/repo format, lowercase),
+      RelationProvenance (provenance of the relationship: UNVERIFIED_METADATA or SLSA_ATTESTATION) and
+      RelationType (SOURCE_REPO_TYPE = the project is the source repository; ISSUE_TRACKER_TYPE = the
+      project is the issue tracker). A package version usually appears twice (one SOURCE_REPO_TYPE and
+      one ISSUE_TRACKER_TYPE row); filter RelationType = ''SOURCE_REPO_TYPE'' when asking for a package''s
+      source repository, and use DISTINCT to avoid double counting.
+
+      JOINS: project_packageversion (System, Name, Version) = packageinfo (System, Name, Version) (packageinfo
+      duplicates multiply rows — deduplicate). project_packageversion.ProjectName = project_name extracted
+      from project_info.Project_Information. See metric package_project_stars for the declared three-table
+      join.
+
+      '
+    tables:
+    - project_database.project_info
+    - project_database.project_packageversion
+    - package_database.packageinfo
+  rules:
+  - name: dedupe_package_versions
+    description: 'packageinfo contains duplicate rows per (System, Name, Version); counts of package versions
+      must use COUNT(DISTINCT (System, Name, Version)) or deduplicate first.
+
+      '
+    enforcement: warn
+  - name: timestamp_units_microseconds
+    description: 'UpstreamPublishedAt is stored in microseconds since the Unix epoch (despite documentation
+      saying ms); convert with make_timestamp(CAST(UpstreamPublishedAt AS BIGINT)). to_timestamp returns
+      TIMESTAMPTZ which may fail to render; prefer make_timestamp.
+
+      '
+    enforcement: warn
+  - name: project_stats_from_text
+    description: 'Project names, stars, forks and open issues exist only inside project_info.Project_Information
+      text; use the declared metrics project_name, project_stars, project_forks, project_open_issues.
+
+      '
+    enforcement: warn

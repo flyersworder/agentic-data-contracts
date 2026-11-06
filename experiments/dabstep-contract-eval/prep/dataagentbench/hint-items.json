@@ -1,0 +1,57 @@
+{
+  "bookreview": [
+    {"id": "bookreview-1", "text": "In books_info, \"description\", \"categories\" and \"features\" look like lists or dictionaries but are stored as strings."},
+    {"id": "bookreview-2", "text": "\"book_id\" in books_info and \"purchase_id\" in review refer to the same books, although the field names differ."},
+    {"id": "bookreview-3", "text": "Joining books_info.book_id to review.purchase_id needs a fuzzy join: the values do not match exactly."},
+    {"id": "bookreview-4", "text": "Some queries need information from the \"categories\" or \"details\" columns of books_info."}
+  ],
+  "crmarenapro": [
+    {"id": "crmarenapro-1", "text": "About 25% of ID-like fields include a leading # (e.g. #001Wt00000PFj4zIAD)."},
+    {"id": "crmarenapro-2", "text": "About 20% of text fields contain trailing whitespace (e.g. \"Company Name \")."},
+    {"id": "crmarenapro-3", "text": "The corruption appears in the fields Id, AccountId, ContactId, Name, FirstName, LastName, Email, Subject and Status."},
+    {"id": "crmarenapro-4", "text": "Handling the corruption is needed for reliable joins."},
+    {"id": "crmarenapro-5", "text": "Domain-specific CRM knowledge is required."}
+  ],
+  "DEPS_DEV_V1": [
+    {"id": "DEPS_DEV_V1-1", "text": "Package records in packageinfo (package_database) match records in project_packageversion (project_database) on System, Name and Version."},
+    {"id": "DEPS_DEV_V1-2", "text": "ProjectName in project_packageversion finds the corresponding record in project_info."},
+    {"id": "DEPS_DEV_V1-3", "text": "The Project_Information field of project_info holds the project name and repository metrics such as GitHub stars and fork counts, with other descriptive details."}
+  ],
+  "GITHUB_REPOS": [
+    {"id": "GITHUB_REPOS-1", "text": "Tables are joined on identifiers such as \"id\" or \"repo_name\"."},
+    {"id": "GITHUB_REPOS-2", "text": "The languages table's language_description field may list several programming languages for one repository."},
+    {"id": "GITHUB_REPOS-3", "text": "A repository's primary language is the one with the most bytes."},
+    {"id": "GITHUB_REPOS-4", "text": "The contents table's repo_data_description field is natural-language metadata derived from file attributes (size, binary, copies, mode)."},
+    {"id": "GITHUB_REPOS-5", "text": "Some queries rely on the attributes in repo_data_description for filtering or interpretation."}
+  ],
+  "PANCANCER_ATLAS": [
+    {"id": "PANCANCER_ATLAS-1", "text": "The average log10-transformed expression value is the mean of log10(normalized_count + 1) across samples."},
+    {"id": "PANCANCER_ATLAS-2", "text": "Molecular data match clinical_info by its \"Patient_description\" and the molecular data's \"ParticipantBarcode\"."},
+    {"id": "PANCANCER_ATLAS-3", "text": "clinical_info's \"Patient_description\" holds more about each patient, such as uuid, barcode, gender and vital status."},
+    {"id": "PANCANCER_ATLAS-4", "text": "The chi-square statistic is the sum over cells of (O - E)^2 / E, with E = row total * column total / grand total."},
+    {"id": "PANCANCER_ATLAS-5", "text": "LGG means brain lower grade glioma; BRCA means breast invasive carcinoma."}
+  ],
+  "googlelocal": [
+    {"id": "googlelocal-1", "text": "The two databases join on the gmap_id field, combining reviews with business metadata."},
+    {"id": "googlelocal-2", "text": "Needed information can be in the \"description\" column of business_database."}
+  ],
+  "music_brainz_20k": [
+    {"id": "music_brainz_20k-1", "text": "The tracks table has duplicates: different track_ids can be the same real-world track."},
+    {"id": "music_brainz_20k-2", "text": "Duplicate tracks need not match exactly (e.g. different year formats or small attribute differences), so they are resolved by comparing title, artist, album, year and so on."},
+    {"id": "music_brainz_20k-3", "text": "The sales table records sales in five countries: USA, UK, Canada, Germany and France."},
+    {"id": "music_brainz_20k-4", "text": "Sales occur on five platforms or stores: iTunes, Spotify, Apple Music, Amazon Music and Google Play."}
+  ],
+  "stockindex": [
+    {"id": "stockindex-1", "text": "The Exchange field in indexinfo_database holds full exchange names (e.g. \"Tokyo Stock Exchange\"), while the Index field in indextrade_database holds index symbols (e.g. \"N225\", \"HSI\", \"000001.SS\")."},
+    {"id": "stockindex-2", "text": "Joining the two needs each exchange matched to its major index symbol (e.g. Tokyo Stock Exchange to N225, Hong Kong Stock Exchange to HSI)."},
+    {"id": "stockindex-3", "text": "An exchange's region (Asia, Europe, North America) is not stored and must be inferred from geography (e.g. N225 is in Asia)."},
+    {"id": "stockindex-4", "text": "An up day is a trading day whose close is above its open; a down day one whose close is below its open."},
+    {"id": "stockindex-5", "text": "Average intraday volatility is (High - Low) / Open per day, averaged over the period."}
+  ],
+  "stockmarket": [
+    {"id": "stockmarket-1", "text": "Listing exchange codes: A = NYSE MKT, N = NYSE, P = NYSE ARCA, Z = BATS, V = IEXG, Q = NASDAQ Global Select Market."},
+    {"id": "stockmarket-2", "text": "Financial status codes: D = deficient, E = delinquent, Q = bankrupt, N = normal, G = deficient and bankrupt, H = deficient and delinquent, J = delinquent and bankrupt, K = deficient, delinquent and bankrupt."},
+    {"id": "stockmarket-3", "text": "A company is financially troubled if it is deficient, delinquent, or both."},
+    {"id": "stockmarket-4", "text": "Market category codes: Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market."}
+  ]
+}

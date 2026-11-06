@@ -1,0 +1,84 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+version: '1.0'
+name: stockindex
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: indexinfo_database
+    description: Metadata about stock market indices from major exchanges around the world (United States,
+      China, Canada, Germany, Japan and more). Described as stored in SQLite but queried here as a DuckDB
+      schema.
+    tables:
+    - index_info
+  - schema: indextrade_database
+    description: Daily price data for indices tracking stock exchanges across various countries and regions.
+      Queried as a DuckDB schema.
+    preferred: true
+    tables:
+    - index_trade
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: index_prices
+    summary: Daily index prices (Open/High/Low/Close/Adj Close/CloseUSD) per index symbol
+    description: 'index_trade has one row per (Index, trading date): Index is the abbreviated index symbol;
+      Date the trading date; Open the opening price; High the highest price during the day; Low the lowest
+      price during the day; Close the closing price; "Adj Close" the adjusted closing price; CloseUSD
+      the closing price in USD.
+
+      DATA FINDINGS (checked with SQL): 104,224 rows, 13 index symbols (NYA, IXIC, HSI, 000001.SS, N225,
+      N100, 399001.SZ, GSPTSE, NSEI, GDAXI, SSMI, TWII, J203.JO). No NULLs in any price column. Date is
+      a VARCHAR stored in THREE mixed formats: ''1987-01-05 00:00:00'', ''31 Dec 1986, 00:00'' and ''January
+      02, 1987 at 12:00 AM''. Never compare, sort or take MIN/MAX on the raw string (that is lexical and
+      wrong); always parse it with the metric `trade_date`, which parses every row. After parsing, (Index,
+      date) is unique; dates range 1965-01-05 to 2021-06-03. CloseUSD equals Close times a constant per-index
+      conversion factor (1.0 for NYA and IXIC, 0.13 HSI, 0.16 000001.SS/399001.SZ, 0.01 N225/NSEI, 1.22
+      N100/GDAXI, 0.83 GSPTSE, 1.11 SSMI, 0.04 TWII, 0.07 J203.JO). Use CloseUSD when comparing closing
+      levels across indices in a common currency. "Adj Close" differs from Close on about 13k rows. Column
+      names Index, Date, Open, Close and "Adj Close" should be double-quoted ("Adj Close" must be, as
+      it contains a space).
+
+      '
+    tables:
+    - indextrade_database.index_trade
+  - name: exchanges
+    summary: Exchange names and their trading currencies; mapping index symbols to exchanges
+    description: 'index_info has one row per stock exchange: Exchange is the full name of the stock exchange
+      and Currency its trading currency (14 rows, e.g. New York Stock Exchange USD, Hong Kong Stock Exchange
+      HKD, Korea Exchange KRW). There is no shared key between index_info and index_trade. INTERPRETATION:
+      index symbols are mapped to exchanges by their standard meaning, encoded in the metric `index_exchange`:
+      NYA -> New York Stock Exchange, IXIC -> NASDAQ, HSI -> Hong Kong Stock Exchange, 000001.SS -> Shanghai
+      Stock Exchange, N225 -> Tokyo Stock Exchange, N100 -> Euronext, 399001.SZ -> Shenzhen Stock Exchange,
+      GSPTSE -> Toronto Stock Exchange, NSEI -> National Stock Exchange of India, GDAXI -> Frankfurt Stock
+      Exchange, SSMI -> SIX Swiss Exchange, TWII -> Taiwan Stock Exchange, J203.JO -> Johannesburg Stock
+      Exchange. Korea Exchange (KS11) has no price rows in index_trade.
+
+      '
+    tables:
+    - indexinfo_database.index_info
+    - indextrade_database.index_trade
+  rules:
+  - name: parse_dates
+    description: 'Date in index_trade is text in three mixed formats; filter, group, order and compare
+      dates only through the parsed `trade_date` expression.
+
+      '
+    enforcement: warn
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true

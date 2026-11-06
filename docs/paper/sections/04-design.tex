@@ -10,14 +10,17 @@ tasks turn on one procedure: matching each payment to the fee rules that
 apply to it, with wildcards, monthly volume and fraud bands, and a fee
 formula. We use the 401 of its 450 test tasks for which we reconstruct a
 gold (332 hard, 69 easy; Section~\ref{sec:grading}). Three subsets recur.
-The \emph{rule-matching} tasks (199) are those both procedural-load raters
-(Section~\ref{sec:procedures}) marked as matching records against a rule
-table, in practice the fee rules; the other 202 include the total-fee and
-fee-average questions. A \emph{family} is the set of tasks one fee
-computation answers, differing only in parameters such as merchant and
-month; eleven families cover 176 of the 332 hard tasks.
-\emph{Held-out} tasks are rule-matching tasks whose transcripts we never
-inspected (Section~\ref{sec:second-fact}).
+The \emph{rule-matching} tasks (199) are those two blind model raters,
+scoring the procedural load of each question's knowledge on both
+benchmarks shuffled together, both marked as matching records against a
+rule table, in practice the fee rules; the other 202 include the
+total-fee and fee-average questions. The subset was first examined after
+the load prediction (18) failed, and every run commit from \mQwen{}'s
+experiment~5 on fixed it as the primary subset. A \emph{family} is the set of
+tasks one fee computation answers, differing only in parameters such as
+merchant and month; eleven families cover 176 of the 332 hard tasks.
+\emph{Held-out} tasks are the 165 rule-matching tasks outside the 34 whose
+transcripts we inspected (Section~\ref{sec:second-fact}).
 
 \textbf{LiveSQLBench}~\cite{livesqlbench} (Base-Full v1) asks SQL
 questions over 22 databases in as many domains, each shipped with a
@@ -29,9 +32,7 @@ PostgreSQL's NULL ordering and integer division, and compares the result
 with the frozen PostgreSQL gold. Executing each gold query 20 times in
 DuckDB, 302 reproduce exactly (the \emph{primary} tasks), 73 reproduce only as a set
 and are reported apart, and 36 are excluded, as not reproducible or
-because they read the clock. Its knowledge is mostly composite (dependent
-formulas, bands, a change of grain) rather than one procedure that many
-tasks share.
+because they read the clock.
 
 \textbf{Constructed questions,} a third test bed. Three experiments
 (Sections~\ref{sec:procedures}, \ref{sec:gaps} and~\ref{sec:scale}) need
@@ -58,24 +59,27 @@ matched shapes.
 \ref{sec:second-fact} & second fact & 5b & the second fact, stated in prose & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 3/4 \\
 \ref{sec:alike} & facts alike & 5c & both facts stated alike in prose and in the contract's text & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 1/3 \\
 \ref{sec:tools-add} & text or tools & 5 & the contract's text in the prompt against its governed tools & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 4/4 \\
+\ref{sec:tools-add} & governed with notes & 5d & both facts added to the governed contract & DABStep, 401 & \mLuna{}, \mQwen{} & 3 & 2/4 \\
+\ref{sec:tools-add} & facts in the contract & 5e & both facts written into the contract, looked up or pasted; the prose KB at 22 databases & DABStep, 401; constructed, 60 & \mLuna{}, \mQwen{} & 3 & 4/6 \\
 \ref{sec:procedures} & load ratings & load & is the gain where the knowledge is procedural? & both, 401 + 302 & (existing runs) & --- & 3/4 \\
 \ref{sec:procedures} & constructed procedures & 4 & a rule-matching procedure and a composite, plain and styled & constructed, 60 & \mLuna{}, \mSol{}; \mQwen{} & 3 & 2/8 \\
 \midrule
-\ref{sec:compiled} & LSB compile & LSB 1 & compiled knowledge, delivered three ways & LiveSQLBench, 302 & \mLuna{}, \mQwen{} & 3 & 2+1/5 \\
+\ref{sec:lsb-knowledge} & LSB compile & LSB 1 & compiled knowledge, delivered three ways & LiveSQLBench, 302 & \mLuna{}, \mQwen{} & 3 & 2+1/5 \\
 \ref{sec:compiled} & DABStep compile & compiler & compiled against the original; a stronger compiler & DABStep, 401 & \mLuna{} & 3 & 2+2/4 \\
-\ref{sec:better-compile} & LSB author & LSB 2 & a stronger compile and a whole-contract author & LiveSQLBench, 55 & \mLuna{} & 3 & 0/3 \\
-\ref{sec:better-compile} & LSB oracle & LSB 3 & corrections from training golds, tested on held-out tasks & LiveSQLBench, 55 & \mLuna{} & 3 & 1/3 \\
+\ref{sec:lsb-knowledge} & LSB author & LSB 2 & a stronger compile and a whole-contract author & LiveSQLBench, 55 & \mLuna{} & 3 & 0/3 \\
+\ref{sec:lsb-knowledge} & LSB oracle & LSB 3 & corrections from training golds, tested on held-out tasks & LiveSQLBench, 55 & \mLuna{} & 3 & 1/3 \\
 \ref{sec:gaps} & gaps & 4b & gaps in the documentation, and an author who can query the data & constructed, 60 & \mLuna{}, \mQwen{}, \mSol{} & 3 & 7/7 \\
 \midrule
 \ref{sec:scale} & scale & 6 & the contract grown from one database to 22 & constructed, 60 & \mLuna{}, \mSol{}, \mQwen{} & 3 & 2+1/5 \\
+\ref{sec:threats} & DataAgentBench & 7 & a contract written from the data, without the questions, against the benchmark's hints & DataAgentBench, 40 & \mLuna{}, \mQwen{} & 5 & 1/5 \\
 \bottomrule
 \end{tabular}
 \caption{The experiments, in the order the paper reports them. \emph{ID}:
 the label the run commits and the prediction index use; the runs went
 roughly in the order panels, one fact, LSB 1--3, load, 4, 5, 5b, 5c, 4b,
-6. \emph{Held}: registered predictions that held, of those fixed;
+6, 5d, 5e, 7. \emph{Held}: registered predictions that held, of those fixed;
 ``+$n$'' counts predictions that held in part (LSB 1, compiler) or were
-read as equivalent (scale). \appref{app:predictions} lists all 53.}
+read as equivalent (scale); for 7, of the 5 read. \appref{app:predictions} lists all 76.}
 \label{tab:experiments}
 \end{table*}
 
@@ -98,6 +102,7 @@ read as equivalent (scale). \appref{app:predictions} lists all 53.}
 \armMw{}, \armMws{} & \armM{} + one or two facts & prompt, plain tools \\
 \armT{} & \armC{}'s files & prompt, plain tools \\
 \armTws{} & \armT{} + the two facts & prompt, plain tools \\
+\armCws{} & \armC{} + the two facts & governed tools \\
 \midrule
 \armComp{} & contract compiled from \armM{} & governed tools \\
 \armMsql{} & \armM{} + compiled SQL & prompt, plain tools \\
@@ -132,8 +137,9 @@ knowledge-equal: the contract states two facts the manual does not
 (Section~\ref{sec:delivery}). \armMw{} adds the first as a note (the
 empty-list wildcard) and \armMws{} adds both (that the fees of
 overlapping rules add up). \armT{} puts the contract's two files verbatim
-in the prompt over the plain tools, and \armTws{} adds the same two notes
-to it. Each note is written once and never reworded between runs. In the
+in the prompt over the plain tools, \armTws{} adds the same two notes to
+it, and \armCws{} adds them to the governed contract. Each note is written
+once and never reworded between runs. In the
 third block, \armComp{} is a contract compiled from the documentation
 (Section~\ref{sec:authoring-paths}), and \armMsql{} the documentation plus
 every compiled metric's SQL. The gaps and scale experiments add arms of
@@ -163,11 +169,13 @@ what the one before found (Table~\ref{tab:experiments}).
 \node[arm] (T) at (2.0,-3*\r) {\armT};
 \node[arm] (C) at (4.75,-3*\r) {\armC};
 \node[arm] (TW) at (2.0,-4*\r) {\armTws};
+\node[arm] (CW) at (4.75,-4*\r) {\armCws};
 \draw[move] (S) -- node[lab, above]{scaffolding, \S\ref{sec:decomposition}} node[lab, below]{($-$9 to $+$15)} (H);
 \draw[move] (H.east) to[out=-30, in=30] node[lab, right, align=left]{knowledge\\($+$26 to $+$50),\\\S\ref{sec:decomposition}} (C.east);
 \draw[move] (M) -- node[lab, right]{two facts, \S\ref{sec:one-fact}--\ref{sec:second-fact}} (MW);
 \draw[move] (MW.west) to[out=-150, in=150] node[lab, left, pos=0.3]{form,\\\S\ref{sec:alike}} (TW.west);
-\draw[move] (T) -- node[lab, above]{lookup, \S\ref{sec:tools-add}} (C);
+\draw[move] (T) -- node[lab, above]{route, \S\ref{sec:tools-add}} (C);
+\draw[move] (TW) -- node[lab, above]{route} (CW);
 \draw[move] (M) -- node[lab, above]{compiled, \S\ref{sec:compiled}} (Co);
 \end{tikzpicture}}
 \caption{The DABStep arms by what the agent knows (rows) and how it reaches
@@ -208,8 +216,7 @@ Three models carry the repeated experiments (Table~\ref{tab:models}):
 \mSol{}, a frontier model; \mLuna{}, the small tier of its family on the
 same deployment, which varies capability alone; and \mQwen{}, an
 open-weight model served at FP8 with thinking on, temperature~0 and
-seed~0, which varies vendor, family and serving stack. The GPT-6 models
-accept only their default temperature. Serving is not deterministic even
+seed~0, which varies vendor, family and serving stack. Serving is not deterministic even
 for \mQwen{}: between any two repeats 12.5 to 14.2\% of its task-arm
 verdicts change (8.3 to 9.7\% on \mSol{}, about 12\% on \mLuna{}), so the
 repeats measure variance on every model. Reasoning effort is
@@ -223,19 +230,17 @@ limiting and is reported on its 279-task complete-case set
 \label{sec:prereg}
 
 From the one-fact experiment on, every experiment committed its arms,
-endpoints and how each outcome would be read before its sweep, and most
-also fixed numbered predictions; every result row stamps the commit it ran
-on. Most commits came before any run or after a smoke run only. One,
-LiveSQLBench's (6), came after Qwen's per-arm totals for two repeats were
-seen, but before the subgroup statistic it predicts; its commit says so. The four single
-runs had a pre-registered design and primary model but no numbered
-predictions, and neither panel fixed any. In all, 53 predictions were
-fixed in 15 commits: 29 held, 3 held in part, 20 failed, and one was read
-as equivalent, an outcome its commit registered in advance
-(\appref{app:predictions}). Analyses chosen after a result was seen are
-labelled exploratory. Neither panel fixed numbered predictions, so the
-headline decomposition of Section~\ref{sec:decomposition} is a
-pre-specified design without registered outcomes.
+endpoints and readings before its sweep, and most fixed numbered
+predictions; every result row stamps the commit it ran on. One commit,
+LiveSQLBench's (6), came after two repeats' per-arm totals were seen but
+before the statistic it predicts, and says so. The single runs and the
+panels fixed a design but no predictions, so the headline decomposition
+(Section~\ref{sec:decomposition}) has no registered outcome. Of the 76
+predictions, fixed in 18 commits, 25 directional ones held, 7 ties were
+not rejected, 4 one-sided bounds held, one was read as equivalent as its
+commit allowed, 3 held in part, 28 failed and 8 were not read because a
+manipulation check failed (\appref{app:predictions}). Analyses chosen after a
+result was seen are exploratory.
 
 The unit is the task. With $k$ repeats a task scores 0 to $k$ for each
 arm, its number of correct runs, and a comparison between two arms counts
@@ -249,15 +254,26 @@ into 22 databases, and the constructed questions into six pieces of
 knowledge (five gap clusters in the gaps experiment). Every effect is
 therefore given in points with a 95\% bootstrap interval over those
 clusters, and where a task-level test and its cluster-level counterpart
-disagree, the text says so. In-text $p$-values are two-sided and quoted no
+disagree, the text says so. Experiment~5e registered one engine for
+DABStep's rule-matching tasks, which Section~\ref{sec:delivery} uses
+throughout: the task-weighted mean difference, a two-sided sign-flip test
+over the per-shape sums, and 90\% and 95\% intervals by inverting that
+test; applied to earlier contrasts it is exploratory. On DABStep the primary clustering is the
+question shapes (38 over the hard tasks, 25 over the rule-matching ones, of
+very unequal size); fee families, mostly single tasks, are reported beside
+it and are close to task-level. In-text $p$-values are two-sided and quoted no
 smaller than $10^{-10}$. A test fixed before its run carries its
-prediction number, as in \emph{(28)}; any other test is exploratory and is
+prediction number, as in \emph{(28)}, with a Q suffix for the same test on
+\mQwen{}; numbers repeat between the DABStep and LiveSQLBench series, so a
+number is read with its experiment. Any other test is exploratory and is
 marked \emph{(expl.)}. The index records each registered verdict at its
 registered sidedness, one-sided where a direction was predicted. A
 registered tie holds when the gap is within 5 points and the sign test
-gives $p \geq 0.10$; a registered equivalence when the interval of the
-difference lies within $\pm$5 points. Accuracy is \emph{strict}: a run
-that ends in an error or at the turn limit counts as wrong. There is no multiplicity correction; Section~\ref{sec:threats} says which results would not survive one.
+gives $p \geq 0.10$; we call that \emph{not rejected}, which does not show
+equivalence. A registered equivalence holds when the interval of the
+difference lies within $\pm$5 points, and a one-sided bound when the 90\%
+interval's end lies inside it. Accuracy is \emph{strict}: a run
+that ends in an error or at the turn limit counts as wrong. Apart from Holm within experiment~5e there is no multiplicity correction; Section~\ref{sec:threats} says which results would not survive one.
 
 \subsection{Grading}
 \label{sec:grading}
@@ -267,24 +283,28 @@ DABStep withholds its test golds. We reconstruct them from the
 leaderboard's published per-task files: for each task, the answer that at
 least 75\% of the submissions graded correct agree on (the median share is
 0.981). That yields 401 golds after excluding five consensus answers that
-verification showed wrong (\appref{app:golds}). We then measured the
-reconstruction: \armC{} and \armM{} on \mGLM{}, swept over all 450 tasks
-and submitted, were graded by the leaderboard against the withheld golds
-at 51.9\% and 18.8\% on the hard tasks, and our golds run about 3 to 6
-points high on the hard split, on both arms (\appref{app:leniency}).
-Answers are graded by DABStep's own scorer,
-vendored verbatim. \mQwen{} often states its working and then the answer
-as its last paragraph, which the scorer marks wrong; the
-\emph{end-to-end} view grades that last paragraph with the same scorer,
-never downgrades, and is reported beside the official verdicts on
-\mQwen{}. On the GPT-6 models the two views agree. LiveSQLBench answers
+verification showed wrong (\appref{app:golds}). We then checked the
+reconstruction against the official grader: \armC{} and \armM{} on
+\mGLM{}, swept over all 450 tasks and submitted, were graded by the
+leaderboard against the withheld golds at 51.9\% and 18.8\% on the hard
+tasks, so the official grader confirms the contract's lead over the
+manual, $+33.1$ points (137 tasks to 12). Against the withheld golds our
+reconstructed golds are 3.0 to 5.7 points lenient on the hard split, on
+both submitted arms (\appref{app:leniency}). The golds were reconstructed
+after a design rule barred every question, gold and score from the
+contract's authoring, and before the contract was first frozen
+(\appref{app:golds}). Answers are graded by
+DABStep's own scorer, vendored verbatim. \mQwen{} often states its working
+and then the answer as its last paragraph, which the scorer marks wrong;
+the \emph{end-to-end} view, defined as official plus final-paragraph
+recovery, grades that last paragraph with the same scorer, never
+downgrades, and is reported beside the official verdicts on \mQwen{}. On
+the GPT-6 models the two views agree. LiveSQLBench answers
 are SQL, graded by the benchmark's Soft-EX rules, which compare the
 answer's result table with the gold's after normalising decimals, rounding
-and \texttt{DISTINCT}. Our DuckDB port departs from them in three
-documented ways, all fixed when the task set was frozen: JSON text is
-parsed, nested dates are normalised, and numbers match within one
-two-place rounding step (floats also within $10^{-5}$ relative), so that
-every frozen gold grades as correct against itself. Matching one database
+and \texttt{DISTINCT}; our DuckDB port adds three documented
+normalisations, fixed with the task set, so that every frozen gold grades
+as correct against itself. Matching one database
 instance is not semantic equivalence~\cite{test-suites}; both benchmarks
 grade that way.
 
@@ -292,11 +312,9 @@ grade that way.
 \label{sec:fixed}
 
 Within a run everything but the arm is fixed: the row limit (50 rows per
-result), the request limit, the token budget, the model and its settings,
-the endpoint, the task set, the golds and the scorer. In most repeated
-experiments the arms ran together within each repeat; where an arm ran
-separately (\armMw{} on \mSol{}, \armMws{} on \mLuna{}), it pairs by task
-and repeat. An agent that exhausts its budget is forced to a final answer
-rather than discarded, and a retry pass reruns transient errors once.
-Harness defects found along the way are recorded with the rows they
-affected (\appref{app:harness}).
+result), the request and token budgets, the model, its settings and
+endpoint, the tasks, golds and scorer. Arms ran together within each
+repeat, except \armMw{} on \mSol{} and \armMws{} on \mLuna{}, which pair by
+task and repeat. An agent that exhausts its budget is forced to a final
+answer, a retry pass reruns transient errors once, and harness defects are
+recorded with the rows they affected (\appref{app:harness}).

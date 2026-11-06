@@ -1,0 +1,27 @@
+[
+ {
+  "id": "PANCANCER_ATLAS-1",
+  "cls": "definition",
+  "text": "The average log10-transformed expression value is the mean of log10(normalized_count + 1) across samples."
+ },
+ {
+  "id": "PANCANCER_ATLAS-2",
+  "cls": "data-discoverable",
+  "text": "Molecular data match clinical_info by its \"Patient_description\" and the molecular data's \"ParticipantBarcode\"."
+ },
+ {
+  "id": "PANCANCER_ATLAS-3",
+  "cls": "data-discoverable",
+  "text": "clinical_info's \"Patient_description\" holds more about each patient, such as uuid, barcode, gender and vital status."
+ },
+ {
+  "id": "PANCANCER_ATLAS-4",
+  "cls": "definition",
+  "text": "The chi-square statistic is the sum over cells of (O - E)^2 / E, with E = row total * column total / grand total."
+ },
+ {
+  "id": "PANCANCER_ATLAS-5",
+  "cls": "world",
+  "text": "LGG means brain lower grade glioma; BRCA means breast invasive carcinoma."
+ }
+]

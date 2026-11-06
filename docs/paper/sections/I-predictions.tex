@@ -14,6 +14,7 @@ listed.
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.95}
 \begin{tabular}{@{}L{2.7cm}L{1.5cm}L{9.0cm}ll@{}}
 \toprule
 \tabhead{Experiment} & \tabhead{No.} & \tabhead{Prediction (abridged)} & \tabhead{Fixed in} & \tabhead{Outcome} \\
@@ -63,7 +64,7 @@ DABStep 5b, the second fact & (28), (28Q) & \armMws{} beats \armMw{} on rule-mat
 DABStep 5c, facts alike & (30), (30Q) & \armTws{} and \armMws{} tie on rule-matching tasks & \texttt{a960495} & fail (text ahead) \\
  & (31Q) & the notes lift \mQwen{}'s \armT{} & \texttt{a960495} & holds \\
 \midrule
-LiveSQLBench 4b, gaps & (32), (32g), (32c) & two thirds of data gap-draws recovered, ordered settled, split, convention-only; the no-data control at most one of five & \texttt{a7ee6b4} & hold \\
+LiveSQLBench 4b, gaps & (32), (32g), (32c) & two thirds of data gap-draws recovered, ordered settled, split, convention-only; the no-data control at most one of five & \texttt{a7ee6b4} & hold$^c$ \\
  & (33) & no data draw resolves precedence as the gold does (most specific wins) & \texttt{a7ee6b4} & holds \\
  & (34) & the complete KB beats the gapped KB & \texttt{a7ee6b4} & holds \\
  & (35) & the authored contract beats the gapped KB & \texttt{a7ee6b4} & holds$^b$ \\
@@ -74,17 +75,45 @@ LiveSQLBench 6, scale & (37) & the text arm at the common top is below itself at
  & (38b) & the governed arm drops too & \texttt{fbca5ec} & fails \\
  & (39) & the governed arm is cheaper at the common top & \texttt{fbca5ec} & holds \\
  & (40) & the governed arm holds where the text arm does not fit & \texttt{fbca5ec} & holds \\
+\midrule
+DABStep 5d, governed with notes & (41) & \armCws{} and \armTws{} tie on rule-matching tasks, \mLuna{} & \texttt{9cb3643} & holds \\
+ & (41Q) & the same, on \mQwen{} & \texttt{9cb3643} & fails (text ahead) \\
+ & (42Q) & the notes lift \mQwen{}'s \armC{} & \texttt{9cb3643} & holds \\
+ & (42) & \armCws{} and \armC{} tie, \mLuna{} & \texttt{9cb3643} & fails (notes ahead) \\
+\midrule
+DABStep 5e, facts in the contract & (49), (49Q) & \armCp{} does not lead \armTp{} by 5 points on rule-matching tasks & \texttt{4897bfe} & hold \\
+ & (50Q) & \armCp{} beats \armC{}, \mQwen{} & \texttt{4897bfe} & fails \\
+ & (51) & \armMws{} is not 5 points below \armC{}, \mLuna{} & \texttt{4897bfe} & fails \\
+LiveSQLBench 5e, scale & (52) & the prose KB at 22 databases is at most 5 points below itself at 1x, \mQwen{} & \texttt{4897bfe} & holds \\
+ & (53) & the governed arm uses fewer input tokens there & \texttt{4897bfe} & holds \\
+\midrule
+DataAgentBench 7 & (43) & an author with the data recovers half the data-discoverable hint items & \texttt{93649d8} & fails \\
+ & (43c) & the control without data recovers at most a third as many & \texttt{93649d8} & holds \\
+ & (43w) & the author recovers fewer items of the other classes & \texttt{93649d8} & fails \\
+ & (44), (44Q) & the hints beat the description & \texttt{93649d8} & fail \\
+ & (45)--(48), (45Q)--(48Q) & the contract beats the description; recovers half the hints' gain; ties its paste; adds to the hints & \texttt{93649d8} & not read$^d$ \\
 \bottomrule
 \end{tabular}
-\caption{53 predictions in 15 commits: 29 held, 3 held in part (``mostly
-holds'' is counted here), 20 failed, and one was read as equivalent, which
-its commit registered as a separate outcome. Rows listing several numbers
-count each. Experiment 4b's predictions were first written in its design
-(\texttt{d76d21e}) and re-specified in \texttt{a7ee6b4}, before any
-contract was authored. Grades are as made at the time; two notes from
-review: $^a$the compiled contract's 45.6\% and the manual's 45.3\% come
-from different runs, so ``between'' is not established; $^b$the test is
-over questions, which come from five gaps, and over gaps it is four to
-none with one tie, one-sided $p{=}0.06$.}
+\caption{The prediction index; totals and notes $a$--$d$ follow the table.}
 \label{tab:predictions}
 \end{table*}
+
+The table holds 76 predictions in 18 commits, 53 before experiment~5d, 4
+for it, 6 for 5e and 13 for experiment~7: 36 held (25 directional, 7
+registered ties, which hold by not rejecting, and 4 one-sided bounds,
+which hold by an interval), 3 held in part (``mostly holds'' is counted
+here), 28 failed, 8 were not read$^d$,
+and one was read as equivalent, which its commit registered as a separate
+outcome. Rows listing several numbers count each. LiveSQLBench's (6) was fixed after \mQwen{}'s per-arm totals for two
+repeats were seen, before the statistic it predicts. Experiment 4b's
+predictions were first written in its design (\texttt{d76d21e}) and
+re-specified in \texttt{a7ee6b4}, before any contract was authored. Grades
+are as made at the time; notes $a$--$c$ are from review: $^a$the compiled
+contract's 45.6\% and the manual's 45.3\% come from different runs, so
+``between'' is not established; $^b$the test is over questions, which come
+from five gaps, and over gaps it is four to none with one tie, one-sided
+$p{=}0.06$; $^c$(32) holds with 12 of 15 gap-draws, crediting three
+wildcard draws that never compute specificity; scored partial, recovery is
+9 of 15 and (32) fails. $^d$Fixed before the run: when the manipulation
+check (44) fails, (45)--(48) are reported (\appref{app:dab}) and not read as
+support.

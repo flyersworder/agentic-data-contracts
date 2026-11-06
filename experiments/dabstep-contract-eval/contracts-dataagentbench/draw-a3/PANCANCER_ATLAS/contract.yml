@@ -1,0 +1,114 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+version: '1.0'
+name: pancancer-atlas
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: clinical_database
+    description: 'Clinical information for patients in the PanCancer Atlas (described as stored in Postgres,
+      queried here as a DuckDB schema). One table, clinical_info, with over one hundred attributes per
+      patient: patient identifiers, cancer type, demographics, diagnosis records, treatment outcomes,
+      survival status and other clinical annotations.'
+    tables:
+    - clinical_info
+  - schema: molecular_database
+    description: 'Molecular profiling data of PanCancer Atlas patients: somatic mutation calls (Mutation_Data)
+      and RNA-seq gene expression (RNASeq_Expression).'
+    preferred: true
+    tables:
+    - Mutation_Data
+    - RNASeq_Expression
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: clinical
+    summary: 'Patient clinical records: identity, cancer type, demographics, survival'
+    description: "clinical_info has one row per patient (DATA CHECK: 10,761 rows, 10,761 distinct barcodes).\
+      \ The documentation says the database holds patient identifiers, cancer type acronyms, demographics,\
+      \ diagnosis, treatment outcome and survival status, but several of these are NOT separate columns.\
+      \ They are embedded in the free-text column `Patient_description`, which is written in several sentence\
+      \ templates, e.g. \"Patient TCGA-36-1576 (UUID ...) is a FEMALE diagnosed with Ovarian serous cystadenocarcinoma.\
+      \ Current vital status: Alive.\"\n  * Patient barcode (TCGA-XX-XXXX, 12 characters): extract with\
+      \ metric\n    `clinical_participant_barcode`. The `patient_id` column holds only\n    the last four\
+      \ characters of the barcode (e.g. '1953', 'A852') and\n    must NOT be used to join to molecular\
+      \ data.\n  * Cancer type: the full TCGA study name appears in the text (case\n    varies, e.g. \"\
+      Brain lower grade glioma\", \"Bladder urothelial\n    carcinoma\"); the acronym (BRCA, LUAD, ...)\
+      \ is derived by metric\n    `cancer_type_acronym`. DATA CHECK: 32 cancer types present, every\n\
+      \    row maps to one; no Acute Myeloid Leukemia (LAML) patients exist.\n  * Gender: FEMALE / MALE\
+      \ in upper case (metric `patient_gender`;\n    5,623 FEMALE, 5,138 MALE).\n  * Vital status: Alive\
+      \ / Dead (metric `vital_status`); 5 rows carry\n    'nan' or '[Discrepancy]' instead and yield NULL.\n\
+      Placeholder values: many VARCHAR columns use bracketed placeholders '[Not Applicable]', '[Not Available]',\
+      \ '[Unknown]', '[Not Evaluated]', '[Discrepancy]' as well as NULL/empty string; treat all of them\
+      \ as missing, not as categories. days_to_death and days_to_last_followup are VARCHAR: cast with\
+      \ TRY_CAST(... AS DOUBLE) (days_to_death is '[Not Applicable]' for living patients). days_to_birth\
+      \ is negative (days before diagnosis). age_at_initial_pathologic_diagnosis is in years.\n"
+    tables:
+    - clinical_database.clinical_info
+  - name: mutations
+    summary: Somatic mutation calls (Mutation_Data)
+    description: 'One row per mutation call in a tumor/normal pair. Hugo_Symbol is the gene symbol (e.g.
+      TP53, CDH1); HGVSp_Short is the protein-level annotation (e.g. p.R175H), HGVSc the coding-DNA annotation;
+      Variant_Classification the mutation class (e.g. Missense_Mutation, Nonsense_Mutation). FILTER is
+      the filter status: ''PASS'' marks reliable calls. DATA CHECK: FILTER values are ''PASS'' (1,780,124
+      rows) and comma-separated failure flags such as ''wga'', ''oxog'', ''common_in_exac'', ''native_wga_mix'',
+      ''nonpreferredpair'', ''filterr'' and combinations like ''common_in_exac,wga''. Variant_Classification
+      contains only coding classes: Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Splice_Site,
+      Frame_Shift_Ins, In_Frame_Del, Translation_Start_Site, Nonstop_Mutation, In_Frame_Ins (no Silent).
+      A patient can have several rows for one gene, so count mutated patients with COUNT(DISTINCT ParticipantBarcode).
+      Normal_SampleTypeLetterCode is the normal control type: NB (blood normal), NT (solid tissue normal),
+      NBC (buccal cell normal). ParticipantBarcode is the 12-character TCGA barcode and joins to clinical
+      data via `clinical_participant_barcode`.
+
+      '
+    tables:
+    - molecular_database.Mutation_Data
+  - name: expression
+    summary: RNA-seq normalized gene expression (RNASeq_Expression)
+    description: 'One row per (aliquot, gene). Symbol is the gene symbol, Entrez the Entrez gene ID (stored
+      as BIGINT), normalized_count the normalized RNA expression value. SampleTypeLetterCode / SampleType:
+      TP = Primary solid Tumor, NT = Solid Tissue Normal, TM = Metastatic, TR = Recurrent Solid Tumor,
+      TB = Primary Blood Derived Cancer - Peripheral Blood, TAP = Additional - New Primary, TAM = Additional
+      Metastatic. DATA CHECK: a participant can have several samples (tumor and normal, or multiple tumors),
+      so restrict sample type explicitly (TP for primary tumor) and aggregate per participant when joining
+      to clinical data. 14,142 rows have Symbol = ''?'' (29 Entrez IDs without symbol) — exclude them
+      for symbol-based analyses or use Entrez. normalized_count is NULL in 177,196 rows and has a few
+      small negative values (min about -0.99). The table covers 20,502 symbols but only ~940 genes per
+      sample, so not every gene is present for every sample.
+
+      '
+    tables:
+    - molecular_database.RNASeq_Expression
+  rules:
+  - name: join_on_participant_barcode
+    description: 'Clinical and molecular data are joined only on the 12-character TCGA participant barcode:
+      molecular ParticipantBarcode = regexp_extract(clinical_info.Patient_description, ''TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'').
+      Never join on clinical_info.patient_id, which holds only the last four barcode characters.
+
+      '
+    enforcement: warn
+  - name: reliable_mutations_pass_filter
+    description: 'Mutation analyses that need reliable calls must keep only rows with FILTER = ''PASS''
+      (the documented marker of reliable calls); all other FILTER values are failed or flagged calls.
+
+      '
+    enforcement: warn
+  - name: placeholders_are_missing
+    description: 'Bracketed clinical placeholders (''[Not Applicable]'', ''[Not Available]'', ''[Unknown]'',
+      ''[Not Evaluated]'', ''[Discrepancy]''), ''nan'', empty strings and NULL are missing values and
+      must not be counted as categories.
+
+      '
+    enforcement: warn

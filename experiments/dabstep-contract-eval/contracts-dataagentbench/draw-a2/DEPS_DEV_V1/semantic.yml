@@ -1,0 +1,290 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: DEPS_DEV_V1, author: claudeopus5.5
+metrics:
+- name: package_version_count
+  description: 'Number of distinct package versions, keyed (System, Name, Version). packageinfo has duplicate
+    rows (661,372 rows, 325,940 keys), so always count distinct keys.
+
+    '
+  sql_expression: COUNT(DISTINCT (pkg.System, pkg.Name, pkg.Version))
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one row per packageinfo row (duplicates possible per version)
+  domains:
+  - packages
+- name: package_count
+  description: Number of distinct packages (System, Name).
+  sql_expression: COUNT(DISTINCT (pkg.System, pkg.Name))
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one row per packageinfo row
+  domains:
+  - packages
+- name: is_release
+  description: 'VersionInfo.IsRelease: true if the version is a release. Stored as a JSON boolean inside
+    VersionInfo text.
+
+    '
+  sql_expression: CAST(json_extract(pkg.VersionInfo, '$.IsRelease') AS BOOLEAN)
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: version_ordinal
+  description: 'VersionInfo.Ordinal: integer position of the version among the package''s versions (higher
+    = later). Values 1..1946. The latest version of a package is the one with the highest Ordinal.
+
+    '
+  sql_expression: CAST(json_extract(pkg.VersionInfo, '$.Ordinal') AS INTEGER)
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: upstream_published_at
+  description: 'When the upstream release was published, as a TIMESTAMP. Documented as Unix ms, but the
+    stored DOUBLE values are microseconds since epoch (range 2015-04 to 2023-11), so make_timestamp(microseconds)
+    is used. NULL for ~11.6k rows.
+
+    '
+  sql_expression: make_timestamp(CAST(pkg.UpstreamPublishedAt AS BIGINT))
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: package_licenses
+  description: 'The license list of a package version as VARCHAR[] (Licenses is a JSON array of strings;
+    ''[]'' -> empty list). Use unnest() to count by license.
+
+    '
+  sql_expression: json_extract_string(pkg.Licenses, '$[*]')
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: advisory_count
+  description: 'Number of security advisories attached to a package version (length of the Advisories
+    JSON list; each entry {Source, SourceID}). 0 means none.
+
+    '
+  sql_expression: json_array_length(pkg.Advisories)
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: has_advisory
+  description: True when the package version has at least one security advisory.
+  sql_expression: json_array_length(pkg.Advisories) > 0
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: dependencies_processed
+  description: Whether dependencies have been processed successfully (stored as 0/1 BIGINT).
+  sql_expression: pkg.DependenciesProcessed = 1
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: dependency_error
+  description: Whether a dependency processing error occurred (stored as 0/1 BIGINT).
+  sql_expression: pkg.DependencyError = 1
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: origin_link_url
+  description: URL of the link labelled ORIGIN in Links (registry URL of the version).
+  sql_expression: json_extract_string(pkg.Links, '$[*].URL')[list_position(json_extract_string(pkg.Links,
+    '$[*].Label'), 'ORIGIN')]
+  source_model: package_database.packageinfo
+  from_sql: package_database.packageinfo pkg
+  grain: one packageinfo row
+  domains:
+  - packages
+- name: project_name
+  description: 'Repository path (owner/repo) of a project, extracted from the free text Project_Information
+    as the first owner/repo token. Verified: 769 of 770 rows yield a name (all distinct, 768 found in
+    project_packageversion.ProjectName); one row yields ''''.
+
+    '
+  sql_expression: regexp_extract(pi.Project_Information, '([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]*[A-Za-z0-9_-])',
+    1)
+  source_model: project_database.project_info
+  from_sql: project_database.project_info pi
+  grain: one project
+  domains:
+  - projects
+- name: project_stars
+  description: 'Star count parsed from Project_Information. Handles "N stars"/"N star", "stars count of
+    N", "starred by N", and numbers with commas. Verified to parse all 770 rows.
+
+    '
+  sql_expression: "TRY_CAST(replace(COALESCE(\n  NULLIF(regexp_extract(pi.Project_Information, '([0-9][0-9,]*)\
+    \ stars?\\b', 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'stars? count of ([0-9][0-9,]*)',\
+    \ 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'starred by ([0-9][0-9,]*)', 1), ''),\n\
+    \  NULLIF(regexp_extract(pi.Project_Information, 'stars?[^0-9.]{0,25}?([0-9][0-9,]*)', 1), '')\n),\
+    \ ',', '') AS BIGINT)\n"
+  source_model: project_database.project_info
+  from_sql: project_database.project_info pi
+  grain: one project
+  domains:
+  - projects
+- name: project_forks
+  description: 'Fork count parsed from Project_Information ("N forks", "forks count of N", "forked N times",
+    commas removed). Parses all 770 rows.
+
+    '
+  sql_expression: "TRY_CAST(replace(COALESCE(\n  NULLIF(regexp_extract(pi.Project_Information, '([0-9][0-9,]*)\
+    \ forks?\\b', 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'forks? count of ([0-9][0-9,]*)',\
+    \ 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'forked ([0-9][0-9,]*) times', 1), ''),\n\
+    \  NULLIF(regexp_extract(pi.Project_Information, 'forks?[^0-9.]{0,25}?([0-9][0-9,]*)', 1), '')\n),\
+    \ ',', '') AS BIGINT)\n"
+  source_model: project_database.project_info
+  from_sql: project_database.project_info pi
+  grain: one project
+  domains:
+  - projects
+- name: project_open_issues
+  description: 'Open issue count parsed from Project_Information ("N open issues", "open issues count
+    of N", commas removed). Parses all 770 rows.
+
+    '
+  sql_expression: "TRY_CAST(replace(COALESCE(\n  NULLIF(regexp_extract(pi.Project_Information, '([0-9][0-9,]*)\
+    \ open issues?', 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'open issues? count of\
+    \ ([0-9][0-9,]*)', 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'open issues?[^0-9.]{0,25}?([0-9][0-9,]*)',\
+    \ 1), '')\n), ',', '') AS BIGINT)\n"
+  source_model: project_database.project_info
+  from_sql: project_database.project_info pi
+  grain: one project
+  domains:
+  - projects
+- name: package_project_stars
+  description: 'Stars of the project linked to a package version, across all three tables. Join package
+    versions to projects on (System, Name, Version) and project_name. Rows multiply: packageinfo duplicates
+    keys and project_packageversion has a SOURCE_REPO_TYPE and an ISSUE_TRACKER_TYPE row per version —
+    filter ppv.RelationType = ''SOURCE_REPO_TYPE'' for the source repository and deduplicate (DISTINCT)
+    before summing/counting.
+
+    '
+  sql_expression: "TRY_CAST(replace(COALESCE(\n  NULLIF(regexp_extract(pi.Project_Information, '([0-9][0-9,]*)\
+    \ stars?\\b', 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'stars? count of ([0-9][0-9,]*)',\
+    \ 1), ''),\n  NULLIF(regexp_extract(pi.Project_Information, 'starred by ([0-9][0-9,]*)', 1), ''),\n\
+    \  NULLIF(regexp_extract(pi.Project_Information, 'stars?[^0-9.]{0,25}?([0-9][0-9,]*)', 1), '')\n),\
+    \ ',', '') AS BIGINT)\n"
+  source_model: project_database.project_packageversion
+  from_sql: "project_database.project_packageversion ppv JOIN project_database.project_info pi\n  ON ppv.ProjectName\
+    \ = regexp_extract(pi.Project_Information, '([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]*[A-Za-z0-9_-])', 1)\n\
+    JOIN package_database.packageinfo pkg\n  ON pkg.System = ppv.System AND pkg.Name = ppv.Name AND pkg.Version\
+    \ = ppv.Version\n"
+  grain: one (packageinfo row, project_packageversion row, project) combination
+  domains:
+  - projects
+  - packages
+tables:
+- schema: package_database
+  table: packageinfo
+  columns:
+  - name: System
+    type: VARCHAR
+    description: Package ecosystem (e.g., NPM, Maven). All rows here are NPM.
+  - name: Name
+    type: VARCHAR
+    description: Package name.
+  - name: Version
+    type: VARCHAR
+    description: Version string of the package. (System, Name, Version) is the key but rows are duplicated.
+  - name: Licenses
+    type: VARCHAR
+    description: License(s) associated with the package, stored as a JSON-like array of strings; '[]'
+      = none.
+  - name: Links
+    type: VARCHAR
+    description: JSON list of {Label, URL}; labels ORIGIN, SOURCE_REPO, HOMEPAGE, ISSUE_TRACKER, ATTESTATION.
+  - name: Advisories
+    type: VARCHAR
+    description: JSON list of security advisories {Source, SourceID}; '[]' = none.
+  - name: VersionInfo
+    type: VARCHAR
+    description: 'JSON object with release metadata: IsRelease (bool), Ordinal (int).'
+  - name: Hashes
+    type: VARCHAR
+    description: JSON list of file hashes {Hash, Type}.
+  - name: DependenciesProcessed
+    type: BIGINT
+    description: Whether dependencies have been processed successfully (1/0).
+  - name: DependencyError
+    type: BIGINT
+    description: Whether a dependency processing error occurred (1/0).
+  - name: UpstreamPublishedAt
+    type: DOUBLE
+    description: When the upstream release was published. Documented as Unix ms; stored values are microseconds
+      since epoch. Use metric upstream_published_at.
+  - name: Registries
+    type: VARCHAR
+    description: JSON-like list of registries where the package is published (empty here).
+  - name: SLSAProvenance
+    type: DOUBLE
+    description: SLSA provenance level if available (all NULL).
+  - name: UpstreamIdentifiers
+    type: VARCHAR
+    description: JSON-like list of upstream identifiers (empty here).
+  - name: Purl
+    type: DOUBLE
+    description: Package URL in purl format if available (all NULL).
+- schema: project_database
+  table: project_info
+  columns:
+  - name: Project_Information
+    type: VARCHAR
+    description: Free-text description of the project containing its owner/repo name, open issues, stars
+      and forks; use metrics project_name, project_stars, project_forks, project_open_issues.
+  - name: Licenses
+    type: VARCHAR
+    description: License(s) of the project, JSON-like array of strings.
+  - name: Description
+    type: VARCHAR
+    description: Project description field (may differ from Project_Information).
+  - name: Homepage
+    type: VARCHAR
+    description: Homepage URL of the project, if available (mostly NULL).
+  - name: OSSFuzz
+    type: DOUBLE
+    description: OSSFuzz status indicator, if applicable (all NULL).
+- schema: project_database
+  table: project_packageversion
+  columns:
+  - name: System
+    type: VARCHAR
+    description: Package ecosystem (e.g., NPM).
+  - name: Name
+    type: VARCHAR
+    description: Package name; joins packageinfo.Name.
+  - name: Version
+    type: VARCHAR
+    description: Package version string; joins packageinfo.Version.
+  - name: ProjectType
+    type: VARCHAR
+    description: 'Type of project: GITHUB, GITLAB, BITBUCKET.'
+  - name: ProjectName
+    type: VARCHAR
+    description: Repository path in owner/repo format; joins project_name extracted from project_info.
+  - name: RelationProvenance
+    type: VARCHAR
+    description: 'Provenance of the relationship data: UNVERIFIED_METADATA or SLSA_ATTESTATION.'
+  - name: RelationType
+    type: VARCHAR
+    description: 'Type of relationship: SOURCE_REPO_TYPE (source repository) or ISSUE_TRACKER_TYPE (issue
+      tracker).'
+relationships:
+- from: project_database.project_packageversion.Name
+  to: package_database.packageinfo.Name
+  type: many_to_many
+  description: Join on System, Name and Version together; packageinfo has duplicate rows per key.

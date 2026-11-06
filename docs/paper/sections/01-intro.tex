@@ -46,86 +46,88 @@ elsewhere~\cite{kaggledbqa,sequeda-kg}. Long-context studies deliver the
 same schema and documentation whole or retrieved, and find long context as
 accurate and retrieval cheaper~\cite{chung-long-context,death-schema-linking,rag-or-long-context}.
 These compare amounts or deliveries of the same material. None removes the
-knowledge while holding its delivery fixed, asks whether the documentation
-determines the answer at all, or asks who wrote it.
+knowledge while holding its delivery fixed, or holds the knowledge equal
+while varying its delivery, so none can tell a delivery effect from
+knowledge one layer states and the other omits.
 
 \subsection*{What we did, and what we found}
 
 We separate the parts with a \emph{data contract} as the instrument: a YAML
-artifact that carries a domain's definitions together with the rules an
-agent's tools enforce, and that can be emptied of its knowledge, delivered
-in the prompt or behind lookup tools, and written by different authors
-(Figure~\ref{fig:ladder}). We use two benchmarks because they differ in
-the property that turns out to matter. DABStep's documentation, read
-closely together with its data, settles its answers; LiveSQLBench's, by
-the consensus of two raters, settles fewer than half. Questions we constructed on
-three LiveSQLBench databases add a third test bed whose knowledge is
-complete by design. We ran seven models, three of them repeated three
-times. Most experiments fixed numbered predictions in a commit before they
-ran: 53 in all, of which 20 failed. Four findings.
+artifact that keeps a domain's semantics explicit and apart from the tools
+that serve and enforce them, so that it can be emptied of its knowledge,
+given extra facts in identical words, and delivered in the prompt or behind
+lookup tools (Figure~\ref{fig:ladder}). It is a convenient instrument for
+this, not the only possible one. On DABStep~\cite{dabstep} we apply all
+three manipulations; on questions we constructed over three
+LiveSQLBench~\cite{livesqlbench} databases, the notes and the routes; on
+LiveSQLBench itself, the routes. We ran seven models, three of them
+repeated three times, and fixed 76 predictions in commits before
+their runs, of which 28 failed.
 
-\textbf{Knowledge does the work} (Section~\ref{sec:knowledge}). Emptying
-the contract's descriptions and SQL definitions while keeping its tools,
-instruction and rules drops DABStep hard-task accuracy by 26 to 50 points
-on all six models that ran it, concentrated on the tasks that need the
-fee procedure; the tools and instruction alone are worth
-between $-9$ and $+15$ points, depending on the model. On LiveSQLBench,
-agents with the documentation solve 60\% of the tasks it settles and 14\%
-of those it clearly leaves open.
+\textbf{Knowledge, not scaffolding} (Section~\ref{sec:decomposition}).
+Emptying the contract's descriptions and SQL definitions while keeping its
+tools, instruction and rules costs 26 to 50 DABStep hard-task points on
+six models, nearly all of it in the fee procedure. The empty scaffolding is
+worth $-9$ to $+15$, and at most $+0.2$ on the repeated panels.
 
-\textbf{What looked like delivery was knowledge}
-(Section~\ref{sec:delivery}). On DABStep the contract beats the same
-domain's manual, pasted into the prompt, by 20 to 23 hard-task points. The
-natural reading, and the one an earlier version of this paper gave, is
-delivery: the rule one lookup away rather than buried in a long prompt. Controlled experiments say otherwise. Two
-facts the manual leaves out, stated in words, recover most of the gap,
-including on held-out tasks whose transcripts were never inspected. Once
-the prose and the contract state the same facts, the contract's representation adds
-about 4 to 6 points on the tasks that match payments to fee rules, and looking a
-rule up as the query is written adds a few points on some fee families.
+\textbf{Two omitted data semantics} (Sections~\ref{sec:panel-gaps}
+to~\ref{sec:plain}). The contract leads the manual pasted into the prompt
+by 20 to 43 hard-task points on the three repeated models (14 to 45 on
+the four single runs), which looks like delivery. On GPT-6 luna and
+Qwen~3.8 it is mostly two pieces of data semantics the manual omits. The
+manual says a null fee field means ``all''; the data stores that as an
+empty list. And when several fee rules match one payment their fees add
+up, which the manual never says. Stated in prose, the two recover most of
+the lead on luna and, end-to-end, all of it on Qwen, whose prose with both
+facts outscores the governed contract. The second lifts accuracy by 19 and
+34 points on tasks outside the transcripts we read to find it. How plainly
+they are stated matters too: on Qwen the prose beats the contract's own
+text, which carries both semantics less plainly, by 16.6 points.
 
-\textbf{What a contract is worth depends on what its author could
-determine} (Section~\ref{sec:authoring}). A model that compiles the
-documentation entry by entry, checking each definition against the data,
-yields the documentation plus what those checks reveal: on LiveSQLBench,
-the KB; on DABStep, with a stronger compiler whose data checks surfaced the
-empty-list wildcard and the overlap of fee rules, 90\% of the way from the first compile to the original contract. An author who can
-query the data recovers what the data settles and two of the three gaps it
-only suggests, misses a convention the data cannot reveal, and the contract
-then carries exactly that knowledge. DABStep's summing of overlapping fees
-is such a convention; the contracts got it right because the gold uses
-the default join-and-sum. On LiveSQLBench, where the gold
-settles task by task what the documentation leaves open, no author we tried
-gained detectably.
+\textbf{Delivery at equal knowledge} (Section~\ref{sec:delivery}). With the
+two semantics stated once, in the same words, the contract's text leads
+prose on the rule-matching tasks by 6.5 points on luna and 4.9 on Qwen
+(unregistered; over question shapes significant on luna only). Written
+into the contract and reachable only by lookup, the two semantics are not
+delivered better than by pasting the same contract: $-2.5$ points on luna
+and $-5.9$ on Qwen, though every lost lookup run had fetched them. On
+Qwen's official scoring the lookup leads, largely because its answers more
+often take the requested format. On LiveSQLBench the route makes no
+detectable difference.
 
-\textbf{Delivery buys cost, scale and accountability; runs that state
-the rules do not write} (Section~\ref{sec:buys}). On constructed questions that name the
-metric they need, padding the contract with unrelated databases to four
-times its size costs the prompt no accuracy, in the easier regime of
-long-context studies~\cite{nolima,context-rot}. But on the two GPT models the lookup
-arm is cheaper from twice the size, 1.7 to 2.4 times cheaper at four
-times, and runs where the prompt no longer fits the context window. Its
-lookups name the definition behind each answer, which locates the source of
-a wrong one. And across every DABStep run, none of 29{,}356 runs whose
-prompt stated the forbidden operations, in the contract's tools or its
-text, corrupted its copy of the database, against 50 of 21{,}790 whose
-prompt did not.
+\textbf{Secondary results} (Sections~\ref{sec:authoring}
+and~\ref{sec:buys}). An author with the data open recovered encodings the
+data shows, and its errors travelled through prose and contract alike. By
+gold-aware model raters, LiveSQLBench's documentation leaves a
+result-changing choice open on 132 of 302 tasks. At four times a
+database's size, lookup is 1.7 to 2.4 times cheaper than the pasted YAML
+on the GPT models and leaves a log of what each answer consulted. No run
+whose prompt stated the forbidden operations corrupted its database copy
+(0 of 48{,}604, against 51 of 24{,}196), an association rather than a test
+of enforcement.
 
 \textbf{What a practitioner should take from this.}
 \begin{itemize}
 \itemsep0pt
-\item Write the knowledge down completely, with the data open, and state each convention a reader could misread: wildcards, how overlapping rules combine, units, \texttt{NULL}s.
-\item Do not expect a format, a retrieval loop or a stronger model to
-      supply what the documentation does not determine.
-\item For one database the prompt is the simplest and, with caching, the
-      cheapest delivery; past about twice that, look definitions up and
-      keep the lookup log.
+\item Before crediting a context layer's machinery, check that the
+      comparison holds its semantics equal.
+\item Write down the semantics a reader could misread (wildcard encodings,
+      what happens when several rules match, units, \texttt{NULL}s), plainly,
+      and check them against the data.
+\item Where accuracy is comparable on your models and tasks, choose the
+      delivery for cost, capacity and the consultation log; a prose KB in
+      the prompt held its accuracy at 22 databases' worth, but used about
+      seven times the input of looking the contract up.
 \item State the forbidden operations, and serve the agent through a
       read-only role regardless.
 \end{itemize}
 
-\textbf{Contributions.} (1)~A decomposition of a context layer into
-knowledge and scaffolding, on two benchmarks and seven models; (2)~a
-revised account of delivery; (3)~determinability as the bound on what any
-layer or author can add; (4)~what delivery buys; (5)~the
-harness, contracts, predictions and results.
+\textbf{Contributions.} (1)~The finding: on DABStep an apparent delivery
+advantage of a context layer is mostly two omitted data semantics,
+supported by a six-model knowledge control and, on two models, a held-out
+lift. (2)~A knowledge-equal protocol: the hollow control, facts as
+identical notes, and the same knowledge by two routes, read as conditional
+contrasts rather than an additive decomposition. (3)~Benchmark properties:
+DABStep's manual omits both semantics; by model raters, LiveSQLBench's KB
+leaves 132 of 302 primary tasks open. (4)~The harness, contracts, result
+rows, predictions and transcripts.

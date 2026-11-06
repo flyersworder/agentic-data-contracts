@@ -1,0 +1,117 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+version: '1.0'
+name: music-brainz-20k
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: tracks_database
+    description: 'Detailed information about music tracks: the primary source for each track''s content
+      (title, artist, album, year, length, language). It is described as stored in SQLite, but here it
+      is a schema of the same DuckDB database. Its one table, tracks, holds every track record, including
+      possible duplicates that come from different sources. Each row is one track record with a unique
+      track_id.'
+    preferred: true
+    tables:
+    - tracks
+  - schema: sales_database
+    description: 'Sales information for the tracks in tracks_database: individual sales transactions with
+      units sold and revenue generated. Its one table, sales, has one row per sale record for a specific
+      track_id.'
+    tables:
+    - sales
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: tracks
+    summary: Track records from 5 sources, their source-specific formats and duplicates
+    description: 'tracks_database.tracks contains all the tracks, including potential duplicates generated
+      from different sources. Each row is a single track record with a unique track_id. Field meanings
+      from the documentation: track_id = unique identifier of the track record; source_id = identifier
+      of the source the record comes from; source_track_id = original track identifier from the source,
+      and it is NOT guaranteed to be unique; title; artist = name of the track''s artist or band; album
+      = name of the album the track appears on; year = year of publication (stored as text); length =
+      length of the track, in seconds or as a formatted string (text); language = language of the track
+      (text).
+
+      DATA FINDINGS (checked with run_sql). There are 19,375 rows, every track_id is distinct, and there
+      are 5 sources (source_id 1-5, about 3,800 to 3,900 rows each). Every source uses its own format,
+      and the values are noisy (typos, stray spaces, letter ''o'' typed for digit 0, and values that belong
+      to another column): * source 1: source_track_id ''WoM<n>''; length ''mm:ss''; year 4-digit; language
+      almost always NULL. * source 2: source_track_id ''MBox<n>-HH''; title is ''Artist - Title'' and
+      artist is NULL; length in plain seconds (''219''); year 2-digit (''75''). * source 3: source_track_id
+      ''<n>MB-01''; title is ''Title - Album'' and album is NULL; length in decimal minutes (''4.367''
+      = 4.367 min); year is 2-digit with an apostrophe ("''94"). * source 4: source_track_id ''<n>-A0xx'';
+      title is prefixed with a track number (''001-Deja Vu''); album ends with ''(YYYY)'' or ''(unknown)'';
+      length ''Xm Ysec''; year column mostly NULL, so the year comes from the album suffix. * source 5:
+      source_track_id numeric; length in milliseconds (''195000''); year 4-digit. Placeholder strings
+      that mean "missing" appear in any column: ''unknown'', ''unk.'', ''n.a.'', ''null'', ''[unknown]'',
+      '''' and their typo variants. Language is spelled in many ways (''English'', ''Eng.'', ''ENGLISH'',
+      ''Englsih'', ...). Use the metrics track_length_seconds, track_publication_year, track_language,
+      track_clean_title, track_clean_artist and track_clean_album rather than the raw columns. Do not
+      cast the raw columns directly.
+
+      DUPLICATES. The same real-world song can appear as several track records from different sources,
+      each with its own track_id and its own sales rows. No shared key links duplicates: the numeric parts
+      of source_track_id do not match across sources, and source_track_id is not unique even within a
+      source. Counting rows counts track RECORDS. To count distinct songs, group on the normalised title
+      and artist (and length/year if needed). Say in the answer which reading was used.
+
+      '
+    tables:
+    - tracks_database.tracks
+  - name: sales
+    summary: 'Individual sales transactions: units sold and USD revenue per track, country, store'
+    description: 'sales_database.sales contains individual sales transactions for tracks. Each row is
+      a single sale record for a specific track_id. Fields: sale_id = unique identifier for the sale record;
+      track_id = identifier linking the sale to a track in tracks_database.tracks (join sales.track_id
+      = tracks.track_id); country = country in which the sale occurred; store = store or platform where
+      the sale occurred; units_sold = number of units sold in this transaction; revenue_usd = revenue
+      generated in USD from this sale.
+
+      DATA FINDINGS. There are 58,049 sale rows and every sale_id is distinct. Every one of the 19,375
+      track_ids has at least one sale and every sale matches a track. There are no NULLs in units_sold
+      or revenue_usd. units_sold is >= 1 and revenue_usd ranges from 0.99 to 641.82. country takes exactly
+      these values: ''USA'', ''UK'', ''Canada'', ''France'', ''Germany''. store takes exactly these values:
+      ''Spotify'', ''Apple Music'', ''iTunes'', ''Google Play'', ''Amazon Music''. Revenue is already
+      in USD, so no currency conversion is needed. Revenue is a per-sale total, not a unit price, so sum
+      it; do not multiply it by units_sold. Sales hang off track RECORDS, so a song that has duplicate
+      records has its sales spread over several track_ids. Sum across those records when a question is
+      about a song rather than a record.
+
+      '
+    tables:
+    - sales_database.sales
+    - tracks_database.tracks
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns.
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: use_normalised_track_fields
+    description: 'Year, length, language, title, artist and album have to be read through the declared
+      normalisation metrics (track_publication_year, track_length_seconds, track_language, track_clean_*).
+      The raw text columns are stored in a different format in each source, so comparing or casting them
+      directly gives wrong results.
+
+      '
+    enforcement: warn
+  - name: join_sales_to_tracks_on_track_id
+    description: 'Join sales to tracks only on sales.track_id = tracks.track_id. Never join on source_track_id,
+      which is not unique.
+
+      '
+    enforcement: warn

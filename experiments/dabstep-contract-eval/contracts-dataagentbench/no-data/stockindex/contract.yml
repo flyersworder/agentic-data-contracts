@@ -1,0 +1,80 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+version: '1.0'
+name: stockindex
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: indexinfo_database
+    description: Metadata about stock market indices from major exchanges around the world, including
+      the United States, China, Canada, Germany, Japan, and more. Described as stored in SQLite, but queried
+      here as a schema of the one DuckDB database, so all SQL is DuckDB SQL.
+    tables:
+    - index_info
+  - schema: indextrade_database
+    description: Daily price data for indices tracking stock exchanges across various countries and regions.
+      Described as stored in DuckDB; it is a schema of the one DuckDB database.
+    preferred: true
+    tables:
+    - index_trade
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: exchanges
+    summary: Stock exchanges and their trading currencies (indexinfo_database.index_info)
+    description: 'indexinfo_database.index_info holds metadata about stock market indices from major exchanges
+      around the world (United States, China, Canada, Germany, Japan, and more). Fields: Exchange (str),
+      the full name of the stock exchange; Currency (str), the trading currency of the exchange. The table
+      has no index-symbol column. The documentation states no key linking an exchange to an abbreviated
+      index symbol in indextrade_database.index_trade, so any mapping from Exchange to Index is outside
+      the documentation. If you use one, say that it is your own assumption.
+
+      '
+    tables:
+    - indexinfo_database.index_info
+  - name: index_prices
+    summary: Daily index prices in local currency and in USD (indextrade_database.index_trade)
+    description: 'indextrade_database.index_trade holds daily price data for indices tracking stock exchanges
+      across various countries and regions. One row is one index on one trading date. Fields: Index (str),
+      the abbreviated index symbol; Date (str), the trading date, stored as text (cast it with TRY_CAST("Date"
+      AS DATE) before doing date arithmetic or filtering by year); Open (float), the opening price; High
+      (float), the highest price during the day; Low (float), the lowest price during the day; Close (float),
+      the closing price; "Adj Close" (float), the adjusted closing price; CloseUSD (float), the closing
+      price in USD. Open, High, Low, Close and Adj Close are in the index''s own trading currency. Only
+      CloseUSD is in USD, so compare or aggregate across indices with CloseUSD. The column names Index,
+      Date, Open, Close and "Adj Close" must be double-quoted in SQL ("Index", "Adj Close").
+
+      '
+    tables:
+    - indextrade_database.index_trade
+  rules:
+  - name: compare_across_indices_in_usd
+    description: 'Open, High, Low, Close and Adj Close are in each exchange''s own trading currency. Any
+      comparison or aggregate across different indices must use CloseUSD (closing price in USD), not the
+      local-currency prices.
+
+      '
+    enforcement: warn
+  - name: cast_date_text
+    description: 'index_trade.Date is text. Cast it with TRY_CAST("Date" AS DATE) before ordering by date,
+      filtering on it or extracting a year or month.
+
+      '
+    enforcement: warn
+  - name: use_declared_metrics
+    description: 'Price computations should reuse the metric definitions in the semantic source.
+
+      '
+    enforcement: warn

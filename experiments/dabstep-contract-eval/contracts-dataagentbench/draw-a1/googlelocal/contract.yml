@@ -1,0 +1,93 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: googlelocal, author: claudeopus5.5
+version: '1.0'
+name: googlelocal
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: review_database
+    description: Review information from Google Maps (reviewer name, ratings, text, etc.) collected up
+      to September 2021 in the United States. Described as stored in SQLite, but queried here as a DuckDB
+      schema.
+    tables:
+    - review
+  - schema: business_database
+    description: Business metadata from Google Maps (business name, description, hours, etc.) collected
+      up to September 2021 in the United States. Described as stored in PostgreSQL, but queried here as
+      a DuckDB schema.
+    tables:
+    - business_description
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: reviews
+    summary: 'Google Maps reviews: reviewer, timestamp, 1-5 rating, text, business id'
+    description: 'Each row of review_database.review is one review from Google Maps, collected up to September
+      2021 in the United States: name = the reviewer''s name, time = the review timestamp, rating = the
+      rating the reviewer gave on a 1-5 scale, text = the review text, gmap_id = the Google Maps business
+      identifier, which links to business_database.business_description.gmap_id. DATA FINDINGS: 2000 reviews.
+      Every rating is an integer between 1 and 5 and none is NULL. Every review gmap_id has a business.
+      `time` is VARCHAR and stored in THREE formats mixed together: ''YYYY-MM-DD HH:MM:SS'' (e.g. ''2021-04-12
+      17:07:52''), ''DD Mon YYYY, HH:MM'' (e.g. ''01 Feb 2021, 00:13'') and ''Month DD, YYYY at HH:MM
+      AM/PM'' (e.g. ''September 03, 2020 at 04:15 PM''). Never filter or sort on the raw string; use the
+      metric review_timestamp, which parses all 2000 rows (range 2011-05-04 to 2021-09-08). Reviewer names
+      are not unique people identifiers: the same name appears on several reviews.
+
+      '
+    tables:
+    - review_database.review
+  - name: businesses
+    summary: 'Google Maps business metadata: name, description, hours, MISC attributes, operating status'
+    description: 'Each row of business_database.business_description is one business: name = business
+      name; gmap_id = Google Maps business identifier (links to review_database); description = business
+      description; num_of_reviews = total number of reviews for this business; hours = operating hours
+      information (a list); MISC = additional miscellaneous business information (a dict); state = business
+      operating status (e.g. open, closed, temporarily closed). DATA FINDINGS: 79 businesses, gmap_id
+      and name both unique. `hours` is VARCHAR holding a JSON array of 7 [day, hours] pairs, e.g. [["Thursday","9AM–5PM"],...]
+      (en dash between times; values like ''Closed'' and ''Open 24 hours''); NULL for 13 businesses. `MISC`
+      is VARCHAR holding a JSON object mapping a category (''Service options'', ''Accessibility'', ''Planning'',
+      ''Amenities'', ''Health & safety'', ''Offerings'', ''Payments'', ''Atmosphere'', ''Popular for'',
+      ''Crowd'', ''Highlights'', ''Recycling'', ''Dining options'', ''From the business'') to a list of
+      strings; NULL for 16 businesses. Access with json_extract(MISC, ''$."Service options"'') — keys
+      contain spaces so must be quoted in the path. `state` is a free-text Google Maps status snapshot
+      such as ''Open ⋅ Closes 5PM'', ''Open now'', ''Open 24 hours'', ''Closed ⋅ Opens 10AM'', ''Opens
+      soon ⋅ 10AM'', ''Temporarily closed'', ''Permanently closed''; NULL for 9. ''Closed ⋅ Opens ...''
+      means closed at that hour, not closed as a business — use business_status_category. `description`
+      values start with a leading space; trim before comparing. num_of_reviews equals the count of rows
+      in review for every business except gmap_60 (48 vs 17 reviews present); the stored total is 2031
+      against 2000 review rows. Use num_of_reviews when asked for the business''s stated total number
+      of reviews, and review_count when the question is about the reviews in the review table (ratings,
+      times, texts).
+
+      '
+    tables:
+    - business_database.business_description
+    - review_database.review
+  rules:
+  - name: join_on_gmap_id
+    description: 'Link reviews to businesses only on gmap_id (review_database.review.gmap_id = business_database.business_description.gmap_id),
+      never on name: review.name is the reviewer, business_description.name is the business.
+
+      '
+    enforcement: warn
+  - name: parse_review_time
+    description: 'review.time is stored in three string formats; any date filter, ordering or grouping
+      by time must use the review_timestamp metric expression, not the raw string.
+
+      '
+    enforcement: warn
+  - name: rating_scale
+    description: Ratings are on a 1-5 integer scale; averages are over review rows.
+    enforcement: warn

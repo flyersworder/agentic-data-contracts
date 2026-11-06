@@ -1,0 +1,50 @@
+{
+ "dataset": "bookreview",
+ "items": [
+  {
+   "id": "bookreview-1",
+   "cls": "described",
+   "text": "In books_info, \"description\", \"categories\" and \"features\" look like lists or dictionaries but are stored as strings.",
+   "kind": "statement",
+   "equivalent": "The contract states that books_info.description, books_info.categories and books_info.features are text (string) columns whose values are list- or dict-shaped (JSON-like) literals, so they must be parsed or string-matched rather than read as native lists/structs. All three columns must be covered; naming only some is partial.",
+   "computation": false,
+   "reference_sql": "SELECT COUNT(*) AS n_rows, COUNT(*) FILTER (WHERE json_valid(description) AND left(trim(description),1)='[') AS description_json_list, COUNT(*) FILTER (WHERE json_valid(categories) AND left(trim(categories),1)='[') AS categories_json_list, COUNT(*) FILTER (WHERE json_valid(features) AND left(trim(features),1)='[') AS features_json_list, COUNT(*) FILTER (WHERE trim(description)='[]') AS description_empty, COUNT(*) FILTER (WHERE trim(categories)='[]') AS categories_empty, COUNT(*) FILTER (WHERE trim(features)='[]') AS features_empty FROM books_database.books_info",
+   "reference_value": "Check only, not a computation: of 200 rows, description/categories/features parse as JSON arrays in 200/200/200 rows; empty lists '[]' in 97/14/18 rows. Stored type VARCHAR in the built file. No dict-shaped values seen (all start with '[').",
+   "notes": "The built file stores these as VARCHAR holding JSON arrays (double-quoted), so they are both JSON- and string-searchable. A contract saying 'JSON array stored as text' is equivalent."
+  },
+  {
+   "id": "bookreview-2",
+   "cls": "described",
+   "text": "\"book_id\" in books_info and \"purchase_id\" in review refer to the same books, although the field names differ.",
+   "kind": "statement",
+   "equivalent": "The contract states that review.purchase_id identifies the book reviewed and corresponds to books_info.book_id (the review-to-book link), despite the different column names.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "How the two values are matched is item bookreview-3; this item is scored on the stated correspondence only. A contract that states the link but implements it as an exact equality join still states this item (the join itself is scored under bookreview-3)."
+  },
+  {
+   "id": "bookreview-3",
+   "cls": "data-discoverable",
+   "text": "Joining books_info.book_id to review.purchase_id needs a fuzzy join: the values do not match exactly.",
+   "kind": "records",
+   "record_query": "SELECT purchase_id, COUNT(*) AS n_reviews FROM review_database.review GROUP BY purchase_id ORDER BY purchase_id",
+   "count": 200,
+   "reading": "Each distinct review.purchase_id ('purchaseid_<n>') links to exactly one book: the books_info row whose book_id is 'bookid_<n>' with the same integer n. The values never match as stored (exact equality join returns 0 rows), so the join must strip the differing prefixes and match on the numeric suffix as a whole number. Every one of the 200 purchase_ids maps to exactly one of the 200 book_ids (a bijection), covering all 1833 review rows.",
+   "reference_sql": "SELECT r.purchase_id, b.book_id, COUNT(*) AS n_reviews FROM review_database.review r JOIN books_database.books_info b ON CAST(regexp_extract(r.purchase_id, '^purchaseid_([0-9]+)$', 1) AS INTEGER) = CAST(regexp_extract(b.book_id, '^bookid_([0-9]+)$', 1) AS INTEGER) GROUP BY r.purchase_id, b.book_id ORDER BY r.purchase_id",
+   "held_file": "~/data/dce-held-results/exp7/recovery/bookreview/bookreview-3.csv",
+   "notes": "Record = a distinct purchase_id (review has no row key; per-row agreement follows since every row of a purchase_id joins the same book). Scoring: for each purchase_id, the set of book_ids the draw's join yields must equal the singleton reference; 0 matches, a different book, or more than one book disagrees. Equivalent implementations agree, e.g. replace(purchase_id,'purchaseid_','bookid_') = book_id or suffix equality. Implementations that do not: exact equality (0/200), suffix LIKE '%'||n without anchoring (bookid_1 would also match 11, 21, 101...), string-similarity matching. Check of the mapping: reviews whose text or title contains the book title's leading word (6+ letters) are 27% under this mapping and 0% under a shift-by-one mapping. Class note: the item calls it a 'fuzzy join'; on the built file the relation is exact after removing the prefixes, not approximate. The reference reads 'fuzzy' as 'not equal as stored; needs a transformation', which the data supports. A draw that states only 'fuzzy match' without a rule is text-only at best."
+  },
+  {
+   "id": "bookreview-4",
+   "cls": "guidance",
+   "text": "Some queries need information from the \"categories\" or \"details\" columns of books_info.",
+   "kind": "statement",
+   "equivalent": "The contract points to books_info.categories and books_info.details as where book attributes live: categories for genre/subject (a JSON-like list of category path strings, e.g. 'Books' > 'Literature & Fiction') and details for publication facts (publisher, edition, publication date, language, format, page count, ISBN, weight, dimensions). Both columns must be named with what they hold; one of them is partial.",
+   "computation": false,
+   "reference_sql": "SELECT COUNT(*) AS n_rows, COUNT(*) FILTER (WHERE json_valid(categories) AND json_array_length(categories::JSON) > 0) AS categories_nonempty, COUNT(*) FILTER (WHERE json_valid(details)) AS details_json, COUNT(*) FILTER (WHERE coalesce(trim(details),'') = '') AS details_empty FROM books_database.books_info",
+   "reference_value": "Check only: of 200 rows, categories is a non-empty JSON list in 186; details parses as JSON in 0 rows (it is free English prose, e.g. 'Published by ... on <date> ... in hardcover format, comprising 196 pages ...'), empty in 4.",
+   "notes": "The item names no computation, so none is checked. details is unstructured prose, not a list/dict: a contract describing details as structured key/value data would be an addition to check (no), not this item's reading."
+  }
+ ]
+}

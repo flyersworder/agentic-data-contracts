@@ -1,0 +1,175 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: DEPS_DEV_V1, author: claudeopus5.5
+metrics:
+- name: upstream_published_at
+  description: 'Timestamp when the upstream release was published. UpstreamPublishedAt is a Unix timestamp
+    in milliseconds, so it is divided by 1000 before conversion.
+
+    '
+  sql_expression: to_timestamp(UpstreamPublishedAt / 1000)
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: version_is_release
+  description: 'The IsRelease flag from the VersionInfo JSON-like object (release metadata): true when
+    the version is a release.
+
+    '
+  sql_expression: CAST(json_extract_string(VersionInfo, '$.IsRelease') AS BOOLEAN)
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: version_ordinal
+  description: 'The Ordinal from the VersionInfo JSON-like object (release metadata): the version''s position
+    in the package''s version ordering.
+
+    '
+  sql_expression: CAST(json_extract_string(VersionInfo, '$.Ordinal') AS BIGINT)
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: dependencies_processed
+  description: True when dependencies have been processed successfully (DependenciesProcessed stored as
+    0/1).
+  sql_expression: DependenciesProcessed = 1
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: dependency_error
+  description: True when a dependency processing error occurred (DependencyError stored as 0/1).
+  sql_expression: DependencyError = 1
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: advisory_count
+  description: Number of security advisories related to a package version (length of the Advisories JSON-like
+    list).
+  sql_expression: json_array_length(Advisories)
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: license_count
+  description: Number of licenses associated with a package version (length of the Licenses JSON-like
+    array).
+  sql_expression: json_array_length(Licenses)
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: package_version_count
+  description: Number of distinct package versions, identified by (System, Name, Version).
+  sql_expression: COUNT(DISTINCT (System, Name, Version))
+  source_model: package_database.packageinfo
+  domains:
+  - packages
+- name: linked_project_count
+  description: 'Number of distinct projects (ProjectName, owner/repo) linked to package versions, joining
+    packageinfo to project_packageversion on System, Name and Version.
+
+    '
+  sql_expression: COUNT(DISTINCT pp.ProjectName)
+  source_model: package_database.packageinfo
+  from_sql: "package_database.packageinfo p JOIN project_database.project_packageversion pp\n  ON p.System\
+    \ = pp.System AND p.Name = pp.Name AND p.Version = pp.Version\n"
+  grain: one row per (package version, linked project relation)
+  domains:
+  - packages
+  - projects
+tables:
+- schema: package_database
+  table: packageinfo
+  columns:
+  - name: System
+    type: VARCHAR
+    description: Package ecosystem (e.g., NPM, Maven).
+  - name: Name
+    type: VARCHAR
+    description: Package name.
+  - name: Version
+    type: VARCHAR
+    description: Version string of the package.
+  - name: Licenses
+    type: VARCHAR
+    description: License(s) associated with the package, stored as a JSON-like array.
+  - name: Links
+    type: VARCHAR
+    description: JSON-like list of relevant links (e.g., origin, documentation, source code).
+  - name: Advisories
+    type: VARCHAR
+    description: JSON-like list of security advisories related to the package.
+  - name: VersionInfo
+    type: VARCHAR
+    description: JSON-like object with release metadata (e.g., IsRelease, Ordinal).
+  - name: Hashes
+    type: VARCHAR
+    description: JSON-like list of file hashes.
+  - name: DependenciesProcessed
+    type: BIGINT
+    description: 'Boolean (0/1): whether dependencies have been processed successfully.'
+  - name: DependencyError
+    type: BIGINT
+    description: 'Boolean (0/1): whether a dependency processing error occurred.'
+  - name: UpstreamPublishedAt
+    type: DOUBLE
+    description: Unix timestamp in milliseconds for when the upstream release was published; use to_timestamp(UpstreamPublishedAt
+      / 1000).
+  - name: Registries
+    type: VARCHAR
+    description: JSON-like list of registries where the package is published.
+  - name: SLSAProvenance
+    type: DOUBLE
+    description: SLSA provenance level if available.
+  - name: UpstreamIdentifiers
+    type: VARCHAR
+    description: JSON-like list of upstream identifiers.
+  - name: Purl
+    type: DOUBLE
+    description: Package URL in purl format (if available).
+- schema: project_database
+  table: project_packageversion
+  columns:
+  - name: System
+    type: VARCHAR
+    description: Package ecosystem (e.g., NPM).
+  - name: Name
+    type: VARCHAR
+    description: Package name.
+  - name: Version
+    type: VARCHAR
+    description: Package version string.
+  - name: ProjectType
+    type: VARCHAR
+    description: Type of project (e.g., GITHUB).
+  - name: ProjectName
+    type: VARCHAR
+    description: Repository path in owner/repo format.
+  - name: RelationProvenance
+    type: VARCHAR
+    description: Provenance of the relationship data.
+  - name: RelationType
+    type: VARCHAR
+    description: Type of relationship (e.g., source repository type).
+- schema: project_database
+  table: project_info
+  columns:
+  - name: Project_Information
+    type: VARCHAR
+    description: Textual description of the project (may include name, owner, and general purpose).
+  - name: Licenses
+    type: VARCHAR
+    description: License(s) associated with the project, stored as a JSON-like array.
+  - name: Description
+    type: VARCHAR
+    description: Project description field (may differ from Project_Information).
+  - name: Homepage
+    type: VARCHAR
+    description: Homepage URL of the project, if available.
+  - name: OSSFuzz
+    type: DOUBLE
+    description: OSSFuzz status indicator (if applicable).
+relationships:
+- from: project_database.project_packageversion.Name
+  to: package_database.packageinfo.Name
+  type: many_to_one
+  description: 'Join on System, Name and Version together (composite key), not on Name alone.
+
+    '

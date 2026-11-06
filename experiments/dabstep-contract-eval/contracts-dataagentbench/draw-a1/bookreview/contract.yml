@@ -1,0 +1,88 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+version: '1.0'
+name: bookreview
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: books_database
+    description: Amazon book information (descriptions, price, details, title, etc.) up to 2023. Documented
+      as stored in PostgreSQL; here a DuckDB schema. One table, books_info, 200 rows, one row per book
+      (book_id unique, format 'bookid_<n>').
+    tables:
+    - books_info
+  - schema: review_database
+    description: Amazon book review information (ratings, text, helpfulness votes, etc.) up to 2023. Documented
+      as stored in SQLite; here a DuckDB schema. One table, review, 1833 rows, one row per review.
+    tables:
+    - review
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: books
+    summary: 'Amazon book catalogue: title, author, price, categories, details'
+    description: 'books_database.books_info holds one row per book with title, subtitle, author(s), rating_number
+      (total number of ratings received), features, description, price, store, categories, details and
+      book_id (unique book identifier). features, description and categories are stored as string representations
+      of lists (valid JSON text in every row); author is a JSON object text {"avatar", "name", "about"}
+      or NULL (51 of 200 rows are NULL) -- use json_extract_string(author, ''$.name'') for the author
+      name, or the `store` column, which holds the author/contributor credit line (e.g. "Marcus Luttrell
+      (Author), James D. Hornfischer"). categories is a JSON array whose first element is always "Books";
+      the second element (''$[1]'') is the top-level genre (14 rows have ''[]''). details is free English
+      prose (publisher, publication date, language, format, pages, ISBN). price: 10 rows NULL and 10 rows
+      0.0; max 1599.97. Note: in DuckDB `->>` binds looser than comparison/AND, so parenthesise (author->>''$.name'')
+      or use json_extract_string.
+
+      '
+    tables:
+    - books_database.books_info
+  - name: reviews
+    summary: 'Amazon book reviews: rating, text, helpful votes, verified purchase'
+    description: 'review_database.review holds one row per review. rating is the rating given by the reviewer
+      on a 1-5 scale (documented as float 1.0-5.0; stored as BIGINT with values 1,2,3,4,5, so cast to
+      DOUBLE before dividing). review_time is the timestamp the review was posted, VARCHAR ''YYYY-MM-DD
+      HH:MM:SS'' (all rows parse), range 1997-08-15 to 2023-06-14; use CAST(review_time AS TIMESTAMP).
+      helpful_vote is the number of helpful votes received. verified_purchase is whether the purchase
+      was verified, documented bool, stored as BIGINT 1 (verified) / 0 (not verified). No NULLs in rating
+      or helpful_vote.
+
+      '
+    tables:
+    - review_database.review
+  - name: book_reviews
+    summary: Linking reviews to books across the two databases
+    description: 'review.purchase_id is the identifier linking to book_id in books_info. The two use different
+      prefixes: purchase_id = ''purchaseid_<n>'' and book_id = ''bookid_<n>'' with the same <n>. Join
+      with replace(r.purchase_id, ''purchaseid_'', ''bookid_'') = b.book_id; a plain equality matches
+      nothing. With this join all 1833 reviews match a book and all 200 books have reviews. Note rating_number
+      (books_info) is Amazon''s total ratings count, not the number of review rows in this database.
+
+      '
+    tables:
+    - books_database.books_info
+    - review_database.review
+  rules:
+  - name: join_via_id_suffix
+    description: 'Reviews must be joined to books with replace(r.purchase_id, ''purchaseid_'', ''bookid_'')
+      = b.book_id, never by r.purchase_id = b.book_id and never by title.
+
+      '
+    enforcement: warn
+  - name: verified_purchase_is_integer
+    description: 'verified_purchase is 0/1 BIGINT: verified means verified_purchase = 1.'
+    enforcement: warn
+  - name: rating_scale
+    description: rating is on a 1-5 scale; average with AVG(CAST(rating AS DOUBLE)).
+    enforcement: warn

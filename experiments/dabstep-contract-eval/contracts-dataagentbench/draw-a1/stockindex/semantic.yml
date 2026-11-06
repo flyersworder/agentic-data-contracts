@@ -1,0 +1,148 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+metrics:
+- name: trade_date
+  description: 'Trading date parsed from the mixed-format VARCHAR Date column (formats ''%Y-%m-%d %H:%M:%S'',
+    ''%d %b %Y, %H:%M'', ''%B %d, %Y at %I:%M %p''; verified to parse all 104,224 rows). Returns a DATE.
+
+    '
+  sql_expression: CAST(try_strptime(t.Date, ['%Y-%m-%d %H:%M:%S', '%d %b %Y, %H:%M', '%B %d, %Y at %I:%M
+    %p']) AS DATE)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: intraday_range
+  description: Daily price range High - Low, in local currency.
+  sql_expression: t.High - t.Low
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: intraday_change_pct
+  description: 'Percentage change from Open to Close within the day: (Close - Open) / Open * 100. No zero
+    Opens exist.'
+  sql_expression: (t.Close - t.Open) / NULLIF(t.Open, 0) * 100
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: daily_return
+  description: 'Close-to-close return versus the previous trading day of the same index, ordered by the
+    parsed trade_date (not the raw string). Fraction, not percent. Window expression; NULL on each index''s
+    first day.
+
+    '
+  sql_expression: t.Close / LAG(t.Close) OVER (PARTITION BY t.Index ORDER BY CAST(try_strptime(t.Date,
+    ['%Y-%m-%d %H:%M:%S', '%d %b %Y, %H:%M', '%B %d, %Y at %I:%M %p']) AS DATE)) - 1
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: average_close_usd
+  description: Average closing price in USD (CloseUSD) over the rows in scope; the comparable cross-index
+    level.
+  sql_expression: AVG(t.CloseUSD)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: usd_conversion_factor
+  description: Conversion factor from local-currency Close to CloseUSD (CloseUSD / Close); constant per
+    index in this data.
+  sql_expression: t.CloseUSD / NULLIF(t.Close, 0)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: trading_day_count
+  description: Number of trading-day rows; (Index, Date) is unique so COUNT(*) per index counts trading
+    days.
+  sql_expression: COUNT(*)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: index_exchange
+  description: 'INTERPRETATION (not stated in the documentation; standard symbol knowledge): the exchange
+    each index symbol tracks, spelled exactly as in index_info.Exchange so it can be joined to get Currency.
+    Korea Exchange has no index in the price data.
+
+    '
+  sql_expression: "CASE t.Index\n  WHEN 'NYA' THEN 'New York Stock Exchange'\n  WHEN 'IXIC' THEN 'NASDAQ'\n\
+    \  WHEN 'HSI' THEN 'Hong Kong Stock Exchange'\n  WHEN '000001.SS' THEN 'Shanghai Stock Exchange'\n\
+    \  WHEN 'N225' THEN 'Tokyo Stock Exchange'\n  WHEN 'N100' THEN 'Euronext'\n  WHEN '399001.SZ' THEN\
+    \ 'Shenzhen Stock Exchange'\n  WHEN 'GSPTSE' THEN 'Toronto Stock Exchange'\n  WHEN 'NSEI' THEN 'National\
+    \ Stock Exchange of India'\n  WHEN 'GDAXI' THEN 'Frankfurt Stock Exchange'\n  WHEN 'SSMI' THEN 'SIX\
+    \ Swiss Exchange'\n  WHEN 'TWII' THEN 'Taiwan Stock Exchange'\n  WHEN 'J203.JO' THEN 'Johannesburg\
+    \ Stock Exchange'\nEND\n"
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - exchanges
+- name: index_currency
+  description: 'Trading currency of the index''s exchange, via the index_exchange mapping joined to index_info.
+    One row per price row.
+
+    '
+  sql_expression: i.Currency
+  source_model: indextrade_database.index_trade
+  from_sql: "indextrade_database.index_trade t LEFT JOIN indexinfo_database.index_info i\n  ON i.Exchange\
+    \ = CASE t.Index\n    WHEN 'NYA' THEN 'New York Stock Exchange'\n    WHEN 'IXIC' THEN 'NASDAQ'\n \
+    \   WHEN 'HSI' THEN 'Hong Kong Stock Exchange'\n    WHEN '000001.SS' THEN 'Shanghai Stock Exchange'\n\
+    \    WHEN 'N225' THEN 'Tokyo Stock Exchange'\n    WHEN 'N100' THEN 'Euronext'\n    WHEN '399001.SZ'\
+    \ THEN 'Shenzhen Stock Exchange'\n    WHEN 'GSPTSE' THEN 'Toronto Stock Exchange'\n    WHEN 'NSEI'\
+    \ THEN 'National Stock Exchange of India'\n    WHEN 'GDAXI' THEN 'Frankfurt Stock Exchange'\n    WHEN\
+    \ 'SSMI' THEN 'SIX Swiss Exchange'\n    WHEN 'TWII' THEN 'Taiwan Stock Exchange'\n    WHEN 'J203.JO'\
+    \ THEN 'Johannesburg Stock Exchange'\n  END\n"
+  grain: one index on one trading day
+  domains:
+  - exchanges
+tables:
+- schema: indexinfo_database
+  table: index_info
+  columns:
+  - name: Exchange
+    type: VARCHAR
+    description: Full name of the stock exchange (14 rows, one per exchange).
+  - name: Currency
+    type: VARCHAR
+    description: Trading currency of the exchange (ISO code, e.g. USD, HKD, CNY, JPY, EUR, CAD, INR, KRW,
+      CHF, TWD, ZAR).
+- schema: indextrade_database
+  table: index_trade
+  columns:
+  - name: Index
+    type: VARCHAR
+    description: Abbreviated index symbol (13 values, e.g. NYA, IXIC, HSI, N225, 000001.SS).
+  - name: Date
+    type: VARCHAR
+    description: Trading date, stored as text in three mixed formats; parse with metric trade_date before
+      any date logic.
+  - name: Open
+    type: DOUBLE
+    description: Opening price, local currency.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day, local currency.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day, local currency.
+  - name: Close
+    type: DOUBLE
+    description: Closing price, local currency.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price, local currency. Quote as "Adj Close". Differs from Close only
+      for GSPTSE, TWII, 399001.SZ.
+  - name: CloseUSD
+    type: DOUBLE
+    description: Closing price in USD (Close times a constant per-index factor).

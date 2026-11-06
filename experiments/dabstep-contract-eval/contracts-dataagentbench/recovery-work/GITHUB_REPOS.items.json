@@ -1,0 +1,27 @@
+[
+ {
+  "id": "GITHUB_REPOS-1",
+  "cls": "guidance",
+  "text": "Tables are joined on identifiers such as \"id\" or \"repo_name\"."
+ },
+ {
+  "id": "GITHUB_REPOS-2",
+  "cls": "described",
+  "text": "The languages table's language_description field may list several programming languages for one repository."
+ },
+ {
+  "id": "GITHUB_REPOS-3",
+  "cls": "definition",
+  "text": "A repository's primary language is the one with the most bytes."
+ },
+ {
+  "id": "GITHUB_REPOS-4",
+  "cls": "described",
+  "text": "The contents table's repo_data_description field is natural-language metadata derived from file attributes (size, binary, copies, mode)."
+ },
+ {
+  "id": "GITHUB_REPOS-5",
+  "cls": "guidance",
+  "text": "Some queries rely on the attributes in repo_data_description for filtering or interpretation."
+ }
+]

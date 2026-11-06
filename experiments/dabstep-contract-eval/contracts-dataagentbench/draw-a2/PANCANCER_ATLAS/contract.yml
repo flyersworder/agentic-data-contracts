@@ -1,0 +1,131 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: PANCANCER_ATLAS, author: claudeopus5.5
+version: '1.0'
+name: pancancer-atlas
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: clinical_database
+    description: 'Clinical information for patients in the PanCancer Atlas (described as stored in Postgres,
+      but queried here as a DuckDB schema): patient identifiers, cancer type, demographics, diagnosis
+      records, treatment outcomes, survival status and other clinical annotations. One table, clinical_info,
+      one row per patient (10,761 rows).'
+    tables:
+    - clinical_info
+  - schema: molecular_database
+    description: 'Molecular profiling data of PanCancer Atlas patients: somatic mutation calls (Mutation_Data)
+      and normalized RNA-seq gene expression (RNASeq_Expression).'
+    tables:
+    - Mutation_Data
+    - RNASeq_Expression
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: clinical
+    summary: 'Patient clinical records: identity, cancer type, demographics, staging, survival'
+    description: 'clinical_info has one row per patient (10,761). The documentation says it holds patient
+      identifiers, cancer type acronyms, demographics, diagnosis records, treatment outcomes and survival
+      status, but there is NO cancer-type, gender, vital-status or barcode column. Those four facts live
+      only inside the free-text column Patient_description (written in several sentence templates, e.g.
+      "Patient TCGA-31-1953 (UUID ...) is recorded as a FEMALE ... vital status: Alive."). Use the metrics
+      participant_barcode, patient_gender, vital_status and cancer_type_acronym to extract them; never
+      match ''MALE'' with LIKE (it also matches ''FEMALE'') and never match ''%Sarcoma%'' without first
+      excluding ''Uterine Carcinosarcoma''. `patient_id` is ONLY the last 4 characters of the barcode
+      (e.g. ''1953'', ''A7WM''); it is not the TCGA barcode and does not join to the molecular tables.
+      Verified in the data: every description contains a barcode of the form TCGA-XX-XXXX (10,761 distinct,
+      one per row); gender is MALE or FEMALE on every row; vital status is Alive or Dead except 5 rows
+      (''nan'' x4, ''[Discrepancy]'' x1) which yield NULL. 32 TCGA cancer types are present (no LAML /
+      Acute Myeloid Leukemia patients). PLACEHOLDERS: many VARCHAR columns use bracketed codes instead
+      of NULL: ''[Not Applicable]'', ''[Not Available]'', ''[Not Evaluated]'', ''[Unknown]'', ''[Discrepancy]'',
+      plus real NULLs (no empty strings were found). Treat all bracketed values as missing when counting
+      or averaging known values. Numeric-looking VARCHAR columns (days_to_death, days_to_last_followup,
+      days_to_new_tumor_event_after_initial_treatment, lymph_node_examined_count, number_of_lymphnodes_positive,
+      karnofsky_performance_score, ...) must be converted with TRY_CAST(... AS DOUBLE) so placeholders
+      become NULL. days_to_death: 7,332 ''[Not Applicable]'' (alive patients), 12 NULL, 1 ''[Discrepancy]''.
+      days_to_last_followup: 1,839 NULL, 7 ''[Discrepancy]'', 14 negative values. days_to_birth is negative
+      (days before diagnosis). age_at_initial_pathologic_diagnosis is in years (10 to 90, 49 NULL).
+
+      '
+    tables:
+    - clinical_database.clinical_info
+  - name: mutations
+    summary: Somatic mutation calls per tumor/normal pair
+    description: 'Mutation_Data: one row per mutation call. ParticipantBarcode is the patient identifier
+      (TCGA-XX-XXXX); Tumor_SampleBarcode / Tumor_AliquotBarcode identify the tumor sample and aliquot;
+      Normal_SampleBarcode / Normal_AliquotBarcode the normal control sample and aliquot; Normal_SampleTypeLetterCode
+      the sample type abbreviation of the normal (values NB = blood derived normal, NT = solid tissue
+      normal, NBC = buccal cell normal). Hugo_Symbol is the gene symbol (e.g. TP53, CDH1); HGVSp_Short
+      the protein-level annotation (e.g. p.S351P); HGVSc the coding DNA annotation; Variant_Classification
+      the classification (values present: Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Splice_Site,
+      Frame_Shift_Ins, In_Frame_Del, Translation_Start_Site, Nonstop_Mutation, In_Frame_Ins); CENTERS
+      the contributing callers/centers (''|''-separated, e.g. ''MUTECT|MUSE''); FILTER the filter status,
+      where ''PASS'' marks reliable calls. Other FILTER values are flags (wga, oxog, common_in_exac, native_wga_mix,
+      nonpreferredpair, filterr, ndp, ...) and may be comma-combined (e.g. ''common_in_exac,wga''); only
+      the exact value ''PASS'' is a reliable call. Count mutated patients with COUNT(DISTINCT ParticipantBarcode),
+      since a patient can have several calls in one gene.
+
+      '
+    tables:
+    - molecular_database.Mutation_Data
+  - name: expression
+    summary: Normalized RNA-seq gene expression per sample
+    description: 'RNASeq_Expression: one row per aliquot x gene. ParticipantBarcode is the patient, SampleBarcode
+      the sample, AliquotBarcode the aliquot, SampleTypeLetterCode / SampleType the sample type: TP =
+      Primary solid Tumor, TM = Metastatic, TB = Primary Blood Derived Cancer - Peripheral Blood, TR =
+      Recurrent Solid Tumor, TAP = Additional - New Primary, TAM = Additional Metastatic, NT = Solid Tissue
+      Normal. Symbol is the gene symbol, Entrez the Entrez gene ID (stored as BIGINT, documented as str),
+      normalized_count the normalized RNA expression value. Data findings: 177,196 normalized_count values
+      are NULL and 53,907 are slightly negative (min about -0.99); max about 9.2 million. Symbol ''?''
+      appears for 29 different Entrez IDs (unannotated genes) and SLC35E2 has two Entrez IDs, so identify
+      genes by Symbol (excluding ''?'') or Entrez explicitly. A participant can have several samples/aliquots
+      (e.g. tumor and normal), so filter on SampleTypeLetterCode when the question is about tumor (or
+      normal) tissue.
+
+      '
+    tables:
+    - molecular_database.RNASeq_Expression
+  - name: cross_database
+    summary: Joining clinical and molecular data
+    description: 'The two databases are schemas of one DuckDB database; join across them directly. The
+      join key is the TCGA participant barcode: regexp_extract(c.Patient_description, ''TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'')
+      = m.ParticipantBarcode (or r.ParticipantBarcode). Do not join on patient_id. Coverage verified:
+      9,854 of 10,063 mutation participants and 9,711 of 9,921 expression participants have a clinical
+      row.
+
+      '
+    tables:
+    - clinical_database.clinical_info
+    - molecular_database.Mutation_Data
+    - molecular_database.RNASeq_Expression
+  rules:
+  - name: join_on_extracted_barcode
+    description: 'Clinical-to-molecular joins must use the barcode extracted from Patient_description
+      (metric participant_barcode), never patient_id.
+
+      '
+    enforcement: warn
+  - name: reliable_mutations_are_pass
+    description: '"Reliable" mutation calls are those with FILTER = ''PASS'' exactly; apply this filter
+      when a question asks for reliable/filtered/passing mutations.
+
+      '
+    enforcement: warn
+  - name: placeholders_are_missing
+    description: 'Bracketed clinical values (''[Not Applicable]'', ''[Not Available]'', ''[Unknown]'',
+      ''[Not Evaluated]'', ''[Discrepancy]'') are missing data, not categories; numeric VARCHAR fields
+      must be TRY_CAST.
+
+      '
+    enforcement: warn

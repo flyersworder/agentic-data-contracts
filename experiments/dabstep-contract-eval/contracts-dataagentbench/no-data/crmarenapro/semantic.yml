@@ -1,0 +1,704 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: crmarenapro, author: claudeopus5.5
+metrics: []
+tables:
+- schema: core_crm
+  table: User
+  description: Sales team information.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: User identifier; target of OwnerId / ownerid / UserId fields.
+  - name: FirstName
+    type: VARCHAR
+    description: First name.
+  - name: LastName
+    type: VARCHAR
+    description: Last name.
+  - name: Email
+    type: VARCHAR
+    description: Email address.
+  - name: Phone
+    type: VARCHAR
+    description: Phone number.
+  - name: Username
+    type: VARCHAR
+    description: Username.
+  - name: Alias
+    type: VARCHAR
+    description: Alias.
+  - name: LanguageLocaleKey
+    type: VARCHAR
+    description: Language locale key.
+  - name: EmailEncodingKey
+    type: VARCHAR
+    description: Email encoding key.
+  - name: TimeZoneSidKey
+    type: VARCHAR
+    description: Time zone key.
+  - name: LocaleSidKey
+    type: VARCHAR
+    description: Locale key.
+- schema: core_crm
+  table: Account
+  description: Company/customer data.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Account identifier.
+  - name: Name
+    type: VARCHAR
+    description: Company name.
+  - name: Phone
+    type: VARCHAR
+    description: Phone number.
+  - name: Industry
+    type: VARCHAR
+    description: Industry.
+  - name: Description
+    type: VARCHAR
+    description: Free-text description.
+  - name: NumberOfEmployees
+    type: DOUBLE
+    description: Number of employees.
+  - name: ShippingState
+    type: VARCHAR
+    description: Shipping state.
+- schema: core_crm
+  table: Contact
+  description: Individual contacts.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Contact identifier.
+  - name: FirstName
+    type: VARCHAR
+    description: First name.
+  - name: LastName
+    type: VARCHAR
+    description: Last name.
+  - name: Email
+    type: VARCHAR
+    description: Email address.
+  - name: AccountId
+    type: VARCHAR
+    description: Account of the contact (core_crm.Account.Id).
+- schema: sales_pipeline
+  table: Contract
+  description: Signed contracts.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Contract identifier.
+  - name: AccountId
+    type: VARCHAR
+    description: Account (core_crm.Account.Id).
+  - name: Status
+    type: VARCHAR
+    description: Contract status; values undocumented, inspect before filtering.
+  - name: StartDate
+    type: VARCHAR
+    description: Start date (text; cast to DATE).
+  - name: CustomerSignedDate
+    type: VARCHAR
+    description: Date the customer signed (text; cast to DATE).
+  - name: CompanySignedDate
+    type: VARCHAR
+    description: Date the company signed (text; cast to DATE).
+  - name: Description
+    type: VARCHAR
+    description: Free-text description.
+  - name: ContractTerm
+    type: VARCHAR
+    description: Contract term (text; cast to a number before arithmetic).
+- schema: sales_pipeline
+  table: Lead
+  description: Sales leads.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Lead identifier.
+  - name: FirstName
+    type: VARCHAR
+    description: First name.
+  - name: LastName
+    type: VARCHAR
+    description: Last name.
+  - name: Email
+    type: VARCHAR
+    description: Email address.
+  - name: Phone
+    type: VARCHAR
+    description: Phone number.
+  - name: Company
+    type: VARCHAR
+    description: Company of the lead.
+  - name: Status
+    type: VARCHAR
+    description: Lead status; values undocumented, inspect before filtering.
+  - name: ConvertedContactId
+    type: VARCHAR
+    description: Contact created on conversion (core_crm.Contact.Id).
+  - name: ConvertedAccountId
+    type: VARCHAR
+    description: Account created on conversion (core_crm.Account.Id).
+  - name: Title
+    type: VARCHAR
+    description: Job title.
+  - name: CreatedDate
+    type: VARCHAR
+    description: Creation timestamp (text; cast to TIMESTAMP).
+  - name: ConvertedDate
+    type: VARCHAR
+    description: Conversion date (text; cast to DATE).
+  - name: IsConverted
+    type: BIGINT
+    description: Conversion flag (1 = converted).
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning user (core_crm.User.Id).
+- schema: sales_pipeline
+  table: Opportunity
+  description: Sales deals.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Opportunity identifier.
+  - name: ContractID__c
+    type: VARCHAR
+    description: Related contract (sales_pipeline.Contract.Id).
+  - name: AccountId
+    type: VARCHAR
+    description: Account (core_crm.Account.Id).
+  - name: ContactId
+    type: VARCHAR
+    description: Contact (core_crm.Contact.Id).
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning user (core_crm.User.Id).
+  - name: Probability
+    type: VARCHAR
+    description: Win probability (text; cast to DOUBLE).
+  - name: Amount
+    type: DOUBLE
+    description: Deal amount.
+  - name: StageName
+    type: VARCHAR
+    description: Sales stage; values undocumented, inspect before filtering.
+  - name: Name
+    type: VARCHAR
+    description: Opportunity name.
+  - name: Description
+    type: VARCHAR
+    description: Free-text description.
+  - name: CreatedDate
+    type: VARCHAR
+    description: Creation timestamp (text; cast to TIMESTAMP).
+  - name: CloseDate
+    type: VARCHAR
+    description: Close date (text; cast to DATE).
+- schema: sales_pipeline
+  table: OpportunityLineItem
+  description: Deal line items.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Line item identifier.
+  - name: OpportunityId
+    type: VARCHAR
+    description: Opportunity (sales_pipeline.Opportunity.Id).
+  - name: Product2Id
+    type: VARCHAR
+    description: Product (products_orders.Product2.Id).
+  - name: PricebookEntryId
+    type: VARCHAR
+    description: Pricebook entry (products_orders.PricebookEntry.Id).
+  - name: Quantity
+    type: VARCHAR
+    description: Quantity (text; cast to DOUBLE).
+  - name: TotalPrice
+    type: VARCHAR
+    description: Total price (text; cast to DOUBLE).
+- schema: sales_pipeline
+  table: Quote
+  description: Price quotes.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Quote identifier.
+  - name: OpportunityId
+    type: VARCHAR
+    description: Opportunity (sales_pipeline.Opportunity.Id).
+  - name: AccountId
+    type: VARCHAR
+    description: Account (core_crm.Account.Id).
+  - name: ContactId
+    type: VARCHAR
+    description: Contact (core_crm.Contact.Id).
+  - name: Name
+    type: VARCHAR
+    description: Quote name.
+  - name: Description
+    type: VARCHAR
+    description: Free-text description.
+  - name: Status
+    type: VARCHAR
+    description: Quote status; values undocumented, inspect before filtering.
+  - name: CreatedDate
+    type: VARCHAR
+    description: Creation timestamp (text; cast to TIMESTAMP).
+  - name: ExpirationDate
+    type: VARCHAR
+    description: Expiration date (text; cast to DATE).
+- schema: sales_pipeline
+  table: QuoteLineItem
+  description: Quote details.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Quote line identifier.
+  - name: QuoteId
+    type: VARCHAR
+    description: Quote (sales_pipeline.Quote.Id).
+  - name: OpportunityLineItemId
+    type: VARCHAR
+    description: Opportunity line item (sales_pipeline.OpportunityLineItem.Id).
+  - name: Product2Id
+    type: VARCHAR
+    description: Product (products_orders.Product2.Id).
+  - name: PricebookEntryId
+    type: VARCHAR
+    description: Pricebook entry (products_orders.PricebookEntry.Id).
+  - name: Quantity
+    type: VARCHAR
+    description: Quantity (text; cast to DOUBLE).
+  - name: UnitPrice
+    type: VARCHAR
+    description: Unit price (text; cast to DOUBLE).
+  - name: Discount
+    type: VARCHAR
+    description: Discount (text; cast to DOUBLE).
+  - name: TotalPrice
+    type: VARCHAR
+    description: Total price (text; cast to DOUBLE).
+- schema: support
+  table: Case
+  description: 'Support cases. Reserved word: write support."Case".'
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Case identifier.
+  - name: priority
+    type: VARCHAR
+    description: Case priority; values undocumented.
+  - name: subject
+    type: VARCHAR
+    description: Subject.
+  - name: description
+    type: VARCHAR
+    description: Free-text description.
+  - name: status
+    type: VARCHAR
+    description: Case status; values undocumented, inspect before filtering.
+  - name: contactid
+    type: VARCHAR
+    description: Contact (core_crm.Contact.Id).
+  - name: createddate
+    type: VARCHAR
+    description: Creation timestamp (text; cast to TIMESTAMP).
+  - name: closeddate
+    type: VARCHAR
+    description: Close timestamp (text; cast to TIMESTAMP).
+  - name: orderitemid__c
+    type: VARCHAR
+    description: Related order item (products_orders.OrderItem.Id).
+  - name: issueid__c
+    type: VARCHAR
+    description: Related issue (support.issue__c.id).
+  - name: accountid
+    type: VARCHAR
+    description: Account (core_crm.Account.Id).
+  - name: ownerid
+    type: VARCHAR
+    description: Owning user/agent (core_crm.User.Id).
+- schema: support
+  table: casehistory__c
+  description: Case history.
+  columns:
+  - name: id
+    type: VARCHAR
+    description: History record identifier.
+  - name: caseid__c
+    type: VARCHAR
+    description: Case (support."Case".id).
+  - name: oldvalue__c
+    type: VARCHAR
+    description: Value before the change.
+  - name: newvalue__c
+    type: VARCHAR
+    description: Value after the change.
+  - name: createddate
+    type: VARCHAR
+    description: Change timestamp (text; cast to TIMESTAMP).
+  - name: field__c
+    type: VARCHAR
+    description: Name of the case field that changed.
+- schema: support
+  table: emailmessage
+  description: Email communications.
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Email identifier.
+  - name: subject
+    type: VARCHAR
+    description: Subject.
+  - name: textbody
+    type: VARCHAR
+    description: Email text body.
+  - name: parentid
+    type: VARCHAR
+    description: Parent record (e.g. a case).
+  - name: fromaddress
+    type: VARCHAR
+    description: Sender address.
+  - name: toids
+    type: VARCHAR
+    description: Recipient identifiers.
+  - name: messagedate
+    type: VARCHAR
+    description: Message timestamp (text; cast to TIMESTAMP).
+  - name: relatedtoid
+    type: VARCHAR
+    description: Related record identifier.
+- schema: support
+  table: issue__c
+  description: Custom issues.
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Issue identifier.
+  - name: name
+    type: VARCHAR
+    description: Issue name.
+  - name: description__c
+    type: VARCHAR
+    description: Issue description.
+- schema: support
+  table: knowledge__kav
+  description: Knowledge articles.
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Article identifier.
+  - name: title
+    type: VARCHAR
+    description: Title.
+  - name: faq_answer__c
+    type: VARCHAR
+    description: FAQ answer text.
+  - name: summary
+    type: VARCHAR
+    description: Summary.
+  - name: urlname
+    type: VARCHAR
+    description: URL name.
+- schema: support
+  table: livechattranscript
+  description: Chat logs.
+  columns:
+  - name: id
+    type: VARCHAR
+    description: Transcript identifier.
+  - name: caseid
+    type: VARCHAR
+    description: Case (support."Case".id).
+  - name: accountid
+    type: VARCHAR
+    description: Account (core_crm.Account.Id).
+  - name: ownerid
+    type: VARCHAR
+    description: Owning user/agent (core_crm.User.Id).
+  - name: body
+    type: VARCHAR
+    description: Chat transcript text.
+  - name: endtime
+    type: VARCHAR
+    description: Chat end timestamp (text; cast to TIMESTAMP).
+  - name: livechatvisitorid
+    type: VARCHAR
+    description: Chat visitor identifier.
+  - name: contactid
+    type: VARCHAR
+    description: Contact (core_crm.Contact.Id).
+- schema: products_orders
+  table: Order
+  description: 'Customer orders. Reserved word: write products_orders."Order".'
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Order identifier.
+  - name: AccountId
+    type: VARCHAR
+    description: Account (core_crm.Account.Id).
+  - name: Status
+    type: VARCHAR
+    description: Order status; values undocumented.
+  - name: EffectiveDate
+    type: VARCHAR
+    description: Effective date (text; cast to DATE).
+  - name: Pricebook2Id
+    type: VARCHAR
+    description: Pricebook (products_orders.Pricebook2.Id).
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning user (core_crm.User.Id).
+- schema: products_orders
+  table: OrderItem
+  description: Order details.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Order item identifier.
+  - name: OrderId
+    type: VARCHAR
+    description: Order (products_orders."Order".Id).
+  - name: Product2Id
+    type: VARCHAR
+    description: Product (products_orders.Product2.Id).
+  - name: Quantity
+    type: VARCHAR
+    description: Quantity (text; cast to DOUBLE).
+  - name: UnitPrice
+    type: VARCHAR
+    description: Unit price (text; cast to DOUBLE).
+  - name: PriceBookEntryId
+    type: VARCHAR
+    description: Pricebook entry (products_orders.PricebookEntry.Id).
+- schema: products_orders
+  table: Pricebook2
+  description: Pricebooks; one of the pricing and mapping tables.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Pricebook identifier.
+  - name: Name
+    type: VARCHAR
+    description: Pricebook name.
+  - name: Description
+    type: VARCHAR
+    description: Description.
+  - name: IsActive
+    type: BIGINT
+    description: Active flag (1 = active).
+  - name: ValidFrom
+    type: VARCHAR
+    description: Validity start (text; cast to DATE/TIMESTAMP).
+  - name: ValidTo
+    type: VARCHAR
+    description: Validity end (text; cast to DATE/TIMESTAMP).
+- schema: products_orders
+  table: PricebookEntry
+  description: Product prices within a pricebook; one of the pricing and mapping tables.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Pricebook entry identifier.
+  - name: Pricebook2Id
+    type: VARCHAR
+    description: Pricebook (products_orders.Pricebook2.Id).
+  - name: Product2Id
+    type: VARCHAR
+    description: Product (products_orders.Product2.Id).
+  - name: UnitPrice
+    type: VARCHAR
+    description: Unit price (text; cast to DOUBLE).
+- schema: products_orders
+  table: Product2
+  description: Product catalog.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Product identifier.
+  - name: Name
+    type: VARCHAR
+    description: Product name.
+  - name: Description
+    type: VARCHAR
+    description: Description.
+  - name: IsActive
+    type: BIGINT
+    description: Active flag (1 = active).
+  - name: External_ID__c
+    type: VARCHAR
+    description: External identifier.
+- schema: products_orders
+  table: ProductCategory
+  description: Product categories.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Category identifier.
+  - name: Name
+    type: VARCHAR
+    description: Category name.
+  - name: CatalogId
+    type: VARCHAR
+    description: Catalog identifier.
+- schema: products_orders
+  table: ProductCategoryProduct
+  description: Product-to-category mapping; one of the pricing and mapping tables.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Mapping identifier.
+  - name: ProductCategoryId
+    type: VARCHAR
+    description: Category (products_orders.ProductCategory.Id).
+  - name: ProductId
+    type: VARCHAR
+    description: Product (products_orders.Product2.Id).
+- schema: activities
+  table: Event
+  description: Calendar events.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Event identifier.
+  - name: WhatId
+    type: VARCHAR
+    description: Related record (e.g. opportunity or account).
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning user (core_crm.User.Id).
+  - name: StartDateTime
+    type: VARCHAR
+    description: Start timestamp (text; cast to TIMESTAMP).
+  - name: Subject
+    type: VARCHAR
+    description: Subject.
+  - name: Description
+    type: VARCHAR
+    description: Description.
+  - name: DurationInMinutes
+    type: VARCHAR
+    description: Duration in minutes (text; cast to DOUBLE).
+  - name: Location
+    type: VARCHAR
+    description: Location.
+  - name: IsAllDayEvent
+    type: BIGINT
+    description: All-day flag (1 = all-day event).
+- schema: activities
+  table: Task
+  description: Activities and tasks.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Task identifier.
+  - name: WhatId
+    type: VARCHAR
+    description: Related record (e.g. opportunity or account).
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning user (core_crm.User.Id).
+  - name: Priority
+    type: VARCHAR
+    description: Task priority; values undocumented.
+  - name: Status
+    type: VARCHAR
+    description: Task status; values undocumented.
+  - name: ActivityDate
+    type: VARCHAR
+    description: Activity date (text; cast to DATE).
+  - name: Subject
+    type: VARCHAR
+    description: Subject.
+  - name: Description
+    type: VARCHAR
+    description: Description.
+- schema: activities
+  table: VoiceCallTranscript__c
+  description: Call records.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Transcript identifier.
+  - name: OpportunityId__c
+    type: VARCHAR
+    description: Opportunity (sales_pipeline.Opportunity.Id).
+  - name: LeadId__c
+    type: VARCHAR
+    description: Lead (sales_pipeline.Lead.Id).
+  - name: Body__c
+    type: VARCHAR
+    description: Call transcript text.
+  - name: CreatedDate
+    type: VARCHAR
+    description: Creation timestamp (text; cast to TIMESTAMP).
+  - name: EndTime__c
+    type: VARCHAR
+    description: Call end timestamp (text; cast to TIMESTAMP).
+- schema: territory
+  table: Territory2
+  description: Sales territories.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Territory identifier.
+  - name: Name
+    type: VARCHAR
+    description: Territory name.
+  - name: Description
+    type: VARCHAR
+    description: Description.
+- schema: territory
+  table: UserTerritory2Association
+  description: Territory assignments.
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Assignment identifier.
+  - name: UserId
+    type: VARCHAR
+    description: User (core_crm.User.Id).
+  - name: Territory2Id
+    type: VARCHAR
+    description: Territory (territory.Territory2.Id).
+relationships:
+- from: core_crm.Contact.AccountId
+  to: core_crm.Account.Id
+  type: many_to_one
+- from: sales_pipeline.Opportunity.AccountId
+  to: core_crm.Account.Id
+  type: many_to_one
+- from: sales_pipeline.Opportunity.OwnerId
+  to: core_crm.User.Id
+  type: many_to_one
+- from: sales_pipeline.OpportunityLineItem.OpportunityId
+  to: sales_pipeline.Opportunity.Id
+  type: many_to_one
+- from: sales_pipeline.Quote.OpportunityId
+  to: sales_pipeline.Opportunity.Id
+  type: many_to_one
+- from: sales_pipeline.QuoteLineItem.QuoteId
+  to: sales_pipeline.Quote.Id
+  type: many_to_one
+- from: products_orders.OrderItem.OrderId
+  to: products_orders.Order.Id
+  type: many_to_one
+- from: products_orders.PricebookEntry.Product2Id
+  to: products_orders.Product2.Id
+  type: many_to_one
+- from: support.casehistory__c.caseid__c
+  to: support.Case.id
+  type: many_to_one
+- from: support.Case.issueid__c
+  to: support.issue__c.id
+  type: many_to_one
+- from: territory.UserTerritory2Association.Territory2Id
+  to: territory.Territory2.Id
+  type: many_to_one
+- from: territory.UserTerritory2Association.UserId
+  to: core_crm.User.Id
+  type: many_to_one

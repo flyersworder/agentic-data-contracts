@@ -1,0 +1,211 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockmarket, author: claudeopus5.5
+metrics:
+- name: is_financially_troubled
+  description: 'True when the company is financially troubled: deficient, delinquent, or both (Financial
+    Status D = Deficient, E = Delinquent, H = Deficient and delinquent). NULL Financial Status (non-NASDAQ
+    rows) yields false. Observed data has D (24) and H (1) only, so 25 troubled securities.
+
+    '
+  sql_expression: COALESCE(s."Financial Status" IN ('D','E','H'), false)
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one row per security (Symbol)
+  domains:
+  - security_metadata
+- name: financially_troubled_count
+  description: Number of securities that are financially troubled (Financial Status in D, E, H).
+  sql_expression: COUNT(*) FILTER (WHERE s."Financial Status" IN ('D','E','H'))
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one row per security (Symbol)
+  domains:
+  - security_metadata
+- name: is_etf
+  description: True when the security is an ETF (ETF column = 'Y'; stored as a 'Y'/'N' string).
+  sql_expression: s.ETF = 'Y'
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one row per security (Symbol)
+  domains:
+  - security_metadata
+- name: listing_exchange_name
+  description: 'Decodes "Listing Exchange": A NYSE MKT, N New York Stock Exchange (NYSE), P NYSE ARCA,
+    Z BATS Global Markets (BATS), V Investors'' Exchange, LLC (IEXG), Q NASDAQ Global Select Market (top-tier
+    NASDAQ market).
+
+    '
+  sql_expression: 'CASE s."Listing Exchange" WHEN ''A'' THEN ''NYSE MKT'' WHEN ''N'' THEN ''New York Stock
+    Exchange (NYSE)'' WHEN ''P'' THEN ''NYSE ARCA'' WHEN ''Z'' THEN ''BATS Global Markets (BATS)'' WHEN
+    ''V'' THEN ''Investors'''' Exchange, LLC (IEXG)'' WHEN ''Q'' THEN ''NASDAQ Global Select Market''
+    END
+
+    '
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one row per security (Symbol)
+  domains:
+  - security_metadata
+- name: market_category_name
+  description: 'Decodes "Market Category": Q NASDAQ Global Select Market, G NASDAQ Global Market, S NASDAQ
+    Capital Market; the literal ''Not applicable or not NASDAQ-listed'' otherwise.
+
+    '
+  sql_expression: 'CASE s."Market Category" WHEN ''Q'' THEN ''NASDAQ Global Select Market'' WHEN ''G''
+    THEN ''NASDAQ Global Market'' WHEN ''S'' THEN ''NASDAQ Capital Market'' ELSE s."Market Category" END
+
+    '
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one row per security (Symbol)
+  domains:
+  - security_metadata
+- name: financial_status_name
+  description: 'Decodes "Financial Status": D Deficient, E Delinquent, Q Bankrupt, N Normal, G Deficient
+    and bankrupt, H Deficient and delinquent, J Delinquent and bankrupt, K Deficient, delinquent, and
+    bankrupt. NULL stays NULL (no status reported; non-NASDAQ rows).
+
+    '
+  sql_expression: 'CASE s."Financial Status" WHEN ''D'' THEN ''Deficient'' WHEN ''E'' THEN ''Delinquent''
+    WHEN ''Q'' THEN ''Bankrupt'' WHEN ''N'' THEN ''Normal'' WHEN ''G'' THEN ''Deficient and bankrupt''
+    WHEN ''H'' THEN ''Deficient and delinquent'' WHEN ''J'' THEN ''Delinquent and bankrupt'' WHEN ''K''
+    THEN ''Deficient, delinquent, and bankrupt'' END
+
+    '
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s
+  grain: one row per security (Symbol)
+  domains:
+  - security_metadata
+- name: trade_date
+  description: 'Trading date as DATE. Date is stored as VARCHAR ''YYYY-MM-DD''. Example on ITI; replace
+    the table with stocktrade_database.<SYMBOL> for any ticker.
+
+    '
+  sql_expression: CAST(t.Date AS DATE)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one row per trading day of one ticker
+  domains:
+  - daily_prices
+- name: daily_price_range
+  description: 'Intraday range High - Low for one trading day. Example on ITI; substitute the ticker table.
+    NULL on rows with NULL prices (present in the DOUBLE-Volume tables).
+
+    '
+  sql_expression: t.High - t.Low
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one row per trading day of one ticker
+  domains:
+  - daily_prices
+- name: average_daily_volume
+  description: 'Mean number of shares traded per day over the selected rows (NULL volumes ignored). Example
+    on ITI; substitute the ticker table and add a Date filter for a period.
+
+    '
+  sql_expression: AVG(t.Volume)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one row per trading day of one ticker
+  domains:
+  - daily_prices
+- name: total_volume
+  description: Total shares traded over the selected rows. Example on ITI; substitute the ticker table.
+  sql_expression: SUM(t.Volume)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one row per trading day of one ticker
+  domains:
+  - daily_prices
+- name: average_close
+  description: Mean closing price over the selected rows (NULLs ignored). Example on ITI.
+  sql_expression: AVG(t.Close)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one row per trading day of one ticker
+  domains:
+  - daily_prices
+- name: max_high_price
+  description: Highest intraday price over the selected rows. Example on ITI.
+  sql_expression: MAX(t.High)
+  source_model: stocktrade_database.ITI
+  from_sql: stocktrade_database.ITI t
+  grain: one row per trading day of one ticker
+  domains:
+  - daily_prices
+- name: ticker_metadata_with_prices
+  description: 'Join pattern for one ticker''s daily rows with its stockinfo metadata: the trade table
+    has no Symbol column, so join on Symbol equal to the table name as a literal. Shown for ITI; replace
+    both the table and the literal. Counts trading days.
+
+    '
+  sql_expression: COUNT(*)
+  source_model: stockinfo_database.stockinfo
+  from_sql: stockinfo_database.stockinfo s JOIN stocktrade_database.ITI t ON s.Symbol = 'ITI'
+  grain: one row per trading day of ticker ITI, carrying ITI's stockinfo attributes
+  domains:
+  - security_metadata
+  - daily_prices
+tables:
+- schema: stockinfo_database
+  table: stockinfo
+  columns:
+  - name: Nasdaq Traded
+    type: VARCHAR
+    description: Whether stock is traded on NASDAQ ('Y'/'N'); 'Y' for every row.
+  - name: Symbol
+    type: VARCHAR
+    description: Stock ticker symbol; unique; equals the table name in stocktrade_database.
+  - name: Listing Exchange
+    type: VARCHAR
+    description: 'Exchange where stock is listed: A NYSE MKT, N NYSE, P NYSE ARCA, Z BATS, V IEXG, Q NASDAQ
+      Global Select Market (top-tier NASDAQ). Q rows are all NASDAQ-listed rows (market category Q/G/S).'
+  - name: Market Category
+    type: VARCHAR
+    description: 'Market category: Q NASDAQ Global Select Market, G NASDAQ Global Market, S NASDAQ Capital
+      Market; ''Not applicable or not NASDAQ-listed'' otherwise.'
+  - name: ETF
+    type: VARCHAR
+    description: Whether security is an ETF ('Y'/'N').
+  - name: Round Lot Size
+    type: DOUBLE
+    description: Standard trading unit size; 100.0 for all rows.
+  - name: Test Issue
+    type: VARCHAR
+    description: Whether this is a test issue ('Y'/'N'); 'N' for all rows.
+  - name: Financial Status
+    type: VARCHAR
+    description: 'Financial status: D Deficient, E Delinquent, Q Bankrupt, N Normal, G Deficient and bankrupt,
+      H Deficient and delinquent, J Delinquent and bankrupt, K Deficient, delinquent, and bankrupt. NULL
+      for non-NASDAQ rows. Financially troubled = D, E or H.'
+  - name: NextShares
+    type: VARCHAR
+    description: NextShares designation ('Y'/'N').
+  - name: Company Description
+    type: VARCHAR
+    description: Company name and description (free text, name first).
+- schema: stocktrade_database
+  table: ITI
+  columns:
+  - name: Date
+    type: VARCHAR
+    description: Trading date, text 'YYYY-MM-DD'; CAST to DATE.
+  - name: Open
+    type: DOUBLE
+    description: Opening price.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day.
+  - name: Close
+    type: DOUBLE
+    description: Closing price (unadjusted).
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price.
+  - name: Volume
+    type: BIGINT
+    description: Number of shares traded (DOUBLE with NULL rows in 38 tables).

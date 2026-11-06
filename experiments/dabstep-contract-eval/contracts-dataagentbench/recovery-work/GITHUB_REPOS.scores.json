@@ -1,0 +1,989 @@
+{
+ "dataset": "GITHUB_REPOS",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "GITHUB_REPOS-1",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Every table identifies a repository by repo_name in `owner/repo` format, and that is the join key across all six tables (contents uses sample_repo_name).",
+      "where": "contract.yml domains.repository_metadata.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships (6, incl. files.id -> contents.id); metrics watch_count_by_language_and_license, content_repo_watch_count, file_with_content from_sql",
+      "summary": "repo_name joins declared for languages, licenses, files, commits to repos, contents.sample_repo_name to repos, and files.id to contents.id; three from_sql joins perform them."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Declared relationships run on the built file (left rows matched / left rows): languages and licenses -> repos 165,429 / 3,325,634 (165,429 of 400,000 repos), files -> repos 524,077 / 524,077, contents.sample_repo_name -> repos 24,286 / 24,286, commits -> repos 17,976 / 17,976, files.id -> contents.id 417 / 524,077 (362 of 24,286 contents ids). Keys as stored, no transformation; the match counts equal the reference's.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "The id join is also stated: 'JOINS: contents.id = files.id joins a blob to its file paths' (contract.yml domains.files_and_contents.description)."
+    },
+    {
+     "id": "GITHUB_REPOS-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "multi/single-language lists 'Lang (N bytes), Lang (N bytes).'",
+      "where": "contract.yml domains.repository_metadata.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.repo_language_breakdown / repo_language_names",
+      "summary": "Parse the description into a list of languages per repo; the name lists equal the reference parse on all 3,325,634 rows."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Statement item, no computation implied; the parse is credited under GITHUB_REPOS-3."
+    },
+    {
+     "id": "GITHUB_REPOS-3",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The repository's main language = the first (largest by bytes) language in language_description.",
+      "where": "semantic.yml metrics.repo_primary_language.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.repo_primary_language.sql_expression",
+      "summary": "First element of the parsed language list."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "repo_primary_language run on all 3,325,634 languages rows and compared per row with the reference: agrees on all 3,325,634 (2,957,293 with a primary language, 368,341 NULL), 0 disagreements, the 196 tied repos included (first listed = the reference's tie-break).",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Also: 'Languages are listed in descending byte order, so the first one is the primary language.' (contract.yml domains.repository_metadata.description) and rule parse_language_description_with_metric."
+    },
+    {
+     "id": "GITHUB_REPOS-4",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "repo_data_description is a natural language summary of the original size, binary flag, copies and mode fields, in 12 templates",
+      "where": "contract.yml domains.files_and_contents.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-5",
+     "cls": "guidance",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Use the content_* metrics to extract size (bytes), copies (number of times the blob is seen in the dataset) and sample mode; they parse every row.",
+      "where": "contract.yml domains.files_and_contents.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.content_size_bytes, content_is_binary, content_copies, content_sample_mode",
+      "summary": "Regexp extraction of the four attributes; content_is_binary = repo_data_description NOT LIKE '%non-binary%' (case-sensitive)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Per row against the reference (24,286 rows): size 24,286 agree, copies 24,286, mode 24,286; binary 20,774 agree, 3,512 disagree. NOT LIKE is case-sensitive, so the 3,512 'Non-binary content file (...)' rows read as binary (metric gives 7,298 binary vs 3,786).",
+     "right_part": "Size, copies and mode extracted correctly on every row; the binary flag is wrong on the 3,512 rows of the capitalised 'Non-binary content file' template.",
+     "class_note": "Mild doubt recorded in the references: the item is vague ('some queries rely on'); its checkable content is the extraction, which overlaps GITHUB_REPOS-4.",
+     "notes": "The text gives the right rule (\"Binary vs non-binary is stated as 'binary' / 'non-binary' (so test for 'non-binary', never LIKE '%binary%' alone)\") but the SQL misses the capitalised form; this is the measurement, not a correctable error."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "repos: one row per repository (400,000 distinct repo_name, no duplicates), watch_count = number of users watching the repository on GitHub (BIGINT, 2..90,457, never NULL).",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "stored lowercase, observed values: mit, apache-2.0, gpl-2.0, gpl-3.0, bsd-3-clause, bsd-2-clause, unlicense, agpl-3.0, lgpl-3.0, cc0-1.0, epl-1.0, lgpl-2.1, mpl-2.0, isc, artistic-2.0 (never NULL)",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "COVERAGE: only 165,429 of the 400,000 repos rows have a languages / licenses row; repos with no license row have no license recorded (e.g. torvalds/linux).",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Language names may contain spaces, '#', '+', '.', '-' and even parentheses ('Graphviz (DOT)', 'Visual Basic .NET').",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Never test a language with LIKE '%Java%' (matches JavaScript) or '%C%'",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "files: one row per (repo_name, ref, path) (no duplicates; 524,077 rows, 59,686 repos).",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes",
+     "note": "All ref values start with 'refs/', as also stated."
+    },
+    {
+     "quote": "Observed values: 33188 (= octal 100644, normal non-executable file, 494,849 rows), 33261 (= 100755, executable file, 26,930), 40960 (= 120000, symlink, 2,170 — exactly the rows with a non-NULL symlink_target), 57344 (= 160000, 128 rows, git submodule/gitlink; INTERPRETATION, the documentation does not name it).",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes",
+     "note": "Counts and the symlink_target match confirmed; the 57344 = gitlink reading is a git convention that cannot be checked on the data."
+    },
+    {
+     "quote": "it is NULL for 3,828 rows (3,793 of them binary)",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "no",
+     "note": "3,828 NULL confirmed; 3,786 of them binary (all binary rows), 42 non-binary. 3,793 follows the draw's case-sensitive binary reading."
+    },
+    {
+     "quote": "True when repo_data_description describes a binary file (7,298 rows), false for 'non-binary' (16,988 rows).",
+     "where": "semantic.yml metrics.content_is_binary.description",
+     "confirmed": "no",
+     "note": "3,786 binary / 20,500 non-binary; the stated counts are the metric's own misreading (see GITHUB_REPOS-5)."
+    },
+    {
+     "quote": "observed 33188 (normal), 33261 (executable), 40960 (symlink, the 3 rows with sample_symlink_target).",
+     "where": "semantic.yml metrics.content_sample_mode.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "only 362 contents ids appear in files. contents.sample_repo_name and files.repo_name both join metadata_database.repos.repo_name (all of them are present there).",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "commits: one row per commit SHA (17,976 rows, commit unique), from only six repositories: torvalds/linux (16,061), apple/swift (1,051), twbs/bootstrap (340), Microsoft/vscode (190), facebook/react (178), tensorflow/tensorflow (156).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "1 parent = ordinary commit, 2+ = merge commit (observed up to 9; 1,370 commits have more than one parent).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "time_sec is Unix epoch seconds (UTC), date is the same instant in microseconds, tz_offset is the timezone offset in minutes.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "date = time_sec * 1,000,000 on every author and committer value; the tz_offset unit cannot be checked."
+    },
+    {
+     "quote": "Emails are hashed in the local part (e.g. '<sha>@linux-foundation.org'); the domain is real.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "Local part is a hex hash on all 17,976 author emails; 'the domain is real' cannot be checked."
+    },
+    {
+     "quote": "Two author values are malformed JSON (escaped quotes in names), so JSON functions raise on them",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "383 rows are malformed JSON — wrap with json_valid(trailer) before parsing.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "old_mode/old_sha1 NULL = file added (26,456 entries), new_mode/new_sha1 NULL = file deleted (14,802; paths are still both present), both present = modified (200,188), 2 entries have neither; always valid JSON, never empty; 241,448 entries in total.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "difference_truncated is documented as a boolean truncation flag but is stored as DOUBLE and is NULL in every row, so truncation cannot be detected. encoding is NULL except 6 'ISO-8859-1' and 1 'ISO-8859-2'.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "a lateral FROM commits c, unnest(...) over all commits exhausts memory",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "cannot be checked",
+     "note": "Not run: it risks the shared machine's memory."
+    },
+    {
+     "quote": "Do not zip several json_extract_string(difference, '$[*].field') lists: they drop missing / null values and misalign.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "For 1,240 commits the '$[*].old_mode' list is shorter than the array."
+    },
+    {
+     "quote": "Use json_extract_string(e, '$.field') rather than e->>'field' inside boolean expressions (operator precedence breaks the latter).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "to_timestamp returns TIMESTAMPTZ which the client cannot render.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "Range 2005-02-01 .. 2016-06.",
+     "where": "semantic.yml metrics.commit_author_timestamp.description",
+     "confirmed": "no",
+     "note": "Minimum 2005-02-01 confirmed; one torvalds/linux author time is 2037-04-25."
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "commit_author_timestamp's description gives the author-time range as 2005-02-01 .. 2016-06; one torvalds/linux commit has an author time of 2037-04-25 (no hint item touches commits).",
+     "where": "semantic.yml metrics.commit_author_timestamp.description",
+     "smallest_fix": "Replace 'Range 2005-02-01 .. 2016-06.' with 'Range 2005-02-01 .. 2016-06, except one torvalds/linux commit dated 2037-04-25.'"
+    }
+   ]
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "GITHUB_REPOS-1",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "All three tables are keyed by repo_name, in 'owner/repo' format. That is also the join key to artifacts_database (commits.repo_name, files.repo_name, contents.sample_repo_name).",
+      "where": "contract.yml domains.repository_metadata.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships (6, incl. files.id -> contents.id); metrics repo_watch_count_with_license, repo_watch_count_with_languages, file_content_join from_sql",
+      "summary": "repo_name joins declared across metadata and artifacts tables (contents via sample_repo_name) and files.id -> contents.id; three from_sql joins perform them."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Declared relationships run on the built file (left rows matched / left rows): repos -> languages 165,429 / 400,000, languages -> licenses 3,325,634 / 3,325,634, files -> repos 524,077 / 524,077, contents.sample_repo_name -> repos 24,286 / 24,286, commits -> repos 17,976 / 17,976, files.id -> contents.id 417 / 524,077 (362 of 24,286 contents ids). Keys as stored, no transformation; the match counts equal the reference's.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Id join stated: 'JOIN: files.id = contents.id links a file location to its blob.' (contract.yml domains.files_and_contents.description); rule join_on_repo_name."
+    },
+    {
+     "id": "GITHUB_REPOS-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "'This repository is mainly written in X (n bytes), with additional code in Y (n bytes), ...'",
+      "where": "contract.yml domains.repository_metadata.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.language_list / language_bytes_list",
+      "summary": "Parse into aligned name and byte lists; names equal the reference parse on all 3,325,634 rows."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Also 'language_description gives the programming language(s) used in the repository as natural-language text.' Statement item, no computation implied."
+    },
+    {
+     "id": "GITHUB_REPOS-3",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The repository's main language: the first language listed, which is the one with the most bytes (DATA CHECK: the first byte count is the maximum in every row).",
+      "where": "semantic.yml metrics.primary_language.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.primary_language.sql_expression",
+      "summary": "First element of the parsed language list."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "primary_language run on all 3,325,634 languages rows and compared per row with the reference: agrees on all 3,325,634 (2,957,293 with a primary language, 368,341 NULL), 0 disagreements, the 196 tied repos included (first listed = the reference's tie-break).",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-4",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "repo_data_description is a natural-language summary of the file's metadata, derived from the original size, binary, copies and mode fields.",
+      "where": "contract.yml domains.files_and_contents.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-5",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Use `content_size_bytes`, `content_is_binary`, `content_copies` and `content_sample_mode`, which parse every template (all 24,286 rows checked).",
+      "where": "contract.yml domains.files_and_contents.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.content_size_bytes, content_is_binary, content_copies, content_sample_mode",
+      "summary": "Regexp extraction of the four attributes; binary = NOT ILIKE '%non-binary%'."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "content_size_bytes, content_is_binary, content_copies, content_sample_mode run on all 24,286 contents rows and compared per row with the reference: 24,286 / 24,286 agree on each of the four attributes.",
+     "right_part": null,
+     "class_note": "Mild doubt recorded in the references: the item is vague ('some queries rely on'); its checkable content is the extraction, which overlaps GITHUB_REPOS-4.",
+     "notes": "Text also: \"'Non-binary' can be capitalised, so test binary-ness case-insensitively.\""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "DATA CHECK: 3,325,634 rows, one per repo_name. 368,341 rows read exactly 'No language information available.'.",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Every other row follows one of six templates",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes",
+     "note": "Six language-list templates besides the no-information sentence."
+    },
+    {
+     "quote": "Language names can contain spaces, '+', '#', '-' and even parentheses (e.g. 'C++', 'C#', 'Objective-C', 'Emacs Lisp', 'Graphviz (DOT)'). A substring LIKE '%Java%' also matches JavaScript, and LIKE '%C%' matches almost anything.",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "The values are lowercase: mit, apache-2.0, gpl-2.0, gpl-3.0, bsd-3-clause, bsd-2-clause, unlicense, agpl-3.0, lgpl-3.0, cc0-1.0, epl-1.0, lgpl-2.1, mpl-2.0, isc, artistic-2.0.",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "This is a smaller set of repos than languages/licenses cover, so an inner join with repos restricts the result to those 400,000 repos. Every repo_name in artifacts_database.files appears in repos.",
+     "where": "contract.yml domains.repository_metadata.description",
+     "confirmed": "yes",
+     "note": "True as written, but only 165,429 of the 400,000 repos have a languages/licenses row, which the draw does not say."
+    },
+    {
+     "quote": "DATA CHECK: no duplicates, and 524,077 rows across 59,686 repos.",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Most rows are 'refs/heads/master'.",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes",
+     "note": "405,307 of 524,077."
+    },
+    {
+     "quote": "33188 = 100644 normal file (494,849 rows); 33261 = 100755 executable file (26,930); 40960 = 120000 symlink (2,170, and these are exactly the rows with a non-NULL symlink_target); 57344 = 160000 gitlink/submodule (128).",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes",
+     "note": "Counts confirmed; the gitlink reading of 57344 cannot be checked on the data."
+    },
+    {
+     "quote": "DATA CHECK: content is NULL for all 3,786 binary blobs and for 42 non-binary ones.",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "DATA CHECK: it follows seven templates",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "no",
+     "note": "Twelve: six sentence forms, each in a binary and a non-binary version (semantic.yml content_size_bytes repeats 'all seven templates')."
+    },
+    {
+     "quote": "DATA CHECK: range 3 to 65,937,671",
+     "where": "semantic.yml metrics.content_size_bytes.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Only 362 contents rows have a matching files row",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "author and committer are JSON objects with keys date (microseconds since the epoch), time_sec (seconds since the epoch), tz_offset (timezone offset in minutes), name and email. Emails are hashed in the local part.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "tz_offset unit cannot be checked."
+    },
+    {
+     "quote": "trailer is a JSON array of {email, key, value} objects (e.g. key 'Signed-off-by', 'Cc', 'Acked-by', 'Reviewed-by').",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "DATA CHECK: it is NULL in every row (stored as DOUBLE), so it cannot identify truncated diffs.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "DATA CHECK: NULL except 6 'ISO-8859-1' and 1 'ISO-8859-2'.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "2 author values and 383 trailer values are not valid JSON because of over-escaped quotes in names",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "The ->> operator does raise on them, as stated."
+    },
+    {
+     "quote": "parent, committer and difference are valid JSON in every row.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "to_timestamp() returns TIMESTAMPTZ, and fetching that type fails in this environment because pytz is missing.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "17,976 commits from 6 repositories only: torvalds/linux 16,061, apple/swift 1,051, twbs/bootstrap 340, Microsoft/vscode 190, facebook/react 178, tensorflow/tensorflow 156. Committer times run from 2005 to June 2016.",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "DATA CHECK: 1 to 9; valid JSON in every row",
+     "where": "semantic.yml metrics.commit_parent_count.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "GITHUB_REPOS-1",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Every repo_name in every table is the GitHub repository name in `owner/repo` format, and is the join key across both databases (artifacts_database.contents uses sample_repo_name).",
+      "where": "contract.yml domains.repositories.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships (6, incl. files.id -> contents.id); metric repo_watch_language_license from_sql",
+      "summary": "repo_name joins declared across metadata and artifacts tables (contents via sample_repo_name) and files.id -> contents.id; one from_sql join (repos-languages-licenses) performs the repo_name join."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Declared relationships run on the built file (left rows matched / left rows): repos -> languages 165,429 / 400,000, languages -> licenses 3,325,634 / 3,325,634, files -> repos 524,077 / 524,077, contents.sample_repo_name -> repos 24,286 / 24,286, commits -> repos 17,976 / 17,976, files.id -> contents.id 417 / 524,077 (362 of 24,286 contents ids). Keys as stored, no transformation; the match counts equal the reference's.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Id join stated: 'contents.id joins files.id (same blob identifier)' (contract.yml domains.files_and_contents.description); rule join_on_repo_name."
+    },
+    {
+     "id": "GITHUB_REPOS-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "language_description lists the programming language(s) used, in natural language.",
+      "where": "contract.yml domains.repositories.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.repo_language_names / repo_language_bytes",
+      "summary": "Parse into aligned name and byte lists; names equal the reference parse on all 3,325,634 rows."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The templates quoted with it ('L (N bytes), L (N bytes)') make the several-language reading explicit. Statement item, no computation implied."
+    },
+    {
+     "id": "GITHUB_REPOS-3",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The repository's largest language: the first listed language (lists are in descending byte order in every row).",
+      "where": "semantic.yml metrics.repo_primary_language.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.repo_primary_language.sql_expression",
+      "summary": "First element of the parsed language list."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "repo_primary_language run on all 3,325,634 languages rows and compared per row with the reference: agrees on all 3,325,634 (2,957,293 with a primary language, 368,341 NULL), 0 disagreements, the 196 tied repos included (first listed = the reference's tie-break).",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Wording 'largest language' for primary: read as the same meaning (most bytes)."
+    },
+    {
+     "id": "GITHUB_REPOS-4",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "repo_data_description is a natural-language summary of the original size, binary flag, copies and mode in one of 12 templates",
+      "where": "contract.yml domains.files_and_contents.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-5",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Use the content_* metrics to parse it: 'non-binary' marks a non-binary file, otherwise the file is binary; 'N times' is the number of copies; the mode follows 'mode', 'mode code' or 'mode:'.",
+      "where": "contract.yml domains.files_and_contents.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.content_size_bytes, content_is_binary, content_copies, content_sample_mode",
+      "summary": "Regexp extraction of the four attributes; binary = NOT ILIKE '%non-binary%'."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "content_size_bytes, content_is_binary, content_copies, content_sample_mode run on all 24,286 contents rows and compared per row with the reference: 24,286 / 24,286 agree on each of the four attributes.",
+     "right_part": null,
+     "class_note": "Mild doubt recorded in the references: the item is vague ('some queries rely on'); its checkable content is the extraction, which overlaps GITHUB_REPOS-4.",
+     "notes": "Rule parse_text_fields_with_metrics also names file size/binary/copies/mode. The metric's description states '6,671 binary blobs' and the domain text '3,793 of them binary'; both counts are wrong (3,786) though the SQL is right; recorded as additions, not affecting the category."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "languages: one row per repository (3,325,634 rows, repo_name unique).",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "'No language information available.' (368,341 rows: no languages)",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Byte counts carry thousands commas ('1,089,067'). Language names may contain spaces, '+', '#', '-' and one parenthesised name exists ('Graphviz (DOT)').",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Do NOT use LIKE '%C%' style matching for a language (it would hit C++, C#, Objective-C, CSS...)",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "licenses: one row per repository (same 3,325,634 repos as languages). license is a lowercase identifier",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "repos: one row per repository (400,000 rows, repo_name unique), a subset of the repos in languages/licenses. watch_count is the number of users watching the repository on GitHub (2 to 90,457).",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "no",
+     "note": "Not a subset: only 165,429 of the 400,000 repos have a languages/licenses row. Row count, uniqueness and range confirmed."
+    },
+    {
+     "quote": "One row per commit (commit SHA unique, 17,976 rows) covering only six repositories",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "every commit here has at least one parent; up to 9",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "author / committer are JSON objects with keys date (epoch MICROseconds), email (local part hashed), name, time_sec (epoch seconds, = date/1e6) and tz_offset (timezone offset in minutes as recorded).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "tz_offset unit cannot be checked."
+    },
+    {
+     "quote": "Two author values are malformed JSON (escaped quotes in the name)",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "383 trailer values are truncated, invalid JSON",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "no",
+     "note": "383 invalid confirmed, but they are complete arrays made invalid by over-escaped quotes, not truncated."
+    },
+    {
+     "quote": "(old_mode/old_sha1 absent for added files, new_mode/new_sha1 absent for deleted files); it is always valid JSON. difference_truncated (indicator that the difference data is truncated) is NULL in every row. encoding is NULL except 7 commits (ISO-8859-1 / ISO-8859-2).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "values present: 33188 (octal 100644, normal file), 33261 (100755, executable file), 40960 (120000, symlink — symlink_target is set exactly for these rows) and 57344 (160000, a git submodule / gitlink entry; not named in the documentation, interpreted from git's mode convention).",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes",
+     "note": "Values and the symlink_target match confirmed; the gitlink reading cannot be checked on the data."
+    },
+    {
+     "quote": "it is NULL for 3,828 rows (3,793 of them binary)",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "no",
+     "note": "3,828 confirmed; 3,786 binary."
+    },
+    {
+     "quote": "numbers have no thousands commas.",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "True when repo_data_description describes a binary file (it does not contain 'non-binary'); 6,671 binary blobs.",
+     "where": "semantic.yml metrics.content_is_binary.description",
+     "confirmed": "no",
+     "note": "The metric itself returns 3,786."
+    },
+    {
+     "quote": "contents.id joins files.id (same blob identifier), but only a few hundred files rows have their blob in contents.",
+     "where": "contract.yml domains.files_and_contents.description",
+     "confirmed": "yes",
+     "note": "417 files rows, 362 blobs."
+    },
+    {
+     "quote": "the inner join keeps 165,429 rows (repos also present in languages).",
+     "where": "semantic.yml metrics.repo_watch_language_license.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Range in the data: 2005-04-16 to 2016-06.",
+     "where": "semantic.yml metrics.commit_committer_time.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Repo names are case-sensitive as stored.",
+     "where": "contract.yml rules.join_on_repo_name.description",
+     "confirmed": "yes",
+     "note": "Keys match as stored; lower-casing adds no matches."
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "The repos description calls repos 'a subset of the repos in languages/licenses'; 234,571 of its 400,000 repos have no languages/licenses row (a coverage statement outside every hint item, which gives only the join keys).",
+     "where": "contract.yml domains.repositories.description; semantic.yml relationships (repos -> languages) description 'repos is a subset'",
+     "smallest_fix": "Replace 'a subset of the repos in languages/licenses' with 'only 165,429 of them have a languages/licenses row' and the relationship description with 'not every repo in repos has a languages row'."
+    },
+    {
+     "cause": "The commits description says the 383 invalid trailer values are 'truncated'; they are complete arrays made invalid by over-escaped quotes in names (no hint item touches commits).",
+     "where": "contract.yml domains.commits.description",
+     "smallest_fix": "Replace 'truncated, invalid JSON' with 'invalid JSON (over-escaped quotes in names)'."
+    }
+   ]
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "GITHUB_REPOS-1",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Joins across tables use repo_name (contents: sample_repo_name) or the blob id (files.id = contents.id).",
+      "where": "contract.yml domains.repositories.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships (6, incl. files.id -> contents.id); metrics watch_count_by_license, content_with_file_metadata from_sql",
+      "summary": "repo_name joins declared for languages, licenses, files, commits to repos, contents.sample_repo_name to repos, and files.id to contents.id; two from_sql joins perform them."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Declared relationships run on the built file (left rows matched / left rows): languages and licenses -> repos 165,429 / 3,325,634 (165,429 of 400,000 repos), files -> repos 524,077 / 524,077, contents.sample_repo_name -> repos 24,286 / 24,286, commits -> repos 17,976 / 17,976, files.id -> contents.id 417 / 524,077 (362 of 24,286 contents ids). Keys as stored, no transformation; the match counts equal the reference's.",
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "languages.language_description states the programming language(s) of a repository in natural language, possibly several per repository, each with a byte count",
+      "where": "contract.yml domains.languages.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.language_names_list / language_bytes_list / language_bytes_by_repo",
+      "summary": "Parse into aligned name and byte lists (and a per-(repo, language) lateral unnest); names equal the reference parse on all 3,325,634 rows."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Statement item, no computation implied. language_bytes_by_repo was run on a 100,000-row sample only (a lateral unnest over all rows risks the shared machine's memory)."
+    },
+    {
+     "id": "GITHUB_REPOS-3",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "To determine the primary or main language, compare the relative number of bytes across languages: the primary language is the one with the most bytes.",
+      "where": "contract.yml domains.languages.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.primary_language.sql_expression",
+      "summary": "First element of the parsed language list (lists verified in descending byte order; ties take the first listed)."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "primary_language run on all 3,325,634 languages rows and compared per row with the reference: agrees on all 3,325,634 (2,957,293 with a primary language, 368,341 NULL), 0 disagreements, the 196 tied repos included (first listed = the reference's tie-break).",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Also rule primary_language_by_bytes and the metric description."
+    },
+    {
+     "id": "GITHUB_REPOS-4",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "repo_data_description (natural-language summary of the file's metadata, derived from original size, binary, copies and mode fields).",
+      "where": "contract.yml domains.contents.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-5",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Some questions rely on these attributes for filtering.",
+      "where": "contract.yml domains.contents.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.content_size_bytes, content_is_binary, content_copies, content_sample_mode",
+      "summary": "Regexp extraction of the four attributes; binary = lower(text) NOT LIKE '%non-binary%'."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "content_size_bytes, content_is_binary, content_copies, content_sample_mode run on all 24,286 contents rows and compared per row with the reference: 24,286 / 24,286 agree on each of the four attributes.",
+     "right_part": null,
+     "class_note": "Mild doubt recorded in the references: the item is vague ('some queries rely on'); its checkable content is the extraction, which overlaps GITHUB_REPOS-4.",
+     "notes": "Text continues: 'Parse with the metrics content_size_bytes, content_is_binary, content_copies, content_sample_mode.'"
+    }
+   ],
+   "additions": [
+    {
+     "quote": "400,000 rows, one per repo, watch_count never NULL, range 2-90,457.",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "values are lowercase: mit, apache-2.0, gpl-2.0, gpl-3.0, bsd-3-clause, bsd-2-clause, unlicense, agpl-3.0, lgpl-3.0, cc0-1.0, epl-1.0, lgpl-2.1, mpl-2.0, isc, artistic-2.0). licenses and languages each have 3,325,634 rows, one per repo. Not every repo in languages/licenses is in repos",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "COVERAGE: commits cover only 6 repos (torvalds/linux 16,061 commits, apple/swift, twbs/bootstrap, Microsoft/vscode, facebook/react, tensorflow/tensorflow). torvalds/linux has no row in licenses or languages. All 59,686 repos in files exist in repos.",
+     "where": "contract.yml domains.repositories.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Byte counts use thousands commas. 368,341 rows read \"No language information available.\" (no languages). Language names may contain spaces or parentheses (\"Emacs Lisp\", \"Ragel in Ruby Host\", \"Graphviz (DOT)\")",
+     "where": "contract.yml domains.languages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "e.g. `language_description LIKE '%Java%'` also matches JavaScript.",
+     "where": "contract.yml domains.languages.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "24,286 rows, id unique. repo_data_description uses 12 templates",
+     "where": "contract.yml domains.contents.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "content is NULL for all 3,786 binary files and for 42 non-binary files of over 1 MB (>= 1,050,127 bytes); there are no empty strings.",
+     "where": "contract.yml domains.contents.description",
+     "confirmed": "yes",
+     "note": "Largest non-NULL content is 1,009,002 bytes."
+    },
+    {
+     "quote": "sample_ref values look like 'refs/heads/master'. Only 362 contents ids also appear in files.id",
+     "where": "contract.yml domains.contents.description",
+     "confirmed": "yes",
+     "note": "21,479 of 24,286 sample_ref values are refs/heads/master."
+    },
+    {
+     "quote": "524,077 rows, (repo_name, ref, path) unique; refs look like 'refs/heads/master'.",
+     "where": "contract.yml domains.files.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "33188 = 0100644 regular file (494,849 rows); 33261 = 0100755 executable file (26,930); 40960 = 0120000 symlink (2,170, all and only these have symlink_target); 57344 = 0160000 gitlink / submodule (128).",
+     "where": "contract.yml domains.files.description",
+     "confirmed": "yes",
+     "note": "Counts confirmed; the gitlink reading cannot be checked on the data."
+    },
+    {
+     "quote": "author/committer `date` is microseconds since epoch, `time_sec` seconds since epoch (UTC), `tz_offset` minutes. Emails are hashed in the local part (hash@domain).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes",
+     "note": "tz_offset unit cannot be checked."
+    },
+    {
+     "quote": "2 author values and 383 trailer values are malformed JSON (escaped quotes in names) and make json_extract raise an error",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "parent and difference are always valid, never empty arrays; 1,370 commits are merges. difference_truncated is NULL in every row (no truncation information). encoding is NULL except 7 rows (ISO-8859-1, ISO-8859-2).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "One torvalds/linux commit has an author time in 2037 (bad clock).",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Casting to TIMESTAMPTZ (to_timestamp) can fail in the client",
+     "where": "contract.yml domains.commits.description",
+     "confirmed": "cannot be checked"
+    },
+    {
+     "quote": "Number of trailer entries; NULL for the 383 rows whose trailer is malformed JSON.",
+     "where": "semantic.yml metrics.commit_trailer_count.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "1 - 16,898.",
+     "where": "semantic.yml metrics.content_copies.description",
+     "confirmed": "yes"
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "commit_author_name's regex fallback for the 2 malformed author values, '\"name\": \"((?:[^\"\\\\]|\\\\.)*)\"', stops at the over-escaped quote and returns a truncated name (a 6- or 8-character prefix in place of the full name; a run of backslashes for the other). No hint item touches commits.",
+     "where": "semantic.yml metrics.commit_author_name.sql_expression",
+     "smallest_fix": "In the ELSE branch use regexp_extract(author, '\"name\": \"(.*)\",', 1) (as drafts A1/A2 do), which returns the whole stored name."
+    }
+   ]
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "GITHUB_REPOS-1",
+     "cls": "guidance",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "All three tables key on repo_name in `owner/repo` format, which is also the repository key used throughout artifacts_database (commits.repo_name, files.repo_name, contents.sample_repo_name).",
+      "where": "contract.yml domains.repository_metadata.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml relationships (6, incl. files.id -> contents.id); metrics watch_count_by_license, watch_count_by_language_match, files_with_content_count, commit_watch_count from_sql",
+      "summary": "repo_name joins declared for languages, licenses, files, commits to repos, contents.sample_repo_name to repos, and files.id to contents.id; four from_sql joins perform them."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Declared relationships run on the built file (left rows matched / left rows): languages and licenses -> repos 165,429 / 3,325,634 (165,429 of 400,000 repos), files -> repos 524,077 / 524,077, contents.sample_repo_name -> repos 24,286 / 24,286, commits -> repos 17,976 / 17,976, files.id -> contents.id 417 / 524,077 (362 of 24,286 contents ids). Keys as stored, no transformation; the match counts equal the reference's.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Id join stated: 'files.id and contents.id are both the file blob identifier and join the two tables.' (contract.yml domains.repository_artifacts.description); rule repo_name_is_owner_slash_repo."
+    },
+    {
+     "id": "GITHUB_REPOS-2",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "language_description (programming language(s) used in the repository, represented in natural language format — free text, so match languages with text search such as ILIKE rather than equality)",
+      "where": "contract.yml domains.repository_metadata.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.watch_count_by_language_match",
+      "summary": "No parse; languages matched by l.language_description ILIKE '%<language>%'."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Read as recovered because the contract carries the documentation's 'language(s)' wording, which is why the item is classed described, and adds that one description is matched by text search rather than equality. The ILIKE substring reading ('%Java%' also matches JavaScript) is how the item's records are read, so it is the measurement, not a correctable error; it bears on GITHUB_REPOS-3 too."
+    },
+    {
+     "id": "GITHUB_REPOS-3",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No primary-language statement or metric; bytes in language_description are never mentioned."
+    },
+    {
+     "id": "GITHUB_REPOS-4",
+     "cls": "described",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "repo_data_description (natural language description summarizing the file's metadata, derived from the original size, binary, copies and mode fields — those fields exist only inside this text).",
+      "where": "contract.yml domains.repository_artifacts.description"
+     },
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "GITHUB_REPOS-5",
+     "cls": "guidance",
+     "category": "stated, not built",
+     "text_reading": {
+      "quote": "derived from the original size, binary, copies and mode fields — those fields exist only inside this text",
+      "where": "contract.yml domains.repository_artifacts.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics (none)",
+      "summary": "No metric or column reads repo_data_description."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "No metric extracts size, binary, copies or mode; nothing to run.",
+     "right_part": null,
+     "class_note": "Mild doubt recorded in the references: the item is vague ('some queries rely on'); its checkable content is the extraction, which overlaps GITHUB_REPOS-4.",
+     "notes": "Read 'those fields exist only inside this text' as stating that the attributes must be read out of repo_data_description to be used, the item's equivalent; it does not say how. A stricter reader would score it partial (text) or missed."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "difference_truncated (indicator whether the difference data is truncated — documented as boolean, stored as DOUBLE, so 1 means truncated)",
+     "where": "contract.yml domains.repository_artifacts.description",
+     "confirmed": "cannot be checked",
+     "note": "Stored as DOUBLE, confirmed; it is NULL in every row, so '1 means truncated' cannot be checked."
+    },
+    {
+     "quote": "Share of commit rows whose difference data is truncated (difference_truncated true, stored as 1).",
+     "where": "semantic.yml metrics.truncated_difference_share.description",
+     "confirmed": "cannot be checked",
+     "note": "Returns 0.0 on the built file because the column is NULL in every row."
+    },
+    {
+     "quote": "Repository names are in `owner/repo` format in every table ... the owner is the part before '/'.",
+     "where": "contract.yml rules.repo_name_is_owner_slash_repo.description",
+     "confirmed": "yes"
+    },
+    {
+     "quote": "Number of file records that are symlinks (symlink_target set).",
+     "where": "semantic.yml metrics.symlink_file_count.description",
+     "confirmed": "yes",
+     "note": "symlink_target is set exactly on the 2,170 mode-40960 rows."
+    }
+   ],
+   "correctable_errors": [
+    {
+     "cause": "truncated_difference_share counts difference_truncated = 1, but the column is NULL in every row, so the metric reports 0.0 (no truncation) when truncation is unknown; the rule truncated_content_and_differences relies on the same flag. No hint item touches commits.",
+     "where": "semantic.yml metrics.truncated_difference_share; contract.yml rules.truncated_content_and_differences",
+     "smallest_fix": "State that difference_truncated is NULL in every row and drop truncated_difference_share (or make it return NULL)."
+    }
+   ]
+  }
+ }
+}

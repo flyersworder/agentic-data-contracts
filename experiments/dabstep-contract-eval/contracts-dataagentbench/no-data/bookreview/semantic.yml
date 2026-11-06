@@ -1,0 +1,148 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+metrics:
+- name: review_count
+  description: Number of reviews (one row of review_database.review per review).
+  sql_expression: COUNT(*)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: average_rating
+  description: 'Mean review rating given by reviewers, on the 1.0-5.0 scale. Cast to DOUBLE so the average
+    is not integer-truncated.
+
+    '
+  sql_expression: AVG(CAST(rating AS DOUBLE))
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: total_helpful_votes
+  description: Total number of helpful votes received by reviews.
+  sql_expression: SUM(helpful_vote)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: verified_purchase_count
+  description: Number of reviews whose purchase was verified (verified_purchase = 1).
+  sql_expression: COUNT(*) FILTER (WHERE verified_purchase = 1)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: verified_purchase_share
+  description: Share of reviews whose purchase was verified (verified_purchase = 1), as a fraction 0-1.
+  sql_expression: COUNT(*) FILTER (WHERE verified_purchase = 1) * 1.0 / NULLIF(COUNT(*), 0)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: book_count
+  description: Number of distinct books (unique book_id).
+  sql_expression: COUNT(DISTINCT book_id)
+  source_model: books_database.books_info
+  domains:
+  - books
+- name: average_price
+  description: Mean book price over books with a non-null price.
+  sql_expression: AVG(price)
+  source_model: books_database.books_info
+  domains:
+  - books
+- name: total_rating_number
+  description: 'Sum of books_info.rating_number, the total number of ratings received per book. This is
+    a count of ratings, not a rating value.
+
+    '
+  sql_expression: SUM(rating_number)
+  source_model: books_database.books_info
+  domains:
+  - books
+- name: book_review_count
+  description: 'Number of reviews matched to books via review.purchase_id = books_info.book_id. Group
+    by b.book_id (and b.title, b.author, etc.) for per-book counts.
+
+    '
+  sql_expression: COUNT(r.purchase_id)
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN books_database.books_info b ON r.purchase_id = b.book_id
+  grain: one row per review joined to the book it reviews
+  domains:
+  - reviews
+  - books
+- name: book_average_rating
+  description: 'Mean review rating (1.0-5.0 scale) of reviews joined to their book via review.purchase_id
+    = books_info.book_id. Group by book attributes (b.book_id, b.author, b.categories, ...) as needed.
+
+    '
+  sql_expression: AVG(CAST(r.rating AS DOUBLE))
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN books_database.books_info b ON r.purchase_id = b.book_id
+  grain: one row per review joined to the book it reviews
+  domains:
+  - reviews
+  - books
+tables:
+- schema: books_database
+  table: books_info
+  columns:
+  - name: title
+    type: VARCHAR
+    description: Book title.
+  - name: subtitle
+    type: VARCHAR
+    description: Book subtitle.
+  - name: author
+    type: VARCHAR
+    description: Book author(s).
+  - name: rating_number
+    type: BIGINT
+    description: Total number of ratings received (a count, not a rating value).
+  - name: features
+    type: VARCHAR
+    description: Book features, stored as a string representation of a list/dict.
+  - name: description
+    type: VARCHAR
+    description: Book description, stored as a string representation of a list/dict.
+  - name: price
+    type: DOUBLE
+    description: Book price.
+  - name: store
+    type: VARCHAR
+    description: Store information.
+  - name: categories
+    type: VARCHAR
+    description: Book categories, stored as a string representation of a list/dict.
+  - name: details
+    type: VARCHAR
+    description: Additional book details.
+  - name: book_id
+    type: VARCHAR
+    description: Unique book identifier; review_database.review.purchase_id links to it.
+- schema: review_database
+  table: review
+  columns:
+  - name: rating
+    type: BIGINT
+    description: Rating given by reviewer, 1.0-5.0 scale (documented as float, stored as BIGINT).
+  - name: title
+    type: VARCHAR
+    description: Review title (not the book title).
+  - name: text
+    type: VARCHAR
+    description: Review text content.
+  - name: review_time
+    type: VARCHAR
+    description: Timestamp when the review was posted, stored as a string; inspect the format before parsing
+      (e.g. TRY_CAST(review_time AS TIMESTAMP)).
+  - name: helpful_vote
+    type: BIGINT
+    description: Number of helpful votes received.
+  - name: verified_purchase
+    type: BIGINT
+    description: Whether the purchase was verified (boolean stored as 1 = verified, 0 = not verified).
+  - name: purchase_id
+    type: VARCHAR
+    description: Unique identifier linking to book_id in books_database.books_info.
+relationships:
+- from: review_database.review.purchase_id
+  to: books_database.books_info.book_id
+  type: many_to_one
+  description: Each review's purchase_id links to the reviewed book's book_id in books_info.

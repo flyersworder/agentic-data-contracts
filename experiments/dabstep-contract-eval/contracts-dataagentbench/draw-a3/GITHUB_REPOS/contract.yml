@@ -1,0 +1,133 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: GITHUB_REPOS, author: claudeopus5.5
+version: '1.0'
+name: github-repos
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: metadata_database
+    description: 'Metadata about GitHub repositories: declared programming languages (natural-language
+      text), licenses, and repository-level statistics (watch_count). Described as stored in SQLite, but
+      queried here as a schema of one DuckDB database, in DuckDB SQL.'
+    tables:
+    - languages
+    - licenses
+    - repos
+  - schema: artifacts_database
+    description: 'GitHub repository artifacts: file contents, commit history and file-level metadata.
+      Queried as a schema of the same DuckDB database; cross-database joins are written as <schema>.<table>
+      in one query.'
+    tables:
+    - commits
+    - contents
+    - files
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: repositories
+    summary: 'Repository metadata: languages, licenses, watch counts (metadata_database)'
+    description: 'Every repo_name in every table is the GitHub repository name in `owner/repo` format,
+      and is the join key across both databases (artifacts_database.contents uses sample_repo_name).
+
+      languages: one row per repository (3,325,634 rows, repo_name unique). language_description lists
+      the programming language(s) used, in natural language. Checked in the data: it uses exactly these
+      templates — ''No language information available.'' (368,341 rows: no languages), ''The codebase
+      includes: L (N bytes), L (N bytes).'', ''This repository is mainly written in L (N bytes), with
+      additional code in L (N bytes), ...'', ''While most of the project is built in L (N bytes), it also
+      incorporates ...'', ''The majority of the code is in L (N bytes), followed by ...'', ''This project
+      is built entirely in L (N bytes of code).'', and ''Nearly all of the code is in L, totaling N bytes.''.
+      Byte counts carry thousands commas (''1,089,067''). Language names may contain spaces, ''+'', ''#'',
+      ''-'' and one parenthesised name exists (''Graphviz (DOT)''). In every row the languages are listed
+      in descending byte order, so the first listed is the largest. Do NOT use LIKE ''%C%'' style matching
+      for a language (it would hit C++, C#, Objective-C, CSS...): use the metric repo_language_names and
+      test membership with list_contains(<that expression>, ''Python'') — case-sensitive exact names,
+      e.g. ''JavaScript'', ''C++'', ''Jupyter Notebook''.
+
+      licenses: one row per repository (same 3,325,634 repos as languages). license is a lowercase identifier;
+      the values present are apache-2.0, mit, gpl-2.0, gpl-3.0, lgpl-2.1, lgpl-3.0, agpl-3.0, bsd-2-clause,
+      bsd-3-clause, isc, mpl-2.0, epl-1.0, cc0-1.0, unlicense, artistic-2.0.
+
+      repos: one row per repository (400,000 rows, repo_name unique), a subset of the repos in languages/licenses.
+      watch_count is the number of users watching the repository on GitHub (2 to 90,457).
+
+      '
+    tables:
+    - metadata_database.languages
+    - metadata_database.licenses
+    - metadata_database.repos
+  - name: commits
+    summary: Commit history (artifacts_database.commits) and its JSON-like fields
+    description: 'One row per commit (commit SHA unique, 17,976 rows) covering only six repositories:
+      torvalds/linux, apple/swift, twbs/bootstrap, Microsoft/vscode, facebook/react, tensorflow/tensorflow.
+      tree is the SHA of the commit''s tree object.
+
+      parent is a JSON array of parent SHAs; more than one parent means a merge commit (every commit here
+      has at least one parent; up to 9).
+
+      author / committer are JSON objects with keys date (epoch MICROseconds), email (local part hashed),
+      name, time_sec (epoch seconds, = date/1e6) and tz_offset (timezone offset in minutes as recorded).
+      Two author values are malformed JSON (escaped quotes in the name), so json_extract on author raises
+      an error; the metrics extract numeric fields and email with regexp_extract and name only when json_valid(author).
+      Author time is when the change was written; committer time is when it was committed.
+
+      subject is the short subject line, message the full message. trailer is a JSON array of {email,
+      key, value} objects (e.g. key ''Signed-off-by'', ''Cc'', ''Acked-by''); 383 trailer values are truncated,
+      invalid JSON — guard with json_valid(trailer). difference is a JSON array of file changes with keys
+      old_path, new_path, old_mode, new_mode, old_sha1, new_sha1 (old_mode/old_sha1 absent for added files,
+      new_mode/new_sha1 absent for deleted files); it is always valid JSON. difference_truncated (indicator
+      that the difference data is truncated) is NULL in every row. encoding is NULL except 7 commits (ISO-8859-1
+      / ISO-8859-2).
+
+      '
+    tables:
+    - artifacts_database.commits
+  - name: files_and_contents
+    summary: File-level metadata (files) and file blobs (contents)
+    description: 'files: one row per (repo_name, ref, path) — file metadata recorded at ref (a branch
+      such as ''refs/heads/master''). id is the blob identifier. mode is the git file mode as a decimal
+      integer; values present: 33188 (octal 100644, normal file), 33261 (100755, executable file), 40960
+      (120000, symlink — symlink_target is set exactly for these rows) and 57344 (160000, a git submodule
+      / gitlink entry; not named in the documentation, interpreted from git''s mode convention).
+
+      contents: one row per blob id (24,286 rows). content is the textual file content; for large or binary
+      files it may contain placeholders or truncated values — it is NULL for 3,828 rows (3,793 of them
+      binary). sample_repo_name / sample_ref / sample_path give one sample location of the blob. repo_data_description
+      is a natural-language summary of the original size, binary flag, copies and mode in one of 12 templates
+      (e.g. ''Non-binary content file (1455 bytes) seen 8 times, using sample mode 33188.'', ''A 170263-byte
+      binary file appearing 3 times, with sample mode code 33188.''); numbers have no thousands commas.
+      Use the content_* metrics to parse it: ''non-binary'' marks a non-binary file, otherwise the file
+      is binary; ''N times'' is the number of copies; the mode follows ''mode'', ''mode code'' or ''mode:''.
+
+      contents.id joins files.id (same blob identifier), but only a few hundred files rows have their
+      blob in contents.
+
+      '
+    tables:
+    - artifacts_database.files
+    - artifacts_database.contents
+  rules:
+  - name: parse_text_fields_with_metrics
+    description: 'Languages, file size/binary/copies/mode and commit author/committer fields must be derived
+      with the declared metrics (exact list parsing, regexp extraction guarded against malformed JSON),
+      not with substring LIKE matches or unguarded json_extract.
+
+      '
+    enforcement: warn
+  - name: join_on_repo_name
+    description: 'Join across databases on repo_name in owner/repo format (contents.sample_repo_name for
+      contents). Repo names are case-sensitive as stored.
+
+      '
+    enforcement: warn

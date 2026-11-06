@@ -32,8 +32,12 @@ docs/paper/pvldb.out
 docs/paper/pvldb.bbl
 docs/paper/pvldb.blg
 
-# Local git worktrees (isolated workspaces for plan execution)
+# Local git worktrees (isolated workspaces for plan execution). The harness
+# puts its own under .claude/worktrees/; ignoring them also keeps ty, which
+# respects .gitignore, from checking a worktree's nested experiments/ copy
+# against the root venv.
 .worktrees/
+.claude/worktrees/
 
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/

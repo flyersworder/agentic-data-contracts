@@ -1,0 +1,137 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: googlelocal, author: claudeopus5.5
+metrics:
+- name: review_timestamp
+  description: 'Parsed TIMESTAMP of a review. review.time is text in three formats (ISO ''%Y-%m-%d %H:%M:%S'';
+    ''%B %d, %Y at %I:%M %p''; ''%d %b %Y, %H:%M''); this COALESCE of TRY_STRPTIME parses all 2000 rows.
+    Use year(...) etc. on it.
+
+    '
+  sql_expression: "COALESCE(TRY_STRPTIME(r.time, '%Y-%m-%d %H:%M:%S'),\n         TRY_STRPTIME(r.time,\
+    \ '%B %d, %Y at %I:%M %p'),\n         TRY_STRPTIME(r.time, '%d %b %Y, %H:%M'))\n"
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: review_count
+  description: Number of review rows (alias r = review_database.review).
+  sql_expression: COUNT(*)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: average_rating
+  description: Mean of review.rating (1-5 scale) over the reviews in scope.
+  sql_expression: AVG(r.rating)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: business_average_rating
+  description: 'Average review rating per business, joining reviews to business metadata on gmap_id. Group
+    by b.gmap_id, b.name.
+
+    '
+  sql_expression: AVG(r.rating)
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN business_database.business_description b ON r.gmap_id = b.gmap_id
+  grain: one review row with its business
+  domains:
+  - reviews
+  - businesses
+- name: business_state_code
+  description: 'Two-letter US state parsed from the address fragment "City, ST 12345" in the description
+    (documentation: needed information comes from the description column). All 78 parseable rows are ''CA'';
+    empty string when the description has no location (gmap_36).
+
+    '
+  sql_expression: regexp_extract(b.description, ',\s*([A-Z]{2})\s+(\d{5})', 1)
+  source_model: business_database.business_description
+  from_sql: business_database.business_description b
+  grain: one business
+  domains:
+  - businesses
+- name: business_zip_code
+  description: 'Five-digit ZIP code parsed from the description''s "City, ST 12345" fragment; empty string
+    when absent.
+
+    '
+  sql_expression: regexp_extract(b.description, ',\s*([A-Z]{2})\s+(\d{5})', 2)
+  source_model: business_database.business_description
+  from_sql: business_database.business_description b
+  grain: one business
+  domains:
+  - businesses
+- name: business_operating_status
+  description: 'Normalised operating status from the `state` column (status, not US state): ''permanently
+    closed'', ''temporarily closed'', ''open'' (any value starting ''Open'' — ''Open now'', ''Open 24
+    hours'', ''Open ⋅ Closes ...'', ''Opens soon ...'' — or ''Closed ⋅ Opens ...'', which is closed only
+    at collection time but operating), NULL when state is NULL.
+
+    '
+  sql_expression: "CASE\n  WHEN b.state IS NULL THEN NULL\n  WHEN b.state = 'Permanently closed' THEN\
+    \ 'permanently closed'\n  WHEN b.state = 'Temporarily closed' THEN 'temporarily closed'\n  ELSE 'open'\n\
+    END\n"
+  source_model: business_database.business_description
+  from_sql: business_database.business_description b
+  grain: one business
+  domains:
+  - businesses
+tables:
+- schema: business_database
+  table: business_description
+  columns:
+  - name: name
+    type: VARCHAR
+    description: Business name.
+  - name: gmap_id
+    type: VARCHAR
+    description: Google Maps business identifier (links to review_database.review.gmap_id). Unique; values
+      like 'gmap_44'.
+  - name: description
+    type: VARCHAR
+    description: Business description, free text with a leading space; usually contains 'City, CA 12345'.
+      Source for location (see business_state_code, business_zip_code).
+  - name: num_of_reviews
+    type: BIGINT
+    description: 'Total number of reviews for this business (stated total; matches review row count except
+      gmap_60: 48 vs 17).'
+  - name: hours
+    type: VARCHAR
+    description: 'Operating hours: JSON text list of [weekday, hours] pairs, e.g. [["Monday","Closed"],["Tuesday","9AM–5PM"]]
+      (en dash). NULL for 13 rows.'
+  - name: MISC
+    type: VARCHAR
+    description: 'Additional miscellaneous business information: JSON object text, category -> array of
+      strings (e.g. "Service options", "Accessibility", "Payments"). NULL for 16 rows.'
+  - name: state
+    type: VARCHAR
+    description: Business operating status (e.g. open, closed, temporarily closed), NOT a US state. Values
+      like 'Open now', 'Open ⋅ Closes 5PM', 'Closed ⋅ Opens 10AM', 'Permanently closed', 'Temporarily
+      closed'; NULL for 9.
+- schema: review_database
+  table: review
+  columns:
+  - name: name
+    type: VARCHAR
+    description: Name of the reviewer.
+  - name: time
+    type: VARCHAR
+    description: Timestamp of the review as text in three mixed formats; parse with metric review_timestamp.
+  - name: rating
+    type: BIGINT
+    description: Rating given by the reviewer (1-5 scale). No NULLs.
+  - name: text
+    type: VARCHAR
+    description: Review text content.
+  - name: gmap_id
+    type: VARCHAR
+    description: Google Maps business identifier; joins to business_description.gmap_id.
+relationships:
+- from: review_database.review.gmap_id
+  to: business_database.business_description.gmap_id
+  type: many_to_one
+  description: Reviews join to business metadata on gmap_id; every review matches a business.

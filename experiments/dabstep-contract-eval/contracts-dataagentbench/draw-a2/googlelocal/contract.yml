@@ -1,0 +1,89 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: googlelocal, author: claudeopus5.5
+version: '1.0'
+name: googlelocal
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: business_database
+    description: Business metadata from Google Maps (business name, description, hours, etc.) collected
+      up to September 2021 in the United States. (Described as PostgreSQL; here a DuckDB schema.)
+    tables:
+    - business_description
+  - schema: review_database
+    description: Review information from Google Maps (reviewer name, ratings, text, etc.) collected up
+      to September 2021 in the United States. (Described as SQLite; here a DuckDB schema.)
+    tables:
+    - review
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: businesses
+    summary: 'Google Maps business metadata: name, description, hours, MISC attributes, status'
+    description: 'business_database.business_description holds one row per business (79 rows, gmap_id
+      unique, names unique). Fields: name (business name); gmap_id (Google Maps business identifier, links
+      to review_database); description (business description, often starts with a leading space and mentions
+      the city/ZIP, e.g. ''Los Angeles, CA 90023''); num_of_reviews (total number of reviews for this
+      business); hours (operating hours, a list); MISC (additional miscellaneous business information,
+      a dict); state (business operating status, e.g. open, closed, temporarily closed).
+
+      STORAGE FINDINGS: hours is a VARCHAR holding a JSON array of [day, hours] pairs, e.g. [["Thursday","6:30AM–6PM"],...,["Monday","Closed"]];
+      the time range separator is an EN DASH ''–'', not ''-''. 13 rows have NULL hours. Parse with CAST(hours::JSON
+      AS VARCHAR[][]). MISC is a VARCHAR holding a JSON object mapping a category to a list of strings,
+      e.g. {"Service options": ["Takeout","Dine-in","Delivery"], "Accessibility": ["Wheelchair accessible
+      entrance"]}; 16 rows NULL. Keys seen: Accessibility, Service options, Planning, Amenities, Health
+      & safety, Offerings, Payments, Atmosphere, Popular for, Highlights, Crowd, From the business, Recycling,
+      Dining options. Keys contain spaces, so use MISC::JSON->''Service options'' (or json_extract(MISC,
+      ''$."Service options"'')). state is free text from Google Maps, not a clean enum: values like ''Open
+      ⋅ Closes 5PM'', ''Open now'', ''Open 24 hours'', ''Closed ⋅ Opens 10AM'', ''Opens soon ⋅ 10AM'',
+      ''Permanently closed'', ''Temporarily closed'' (separator is ''⋅''); 9 rows NULL. ''Closed ⋅ Opens
+      ...'' means closed at the moment of collection, not permanently closed — see metric business_operating_status.
+
+      '
+    tables:
+    - business_database.business_description
+  - name: reviews
+    summary: 'Google Maps reviews: reviewer, timestamp, 1-5 rating, text'
+    description: 'review_database.review holds one row per review (2000 rows, all 79 businesses covered,
+      every gmap_id matches a business). Fields: name (name of the reviewer), time (timestamp of the review),
+      rating (rating given by the reviewer, 1-5 scale; no NULLs, values 1..5), text (review text content),
+      gmap_id (Google Maps business identifier).
+
+      STORAGE FINDING: time is VARCHAR in three mixed formats: ''2021-04-12 17:07:52'' (ISO, ~680 rows),
+      ''08 Mar 2020, 00:04'', and ''September 03, 2020 at 04:15 PM''. Never compare or sort the raw string;
+      use the metric review_timestamp, which parses all 2000 rows (range 2011-05-04 to 2021-09-08).
+
+      JOIN: review.gmap_id = business_description.gmap_id (many reviews to one business). business_description.num_of_reviews
+      is the stored total and can differ from the count of rows in review (e.g. gmap_60: 48 vs 17); when
+      asked about reviews in this data, count review rows (review_count); use num_of_reviews only when
+      the stored total is asked for.
+
+      '
+    tables:
+    - review_database.review
+    - business_database.business_description
+  rules:
+  - name: parse_review_time
+    description: 'Filter, sort or group reviews by time only through the review_timestamp expression (three
+      mixed string formats); never on the raw time string.
+
+      '
+    enforcement: warn
+  - name: join_on_gmap_id
+    description: 'Link reviews to businesses on gmap_id, never on name (review.name is the reviewer, business_description.name
+      is the business).
+
+      '
+    enforcement: warn

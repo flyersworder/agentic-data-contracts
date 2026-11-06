@@ -1,14 +1,14 @@
 \section{The Four Single Runs in Detail}
 \label{app:single}
 
-This appendix keeps the preprint's analysis of the four-arm ablation on
-\mGLM{}, \mDS{}, \mSON{} and \mGPT{}, one run each: the full tables, the
-compiled ceiling and its buckets, the clause analysis of the submitted
-SQL, efficiency, and governance. The measurements stand. Its account of
-\emph{why} the contract beats the manual, that the rule is one lookup away
-rather than buried in a long prompt, is superseded by
-Section~\ref{sec:delivery}: most of that lead was two facts the manual does
-not state. Where the text below reads the clause analysis as evidence of
+This appendix gives the analysis of the four-arm ablation on the
+single-run models, \mGLM{}, \mDS{}, \mSON{} and \mGPT{}: the full tables,
+the compiled ceiling and its buckets, the clause analysis of the submitted
+SQL, efficiency, and governance. The natural account of \emph{why} the
+contract beats the manual, that the rule is one lookup away rather than
+buried in a long prompt, does not survive Sections~\ref{sec:knowledge}
+and~\ref{sec:delivery}: on the models tested there, most of that lead was
+two facts the manual does not state. Where the text below reads the clause analysis as evidence of
 placement, read it as evidence that the contract arm's SQL carries facts
 the manual arm was never given. The scaffolding step reported here at
 $+14$ to $+15$ points on the two frontier models is not reproduced by the
@@ -124,8 +124,9 @@ puts 191k input tokens per task in front of \mSON{} against \armS{}'s 91k,
 and a context-load effect would produce the same null; in an independent
 study, a semantic layer pasted into the prompt costs \mSON{} 11.9 points
 against no layer, the largest drop of six models~\cite{evoontology}. The
-clause analysis of Section~\ref{sec:clauses} cannot separate the two, since
-rules absent from the SQL is what both predict.
+clause analysis of Section~\ref{sec:clauses} does not separate the two:
+\mSON{}'s \armM{} writes the fee clauses more often than \armS{} does and
+still scores no better.
 
 \subsubsection{Content dominates scaffolding}
 \label{app:decomposition-k1}
@@ -269,7 +270,7 @@ price of making an agent derive a query the contract could have
 pre-computed. Against a ceiling of 100\% the gap is arithmetically the arm's
 error rate, and ``errors fall as models improve'' is not a finding. The
 finding is the contrast with \emph{derived}, whose shortfall we call the
-\emph{composition gap}: between the flash models and the strongest one, the same capability increment closes 87\% of the
+\emph{composition gap}: between \mGLM{} and \mGPT{}, the same capability increment closes 87\% of the
 macro-bucket gap and 19\% of the derived-bucket one, and \mSON{}'s
 \emph{macro} score falls between the flash models and \mGPT{} while its
 \emph{derived} score exceeds all three. We recorded the direction of this
@@ -387,35 +388,34 @@ idea, not whether it copied the contract's phrasing.
 \toprule
 \tabhead{Wrote all six clauses} & \mGLM{} & \mDS{} & \mSON{} & \mGPT{} \\
 \midrule
-\armS{} & 7\% & 4\% & 3\% & 8\% \\
-\armH{} & 14\% & 4\% & 4\% & 8\% \\
-\armM{} & 3\% & 9\% & 4\% & 4\% \\
-\armC{} & \textbf{39\%} & \textbf{65\%} & \textbf{55\%} & \textbf{98\%} \\
+\armS{} & 0\% & 7\% & 25\% & 36\% \\
+\armH{} & 7\% & 7\% & 37\% & 33\% \\
+\armM{} & 30\% & 38\% & 45\% & 52\% \\
+\armC{} & \textbf{47\%} & \textbf{75\%} & \textbf{75\%} & \textbf{98\%} \\
 \bottomrule
 \end{tabular}
 \caption{Share of the 97 tasks requiring all six fee clauses (69 on \mDS{})
 on which the agent's submitted SQL expresses all six. \armM{} holds the same
 knowledge as prose in its system prompt. \armC{} against \armM{} is
-$p{=}2{\times}10^{-10}$, $3{\times}10^{-12}$, $9{\times}10^{-16}$ and
-$2{\times}10^{-47}$ (Fisher exact).}
+$p{=}0.018$, $1{\times}10^{-5}$, $3{\times}10^{-5}$ and
+$4{\times}10^{-15}$ (Fisher exact).}
 \label{tab:clauses}
 \end{table}
 
-\textbf{Note what does not move.} \armM{} writes no more of the contract's
-clauses on a strong model than on a weak one (3\%, 9\%, 4\%, 4\%), while
-\armC{} reaches 55\% and 98\% on the two frontier models. \mSON{} is the
-extreme case: 4\% against 55\% in the SQL, no better than a bare schema
-against 45 points above it in accuracy. Capability does not, on its own,
-make a model extract structure from prose; it makes a model much better at
-\emph{using} structure it is handed. That is the same asymmetry the
-derivation gap shows (Section~\ref{sec:ceiling}), measured on behaviour
-instead of outcomes.
+\textbf{The contract leads on every model; capability raises both arms.}
+\armM{} writes all six on 30\% of the tasks on \mGLM{} and 52\% on
+\mGPT{}, and \armS{}, with no manual, rises from 0\% to 36\%: a stronger
+model extracts more of the structure from prose and infers some of it from
+the schema. \armC{} leads \armM{} by 17, 37, 30 and 46 points. Most of the
+gap is one clause: \armM{} writes the capture-delay band mapping on 57 to
+58\% of these tasks on all four models, against 88 to 100\% for \armC{}.
 
 \textbf{What this does not measure.} Clause presence does not predict
 success: within every arm on every model, attempts that got the task right
 and attempts that got it wrong write the same clauses (every Fisher
-$p{\ge}0.14$), and \armH{} on \mGLM{} writes more clauses than \armM{} while
-scoring at the bare-schema floor. The measure captures whether the
+$p{\ge}0.077$), and \mSON{}'s \armM{} writes all six on 45\% of these tasks
+against \armS{}'s 25\% yet scores no better on the hard split (79 against
+76 of 332). The measure captures whether the
 contract's vocabulary reaches the query, not whether the query is any good.
 
 \subsubsection{Less work, and usually less money}
@@ -431,8 +431,8 @@ contract's vocabulary reaches the query, not whether the query is any good.
 \midrule
 \multicolumn{5}{@{}l}{\emph{\mGLM{}}}\\
 Turns / task & 12.1 & 8.4 & 9.8 & \textbf{7.1} \\
-Tool calls & 5{,}134 & 4{,}110 & 4{,}282 & \textbf{3{,}355} \\
-Reasoning tokens & 428k & 525k & 400k & \textbf{154k} \\
+Tool calls & 5{,}137 & 4{,}105 & 4{,}286 & \textbf{3{,}355} \\
+Reasoning tokens & 445k & 544k & 416k & \textbf{154k} \\
 Cost / correct & \$0.0084 & \$0.0080 & \$0.0076 & \textbf{\$0.0029} \\
 Forced answers & 41 & 0 & 18 & \textbf{0} \\
 \midrule
@@ -590,8 +590,7 @@ deter. \mSON{} supplies the hazard \mGPT{} lacks, with 22 statements on two
 frontier model on both sides. The idiom rather than the capability predicts
 the attempt: \mGPT{} holds intermediate results in common table expressions
 on 59\% and 55\% of its ungoverned traces against 26--37\% for the other
-three models, and never issues \texttt{CREATE TEMP}, the statement behind every
-mutation attempt on \mGLM{}.
+three models, and never attempts \texttt{CREATE TEMP}, which \mGLM{} attempts 22 times.
 
 The governed arms have two defences, both declared as data in the contract:
 the forbidden operations and the table allow-list are rendered into the

@@ -1,0 +1,361 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: crmarenapro, author: claudeopus5.5
+metrics:
+- name: normalized_id
+  description: 'Canonical form of any ID-like value: trimmed and with the leading ''#'' removed. Apply
+    to both sides of every join/filter (example shows Opportunity.AccountId; substitute the column).
+
+    '
+  sql_expression: ltrim(trim(AccountId), '#')
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - data_quality
+- name: clean_text
+  description: 'Canonical form of a text value: trim(). Example on StageName; use the same for Status,
+    Name, Subject, FirstName, LastName, Email (lower(trim(Email)) for email matching).
+
+    '
+  sql_expression: trim(StageName)
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - data_quality
+- name: parse_timestamp
+  description: 'Parses VARCHAR timestamps of the form ''2024-07-27T09:30:00.000+0000'' (UTC) into a TIMESTAMP.
+    Example on Opportunity.CreatedDate; same format in Lead.CreatedDate, Quote.CreatedDate, Case createddate/closeddate,
+    casehistory__c.createddate, emailmessage.messagedate, livechattranscript.endtime, Event.StartDateTime,
+    VoiceCallTranscript__c.CreatedDate.
+
+    '
+  sql_expression: CAST(substr(trim(CreatedDate), 1, 19) AS TIMESTAMP)
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - data_quality
+- name: opportunity_count
+  description: Number of distinct opportunities (normalized Id).
+  sql_expression: COUNT(DISTINCT ltrim(trim(Id), '#'))
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: total_pipeline_amount
+  description: Sum of Opportunity.Amount over the opportunities in scope.
+  sql_expression: SUM(Amount)
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: closed_opportunity_amount
+  description: 'Sum of Amount for opportunities in the closed stage. ''Closed'' (after trim) is the only
+    closed StageName in the data; there is no won/lost split.
+
+    '
+  sql_expression: SUM(Amount) FILTER (WHERE trim(StageName) = 'Closed')
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: opportunity_win_rate
+  description: 'Share of opportunities that reached StageName ''Closed'' (trimmed). INTERPRETATION: with
+    no won/lost split, ''Closed'' is read as a closed (won) deal.
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE trim(StageName) = 'Closed') * 1.0 / NULLIF(COUNT(*), 0)
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: opportunity_probability
+  description: Opportunity win probability in percent, cast from VARCHAR ('75.0').
+  sql_expression: CAST(Probability AS DOUBLE)
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: weighted_pipeline_amount
+  description: 'Probability-weighted amount: SUM(Amount * Probability / 100).'
+  sql_expression: SUM(Amount * CAST(Probability AS DOUBLE) / 100)
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: opportunity_sales_cycle_days
+  description: Days from Opportunity CreatedDate to CloseDate.
+  sql_expression: date_diff('day', CAST(substr(trim(CreatedDate), 1, 10) AS DATE), CAST(trim(CloseDate)
+    AS DATE))
+  source_model: sales_pipeline.Opportunity
+  domains:
+  - sales_pipeline
+- name: lead_conversion_rate
+  description: 'Share of leads converted, using the Salesforce flag IsConverted = 1. OBSERVED: 1269 leads
+    have Status ''Converted'' but only 885 have IsConverted = 1 (with ConvertedDate); the other 384 ''Converted''-status
+    leads lack conversion data. State which reading you use if it matters.
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE IsConverted = 1) * 1.0 / NULLIF(COUNT(*), 0)
+  source_model: sales_pipeline.Lead
+  domains:
+  - sales_pipeline
+- name: lead_conversion_days
+  description: Days from Lead CreatedDate to ConvertedDate, for converted leads (NULL otherwise).
+  sql_expression: date_diff('day', CAST(substr(trim(CreatedDate), 1, 10) AS DATE), CAST(trim(ConvertedDate)
+    AS DATE))
+  source_model: sales_pipeline.Lead
+  domains:
+  - sales_pipeline
+- name: quote_line_total
+  description: 'QuoteLineItem net total: Quantity * UnitPrice * (1 - Discount/100); Discount is a percent.
+    Equals the stored TotalPrice (verified).
+
+    '
+  sql_expression: CAST(Quantity AS DOUBLE) * CAST(UnitPrice AS DOUBLE) * (1 - CAST(Discount AS DOUBLE)
+    / 100)
+  source_model: sales_pipeline.QuoteLineItem
+  domains:
+  - sales_pipeline
+- name: opportunity_line_total
+  description: Sum of OpportunityLineItem.TotalPrice (VARCHAR, cast to DOUBLE; already net of discount).
+  sql_expression: SUM(CAST(TotalPrice AS DOUBLE))
+  source_model: sales_pipeline.OpportunityLineItem
+  domains:
+  - sales_pipeline
+- name: order_revenue
+  description: 'Order revenue: SUM(Quantity * UnitPrice) over OrderItem lines (both VARCHAR, cast).'
+  sql_expression: SUM(CAST(Quantity AS DOUBLE) * CAST(UnitPrice AS DOUBLE))
+  source_model: products_orders.OrderItem
+  domains:
+  - products_orders
+- name: order_revenue_by_account
+  description: Order revenue joined to orders so it can be grouped by account/owner/date; joins on normalized
+    Ids.
+  sql_expression: SUM(CAST(oi.Quantity AS DOUBLE) * CAST(oi.UnitPrice AS DOUBLE))
+  source_model: products_orders.OrderItem
+  from_sql: 'products_orders.OrderItem oi JOIN products_orders."Order" ord ON ltrim(trim(oi.OrderId),
+    ''#'') = ltrim(trim(ord.Id), ''#'')
+
+    '
+  grain: one row per order line item with its order
+  domains:
+  - products_orders
+- name: case_count
+  description: Number of distinct support cases (normalized id).
+  sql_expression: COUNT(DISTINCT ltrim(trim(id), '#'))
+  source_model: support.Case
+  domains:
+  - support
+- name: case_handle_time_hours
+  description: 'Hours from Case createddate to closeddate (closed cases only; closeddate is NULL otherwise).
+    Average with AVG(...).
+
+    '
+  sql_expression: date_diff('second', CAST(substr(trim(createddate), 1, 19) AS TIMESTAMP), CAST(substr(trim(closeddate),
+    1, 19) AS TIMESTAMP)) / 3600.0
+  source_model: support.Case
+  domains:
+  - support
+- name: case_issue
+  description: Issue name of a case, via Case.issueid__c -> issue__c.id (normalized).
+  sql_expression: trim(i.name)
+  source_model: support.Case
+  from_sql: 'support."Case" c JOIN support.issue__c i ON ltrim(trim(c.issueid__c), ''#'') = ltrim(trim(i.id),
+    ''#'')
+
+    '
+  grain: one row per case
+  domains:
+  - support
+- name: case_product
+  description: Product a case concerns, via Case.orderitemid__c -> OrderItem -> Product2 (normalized Ids).
+  sql_expression: trim(p.Name)
+  source_model: support.Case
+  from_sql: 'support."Case" c JOIN products_orders.OrderItem oi ON ltrim(trim(c.orderitemid__c), ''#'')
+    = ltrim(trim(oi.Id), ''#'') JOIN products_orders.Product2 p ON ltrim(trim(oi.Product2Id), ''#'') =
+    ltrim(trim(p.Id), ''#'')
+
+    '
+  grain: one row per case
+  domains:
+  - support
+  - products_orders
+- name: case_owner_assignment_count
+  description: Number of 'Owner Assignment' history entries (transfers incl. first assignment); group
+    by normalized caseid__c.
+  sql_expression: COUNT(*) FILTER (WHERE trim(field__c) = 'Owner Assignment')
+  source_model: support.casehistory__c
+  domains:
+  - support
+- name: event_duration_minutes
+  description: 'Total event minutes: SUM of DurationInMinutes cast to INTEGER.'
+  sql_expression: SUM(CAST(DurationInMinutes AS INTEGER))
+  source_model: activities.Event
+  domains:
+  - activities
+- name: account_in_territory
+  description: 'Territory of an account: the territory whose comma-separated state list (Territory2.Description)
+    contains the account''s trimmed ShippingState.
+
+    '
+  sql_expression: trim(t.Name)
+  source_model: core_crm.Account
+  from_sql: 'core_crm.Account a JOIN territory.Territory2 t ON list_contains(string_split(t.Description,
+    '',''), trim(a.ShippingState))
+
+    '
+  grain: one row per (account, territory covering its shipping state)
+  domains:
+  - territory
+  - accounts_and_people
+- name: agent_territories
+  description: Territories assigned to a user (agent), joined on normalized Ids.
+  sql_expression: trim(t.Name)
+  source_model: territory.UserTerritory2Association
+  from_sql: 'territory.UserTerritory2Association ut JOIN territory.Territory2 t ON ltrim(trim(ut.Territory2Id),
+    ''#'') = ltrim(trim(t.Id), ''#'') JOIN core_crm."User" u ON ltrim(trim(ut.UserId), ''#'') = ltrim(trim(u.Id),
+    ''#'')
+
+    '
+  grain: one row per user-territory assignment
+  domains:
+  - territory
+  - accounts_and_people
+tables:
+- schema: sales_pipeline
+  table: Opportunity
+  columns:
+  - name: Id
+    type: VARCHAR
+    description: Opportunity Id (prefix 006); may carry leading '#'.
+  - name: ContractID__c
+    type: VARCHAR
+    description: Linked Contract Id when the deal has a contract.
+  - name: AccountId
+    type: VARCHAR
+    description: Customer Account Id; normalize before join.
+  - name: ContactId
+    type: VARCHAR
+    description: Primary Contact Id; normalize before join.
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning sales agent (User Id); normalize before join.
+  - name: Probability
+    type: VARCHAR
+    description: Win probability percent as text, e.g. '75.0'.
+  - name: Amount
+    type: DOUBLE
+    description: Deal amount; never null.
+  - name: StageName
+    type: VARCHAR
+    description: Qualification, Discovery, Quote, Negotiation, Closed (trim first).
+  - name: CreatedDate
+    type: VARCHAR
+    description: Timestamp 'YYYY-MM-DDTHH:MM:SS.000+0000'.
+  - name: CloseDate
+    type: VARCHAR
+    description: Date 'YYYY-MM-DD'.
+- schema: sales_pipeline
+  table: Lead
+  columns:
+  - name: Status
+    type: VARCHAR
+    description: New, Working, Qualified, Converted (trim first).
+  - name: IsConverted
+    type: BIGINT
+    description: 1 = converted (authoritative); 384 'Converted'-status leads have 0.
+  - name: ConvertedDate
+    type: VARCHAR
+    description: Date 'YYYY-MM-DD'; set only when IsConverted = 1.
+  - name: CreatedDate
+    type: VARCHAR
+    description: Timestamp 'YYYY-MM-DDTHH:MM:SS.000+0000'.
+  - name: OwnerId
+    type: VARCHAR
+    description: Owning User Id.
+- schema: sales_pipeline
+  table: QuoteLineItem
+  columns:
+  - name: Discount
+    type: VARCHAR
+    description: Discount percent (e.g. '5.0' = 5%).
+  - name: TotalPrice
+    type: VARCHAR
+    description: Quantity * UnitPrice * (1 - Discount/100).
+- schema: sales_pipeline
+  table: Contract
+  columns:
+  - name: Status
+    type: VARCHAR
+    description: Always 'Activated' after trim.
+  - name: ContractTerm
+    type: VARCHAR
+    description: 'Term in months: 12, 24, 36.'
+- schema: support
+  table: Case
+  columns:
+  - name: status
+    type: VARCHAR
+    description: Working, Waiting on Customer, Closed (trim first).
+  - name: priority
+    type: VARCHAR
+    description: High, Medium, Low.
+  - name: createddate
+    type: VARCHAR
+    description: Timestamp 'YYYY-MM-DDTHH:MM:SS.000+0000'.
+  - name: closeddate
+    type: VARCHAR
+    description: Timestamp; set exactly for Closed cases.
+  - name: orderitemid__c
+    type: VARCHAR
+    description: OrderItem Id the case concerns.
+  - name: issueid__c
+    type: VARCHAR
+    description: issue__c Id (issue type).
+  - name: ownerid
+    type: VARCHAR
+    description: Current owning support agent (User Id).
+- schema: support
+  table: casehistory__c
+  columns:
+  - name: field__c
+    type: VARCHAR
+    description: '''Case Creation'', ''Owner Assignment'', ''Case Closed''.'
+  - name: newvalue__c
+    type: VARCHAR
+    description: 'For Owner Assignment: new owner User Id.'
+  - name: oldvalue__c
+    type: VARCHAR
+    description: 'For Owner Assignment: previous owner User Id, empty on first assignment.'
+- schema: support
+  table: emailmessage
+  columns:
+  - name: parentid
+    type: VARCHAR
+    description: Case Id for case emails; empty otherwise.
+  - name: relatedtoid
+    type: VARCHAR
+    description: Opportunity Id (006...) or Case Id (500...).
+  - name: toids
+    type: VARCHAR
+    description: JSON-style array string of recipient Ids, e.g. '["005Wt000003NJBVIA4"]'.
+- schema: activities
+  table: Event
+  columns:
+  - name: WhatId
+    type: VARCHAR
+    description: Related Opportunity Id.
+  - name: DurationInMinutes
+    type: VARCHAR
+    description: Duration in minutes as text.
+- schema: activities
+  table: Task
+  columns:
+  - name: WhatId
+    type: VARCHAR
+    description: Related Opportunity Id.
+  - name: Status
+    type: VARCHAR
+    description: Not Started, In Progress, Waiting, Deferred, Completed.
+- schema: territory
+  table: Territory2
+  columns:
+  - name: Description
+    type: VARCHAR
+    description: Comma-separated US state codes covered, e.g. 'MO,KS,OK'.
+- schema: core_crm
+  table: Account
+  columns:
+  - name: ShippingState
+    type: VARCHAR
+    description: US state code; matched against Territory2.Description.

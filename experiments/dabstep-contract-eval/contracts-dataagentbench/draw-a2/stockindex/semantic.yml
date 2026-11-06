@@ -1,0 +1,116 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+metrics:
+- name: trade_date
+  description: 'Trading date parsed from the mixed-format VARCHAR Date column. Three formats occur (''%Y-%m-%d
+    %H:%M:%S'', ''%d %b %Y, %H:%M'', ''%B %d, %Y at %I:%M %p''); this expression parses all 104,224 rows
+    (verified: zero NULLs). Use for year/month extraction, filtering, and ordering.
+
+    '
+  sql_expression: "CAST(COALESCE(try_strptime(t.\"Date\", '%Y-%m-%d %H:%M:%S'),\n              try_strptime(t.\"\
+    Date\", '%d %b %Y, %H:%M'),\n              try_strptime(t.\"Date\", '%B %d, %Y at %I:%M %p')) AS DATE)\n"
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: close_usd
+  description: Closing price in USD (CloseUSD); the comparable price across indices.
+  sql_expression: t.CloseUSD
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: average_close_usd
+  description: Average closing price in USD over the selected rows.
+  sql_expression: AVG(t.CloseUSD)
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: intraday_range
+  description: High minus Low for one trading day, in local currency (highest price during the day minus
+    lowest).
+  sql_expression: t.High - t.Low
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - index_prices
+- name: index_exchange
+  description: 'INTERPRETATION: the exchange (as named in index_info.Exchange) that an index symbol tracks.
+    The data has no key linking the two tables; this is the standard mapping of the 13 symbols present.
+    Korea Exchange has no matching index.
+
+    '
+  sql_expression: "CASE t.\"Index\"\n  WHEN 'NYA' THEN 'New York Stock Exchange'\n  WHEN 'IXIC' THEN 'NASDAQ'\n\
+    \  WHEN 'HSI' THEN 'Hong Kong Stock Exchange'\n  WHEN '000001.SS' THEN 'Shanghai Stock Exchange'\n\
+    \  WHEN 'N225' THEN 'Tokyo Stock Exchange'\n  WHEN 'N100' THEN 'Euronext'\n  WHEN '399001.SZ' THEN\
+    \ 'Shenzhen Stock Exchange'\n  WHEN 'GSPTSE' THEN 'Toronto Stock Exchange'\n  WHEN 'NSEI' THEN 'National\
+    \ Stock Exchange of India'\n  WHEN 'GDAXI' THEN 'Frankfurt Stock Exchange'\n  WHEN 'SSMI' THEN 'SIX\
+    \ Swiss Exchange'\n  WHEN 'TWII' THEN 'Taiwan Stock Exchange'\n  WHEN 'J203.JO' THEN 'Johannesburg\
+    \ Stock Exchange'\nEND\n"
+  source_model: indextrade_database.index_trade
+  from_sql: indextrade_database.index_trade t
+  grain: one index on one trading day
+  domains:
+  - exchanges
+- name: index_currency
+  description: 'Trading currency of the exchange an index tracks (local currency of Open/High/Low/Close/Adj
+    Close), via the `index_exchange` mapping joined to index_info.
+
+    '
+  sql_expression: i.Currency
+  source_model: indextrade_database.index_trade
+  from_sql: "indextrade_database.index_trade t LEFT JOIN indexinfo_database.index_info i\n  ON i.Exchange\
+    \ = CASE t.\"Index\"\n    WHEN 'NYA' THEN 'New York Stock Exchange'\n    WHEN 'IXIC' THEN 'NASDAQ'\n\
+    \    WHEN 'HSI' THEN 'Hong Kong Stock Exchange'\n    WHEN '000001.SS' THEN 'Shanghai Stock Exchange'\n\
+    \    WHEN 'N225' THEN 'Tokyo Stock Exchange'\n    WHEN 'N100' THEN 'Euronext'\n    WHEN '399001.SZ'\
+    \ THEN 'Shenzhen Stock Exchange'\n    WHEN 'GSPTSE' THEN 'Toronto Stock Exchange'\n    WHEN 'NSEI'\
+    \ THEN 'National Stock Exchange of India'\n    WHEN 'GDAXI' THEN 'Frankfurt Stock Exchange'\n    WHEN\
+    \ 'SSMI' THEN 'SIX Swiss Exchange'\n    WHEN 'TWII' THEN 'Taiwan Stock Exchange'\n    WHEN 'J203.JO'\
+    \ THEN 'Johannesburg Stock Exchange'\n  END\n"
+  grain: one index_trade row (one index on one trading day) with its exchange's currency
+  domains:
+  - exchanges
+  - index_prices
+tables:
+- schema: indexinfo_database
+  table: index_info
+  columns:
+  - name: Exchange
+    type: VARCHAR
+    description: Full name of the stock exchange (14 rows, unique).
+  - name: Currency
+    type: VARCHAR
+    description: Trading currency of the exchange, ISO code (USD, HKD, CNY, JPY, EUR, CAD, INR, KRW, CHF,
+      TWD, ZAR).
+- schema: indextrade_database
+  table: index_trade
+  columns:
+  - name: Index
+    type: VARCHAR
+    description: Abbreviated index symbol (13 distinct, e.g. HSI, NYA, IXIC, N225). Quote as "Index".
+  - name: Date
+    type: VARCHAR
+    description: Trading date, text in three mixed formats; parse with metric trade_date before use.
+  - name: Open
+    type: DOUBLE
+    description: Opening price, local currency.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day, local currency.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day, local currency.
+  - name: Close
+    type: DOUBLE
+    description: Closing price, local currency.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price, local currency. Quote as "Adj Close".
+  - name: CloseUSD
+    type: DOUBLE
+    description: Closing price in USD; equals Close times a constant per-index conversion factor.

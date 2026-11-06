@@ -1,0 +1,215 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+metrics:
+- name: review_count
+  description: Number of reviews (rows of review_database.review).
+  sql_expression: COUNT(*)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: average_rating
+  description: 'Mean reviewer rating on the 1-5 scale. rating is stored as integer 1..5; AVG returns DOUBLE.
+
+    '
+  sql_expression: AVG(r.rating)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: verified_purchase_share
+  description: 'Share of reviews whose purchase was verified. verified_purchase is stored as BIGINT 0/1
+    (1 = verified).
+
+    '
+  sql_expression: AVG(CASE WHEN r.verified_purchase = 1 THEN 1.0 ELSE 0.0 END)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: verified_review_count
+  description: Number of reviews with verified_purchase = 1.
+  sql_expression: COUNT(*) FILTER (WHERE r.verified_purchase = 1)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: total_helpful_votes
+  description: Sum of helpful votes received by reviews.
+  sql_expression: SUM(r.helpful_vote)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: review_timestamp
+  description: 'review_time parsed to TIMESTAMP. Stored as VARCHAR ''YYYY-MM-DD HH:MM:SS''; every row
+    parses. Use EXTRACT(year FROM ...) for the review year.
+
+    '
+  sql_expression: CAST(r.review_time AS TIMESTAMP)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: review_book_id
+  description: 'The books_info.book_id a review belongs to. purchase_id is ''purchaseid_<n>'' and book_id
+    is ''bookid_<n>''; the numeric part links them.
+
+    '
+  sql_expression: replace(r.purchase_id, 'purchaseid_', 'bookid_')
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one review
+  domains:
+  - reviews
+- name: book_average_rating
+  description: 'Average review rating per book, over reviews joined to their book. Use with GROUP BY b.book_id,
+    b.title.
+
+    '
+  sql_expression: AVG(r.rating)
+  source_model: review_database.review
+  from_sql: "review_database.review r JOIN books_database.books_info b\n  ON replace(r.purchase_id, 'purchaseid_',\
+    \ 'bookid_') = b.book_id\n"
+  grain: one review joined to its book
+  domains:
+  - reviews
+  - books
+- name: book_review_count
+  description: 'Number of reviews per book in the review table (not the Amazon rating_number). Use with
+    GROUP BY b.book_id.
+
+    '
+  sql_expression: COUNT(r.purchase_id)
+  source_model: review_database.review
+  from_sql: "books_database.books_info b LEFT JOIN review_database.review r\n  ON replace(r.purchase_id,\
+    \ 'purchaseid_', 'bookid_') = b.book_id\n"
+  grain: one book joined to each of its reviews (books without reviews keep one row)
+  domains:
+  - reviews
+  - books
+- name: book_author_name
+  description: 'Author name of a book. author is a JSON string {"avatar","name","about"}; the name is
+    author->>''$.name''. author is NULL for 51 books, in which case the first contributor listed in store
+    (text before '' ('') is used, trimmed.
+
+    '
+  sql_expression: COALESCE(b.author->>'$.name', trim(split_part(b.store, ' (', 1)))
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one book
+  domains:
+  - books
+- name: book_main_category
+  description: 'Top-level genre of a book: element 1 of the categories JSON array (element 0 is always
+    "Books"). NULL for the 14 books with ''[]''.
+
+    '
+  sql_expression: NULLIF(b.categories->>'$[1]', '')
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one book
+  domains:
+  - books
+- name: average_price
+  description: 'Mean book price. price has 10 NULLs (ignored by AVG) and 10 rows of 0.0; this metric excludes
+    0.0 as not a real price. State the choice in answers.
+
+    '
+  sql_expression: AVG(b.price) FILTER (WHERE b.price > 0)
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one book
+  domains:
+  - books
+- name: book_publication_date
+  description: 'Publication date parsed from the details prose (first ''Month D, YYYY'' occurrence, e.g.
+    "released on January 1, 2004"). NULL for 11 books whose details contain no such date.
+
+    '
+  sql_expression: "try_strptime(NULLIF(regexp_extract(b.details,\n  '(January|February|March|April|May|June|July|August|September|October|November|December)\
+    \ [0-9]{1,2}, [0-9]{4}'), ''),\n  '%B %d, %Y')\n"
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one book
+  domains:
+  - books
+tables:
+- schema: books_database
+  table: books_info
+  columns:
+  - name: title
+    type: VARCHAR
+    description: Book title.
+  - name: subtitle
+    type: VARCHAR
+    description: Book subtitle; often format and date, e.g. 'Hardcover – May 8, 2012', or edition label;
+      may be NULL.
+  - name: author
+    type: VARCHAR
+    description: Book author(s), JSON object string {avatar, name, about}; name via author->>'$.name'.
+      NULL for 51 books (see store).
+  - name: rating_number
+    type: BIGINT
+    description: Total number of ratings received (Amazon total, not the count of rows in review).
+  - name: features
+    type: VARCHAR
+    description: Book features, stored as string representation of a list (JSON array); '[]' = none.
+  - name: description
+    type: VARCHAR
+    description: Book description, stored as string representation of a list (JSON array); '[]' = none.
+  - name: price
+    type: DOUBLE
+    description: Book price. 10 NULL, 10 zero values.
+  - name: store
+    type: VARCHAR
+    description: 'Store information: contributor listing such as ''Name (Author),  Name (Illustrator)''.'
+  - name: categories
+    type: VARCHAR
+    description: Book categories, JSON array string like ["Books", "Genre", "Subgenre"]; '[]' for 14 books.
+  - name: details
+    type: VARCHAR
+    description: 'Additional book details as English prose: publisher, publication date, language, format,
+      pages, ISBN-10/13, weight, dimensions.'
+  - name: book_id
+    type: VARCHAR
+    description: Unique book identifier, 'bookid_<n>'.
+- schema: review_database
+  table: review
+  columns:
+  - name: rating
+    type: BIGINT
+    description: Rating given by reviewer, 1-5 scale (stored as integer).
+  - name: title
+    type: VARCHAR
+    description: Review title.
+  - name: text
+    type: VARCHAR
+    description: Review text content (may contain HTML like <br />).
+  - name: review_time
+    type: VARCHAR
+    description: Timestamp when review was posted, 'YYYY-MM-DD HH:MM:SS' text; cast to TIMESTAMP.
+  - name: helpful_vote
+    type: BIGINT
+    description: Number of helpful votes received.
+  - name: verified_purchase
+    type: BIGINT
+    description: 'Whether purchase was verified: 1 = verified, 0 = not.'
+  - name: purchase_id
+    type: VARCHAR
+    description: '''purchaseid_<n>'', links to books_info.book_id ''bookid_<n>'' by the number n (replace
+      prefix to join).'
+relationships:
+- from: review_database.review.purchase_id
+  to: books_database.books_info.book_id
+  type: many_to_one
+  description: 'Not a plain equality: join on replace(purchase_id, ''purchaseid_'', ''bookid_'') = book_id.
+    All reviews match a book.
+
+    '

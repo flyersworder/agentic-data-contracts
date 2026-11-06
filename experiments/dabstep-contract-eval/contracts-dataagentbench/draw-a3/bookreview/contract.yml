@@ -1,0 +1,93 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+version: '1.0'
+name: bookreview
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: books_database
+    description: 'Amazon book information (descriptions, price, details, title, etc.) up to 2023. Documented
+      as stored in PostgreSQL; here it is a schema of one DuckDB database. One table, books_info: one
+      row per book (200 rows, book_id unique).'
+    tables:
+    - books_info
+  - schema: review_database
+    description: 'Amazon book review information (ratings, text, helpfulness votes, etc.) up to 2023.
+      Documented as stored in SQLite; here it is a schema of the same DuckDB database. One table, review:
+      one row per review (1,833 rows).'
+    tables:
+    - review
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: books
+    summary: 'Amazon book catalogue: title, author, price, categories, details'
+    description: "books_info holds Amazon book information up to 2023. Fields: title (book title), subtitle\
+      \ (book subtitle), author (book author(s)), rating_number (total number of ratings received), features\
+      \ (book features, stored as a string representation of a list/dict), description (book description,\
+      \ stored as a string representation of a list/dict), price (book price), store (store information),\
+      \ categories (book categories, stored as a string representation of a list/dict), details (additional\
+      \ book details), book_id (unique book identifier, format 'bookid_<n>').\nDATA FINDINGS (checked\
+      \ with queries): * author is a JSON object string {\"avatar\",\"name\",\"about\"}; extract the\n\
+      \  name with author->>'$.name'. author is NULL for 51 of 200 books; the\n  `store` column then still\
+      \ lists contributors as e.g. \"Peter Ackroyd\n  (Author),  James D. Hornfischer\" — use book_author_name,\
+      \ which falls\n  back to store.\n* categories is a valid JSON array string, e.g. [\"Books\", \"\
+      Literature &\n  Fiction\", \"History & Criticism\"]; element 0 is always \"Books\", element\n  1\
+      \ is the top-level genre (categories->>'$[1]'). 14 books have '[]'.\n  Test membership with list_contains(CAST(categories\
+      \ AS VARCHAR[]) ...)\n  or categories LIKE '%\"Name\"%'.\n* features and description are JSON array\
+      \ strings; '[]' means empty\n  (18 and 97 books respectively).\n* price: 10 NULLs and 10 rows with\
+      \ 0.0; max 1599.97. Exclude NULL (and\n  consider excluding 0) when averaging prices; say which\
+      \ you did.\n* details is English prose, e.g. \"Published by Chatto & Windus, the\n  first edition\
+      \ ... released on January 1, 2004. It is written in\n  English and comes in a hardcover format,\
+      \ comprising 196 pages. ...\n  ISBN-10 ... ISBN-13 ...\". Publisher, publication date, language,\n\
+      \  format, page count, ISBN are only extractable with regex; 11 rows\n  have no 'Month D, YYYY'\
+      \ date in details. See\n  book_publication_date.\n* subtitle often carries format and date, e.g.\
+      \ \"Hardcover – May 8,\n  2012\", but may also be an edition label (\"1st Edition\") or NULL.\n"
+    tables:
+    - books_database.books_info
+  - name: reviews
+    summary: 'Amazon book reviews: rating, text, helpful votes, verified purchase'
+    description: "review holds Amazon book reviews up to 2023. Fields: rating (rating given by reviewer,\
+      \ 1-5 scale), title (review title), text (review text content), purchase_id (identifier linking\
+      \ to book_id in books_database.books_info), review_time (timestamp when the review was posted),\
+      \ helpful_vote (number of helpful votes received), verified_purchase (whether the purchase was verified).\n\
+      DATA FINDINGS: * rating is stored as BIGINT (integers 1..5), not float; AVG returns\n  DOUBLE.\n\
+      * verified_purchase is stored as BIGINT 0/1 (1 = verified), not\n  boolean; test with verified_purchase\
+      \ = 1.\n* review_time is VARCHAR 'YYYY-MM-DD HH:MM:SS' (all rows parse);\n  range 1997-08-15 to\
+      \ 2023-06-14. Use CAST(review_time AS TIMESTAMP).\n* JOIN KEY: purchase_id looks like 'purchaseid_<n>'\
+      \ while book_id looks\n  like 'bookid_<n>'; they do NOT match by plain equality. The number\n  is\
+      \ shared: join on replace(r.purchase_id, 'purchaseid_', 'bookid_') =\n  b.book_id. All 1,833 reviews\
+      \ match a book this way.\n* rating_number in books_info (Amazon's total rating count) is not the\n\
+      \  same as the count of rows in review; use review rows for questions\n  about reviews in this data.\n"
+    tables:
+    - review_database.review
+    - books_database.books_info
+  rules:
+  - name: join_review_to_book_by_number
+    description: 'Join review to books_info only with replace(r.purchase_id, ''purchaseid_'', ''bookid_'')
+      = b.book_id (equivalently comparing the numeric suffixes). Plain r.purchase_id = b.book_id matches
+      nothing.
+
+      '
+    enforcement: warn
+  - name: verified_purchase_is_integer
+    description: verified_purchase is 0/1 BIGINT; filter verified reviews with verified_purchase = 1.
+    enforcement: warn
+  - name: parse_json_string_columns
+    description: 'author, categories, features and description are JSON text; parse with DuckDB JSON operators
+      (->>) instead of naive substring matching where exact values matter.
+
+      '
+    enforcement: warn

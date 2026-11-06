@@ -210,6 +210,10 @@ class ArmSetup:
     # input tokens a request must report, below which the route truncated it.
     token_budget: int | None = None
     min_input_tokens: int | None = None
+    # Experiment 7: an arm whose knowledge travels in the user message (DAB
+    # appends its hints to the database description) carries that message;
+    # else the task's prompt is sent.
+    user_prompt: str | None = None
 
     def close(self) -> None:
         """Release the persistent database connection this arm holds, if any.
@@ -346,7 +350,22 @@ def _connect(db_path: Path, init_sql: tuple[str, ...]) -> duckdb.DuckDBPyConnect
     return con
 
 
-def _ungoverned_tools(db_path: Path, *, init_sql: tuple[str, ...] = ()) -> list[Tool]:
+def _list_tables_sql(all_schemas: bool) -> str:
+    """`SHOW TABLES` lists the default schema only. A database whose tables
+    live in schemas of their own (DataAgentBench's, one per logical
+    database) lists every base table as `schema.table` instead."""
+    if not all_schemas:
+        return "SHOW TABLES"
+    return (
+        "SELECT schema_name || '.' || table_name FROM duckdb_tables() "
+        "WHERE database_name = current_database() AND NOT temporary "
+        "ORDER BY schema_name, table_name"
+    )
+
+
+def _ungoverned_tools(
+    db_path: Path, *, init_sql: tuple[str, ...] = (), all_schemas: bool = False
+) -> list[Tool]:
     """Plain schema access + query execution. No contract, no validation.
 
     Every connection here opens `db_path` read-write (no `read_only=True`) so
@@ -366,7 +385,8 @@ def _ungoverned_tools(db_path: Path, *, init_sql: tuple[str, ...] = ()) -> list[
         con = None
         try:
             con = _connect(db_path, init_sql)
-            return "\n".join(r[0] for r in con.execute("SHOW TABLES").fetchall())
+            rows = con.execute(_list_tables_sql(all_schemas)).fetchall()
+            return "\n".join(r[0] for r in rows)
         except Exception as exc:  # surfaced to the model, same as execute_sql
             return f"ERROR: {exc}"
         finally:

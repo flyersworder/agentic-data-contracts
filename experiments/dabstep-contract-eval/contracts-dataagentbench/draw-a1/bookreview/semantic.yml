@@ -1,0 +1,174 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+metrics:
+- name: review_count
+  description: Number of reviews (rows of review_database.review).
+  sql_expression: COUNT(*)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: average_rating
+  description: 'Mean reviewer rating on the 1-5 scale. rating is stored as BIGINT (1..5), cast to DOUBLE
+    for the average.
+
+    '
+  sql_expression: AVG(CAST(r.rating AS DOUBLE))
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: verified_purchase_share
+  description: 'Share of reviews whose purchase was verified. verified_purchase is stored as BIGINT 1
+    = verified, 0 = not verified.
+
+    '
+  sql_expression: AVG(CASE WHEN r.verified_purchase = 1 THEN 1.0 ELSE 0.0 END)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: total_helpful_votes
+  description: Total number of helpful votes received by reviews.
+  sql_expression: SUM(r.helpful_vote)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: review_timestamp
+  description: 'Timestamp the review was posted. review_time is VARCHAR ''YYYY-MM-DD HH:MM:SS''; all rows
+    cast cleanly. Use EXTRACT(year FROM ...) for the review year.
+
+    '
+  sql_expression: CAST(r.review_time AS TIMESTAMP)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: book_author_name
+  description: 'Author name from the author JSON object (''$.name''). NULL for the 51 books whose author
+    is NULL; the store column holds the contributor credit line as fallback.
+
+    '
+  sql_expression: json_extract_string(b.author, '$.name')
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+- name: book_main_category
+  description: 'Top-level genre of a book: second element of the categories JSON array (the first is always
+    "Books"). NULL when categories is ''[]'' (14 books). To test membership in any category level use
+    list_contains(CAST(b.categories AS VARCHAR[]) ...) or b.categories LIKE ''%"<name>"%''.
+
+    '
+  sql_expression: json_extract_string(b.categories, '$[1]')
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+- name: average_price
+  description: Mean book price; NULL prices (10 books) are ignored; 10 books have price 0.0.
+  sql_expression: AVG(b.price)
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+- name: book_average_rating
+  description: 'Average review rating per book, joining reviews to books via the id suffix (purchaseid_<n>
+    -> bookid_<n>). Group by b.book_id (and b.title).
+
+    '
+  sql_expression: AVG(CAST(r.rating AS DOUBLE))
+  source_model: review_database.review
+  from_sql: books_database.books_info b JOIN review_database.review r ON replace(r.purchase_id, 'purchaseid_',
+    'bookid_') = b.book_id
+  grain: one row per review joined to its book
+  domains:
+  - book_reviews
+- name: book_review_count
+  description: Number of reviews per book in this database (group by b.book_id); differs from rating_number.
+  sql_expression: COUNT(r.purchase_id)
+  source_model: review_database.review
+  from_sql: books_database.books_info b LEFT JOIN review_database.review r ON replace(r.purchase_id, 'purchaseid_',
+    'bookid_') = b.book_id
+  grain: one row per review joined to its book (books without reviews kept)
+  domains:
+  - book_reviews
+tables:
+- schema: books_database
+  table: books_info
+  columns:
+  - name: title
+    type: VARCHAR
+    description: Book title.
+  - name: subtitle
+    type: VARCHAR
+    description: Book subtitle (often format and date, e.g. 'Hardcover – May 8, 2012').
+  - name: author
+    type: VARCHAR
+    description: 'Book author(s): JSON object text with keys avatar, name, about; NULL for 51 books. Name
+      via json_extract_string(author,''$.name'').'
+  - name: rating_number
+    type: BIGINT
+    description: Total number of ratings received (Amazon), 1..6631; not the count of review rows.
+  - name: features
+    type: VARCHAR
+    description: Book features, stored as string representation of a list (JSON array text).
+  - name: description
+    type: VARCHAR
+    description: Book description, stored as string representation of a list (JSON array text).
+  - name: price
+    type: DOUBLE
+    description: Book price; 10 NULL, 10 zero.
+  - name: store
+    type: VARCHAR
+    description: 'Store information: contributor credit line, e.g. ''Peter Ackroyd (Author)'', sometimes
+      with ''Format: Kindle Edition''.'
+  - name: categories
+    type: VARCHAR
+    description: Book categories, string representation of a list (JSON array), first element 'Books'.
+  - name: details
+    type: VARCHAR
+    description: 'Additional book details as prose: publisher, publication date, language, format, pages,
+      ISBN.'
+  - name: book_id
+    type: VARCHAR
+    description: Unique book identifier, 'bookid_<n>'. Matches review.purchase_id 'purchaseid_<n>'.
+- schema: review_database
+  table: review
+  columns:
+  - name: rating
+    type: BIGINT
+    description: Rating given by reviewer, 1-5 scale (documented float 1.0-5.0; stored integers 1..5).
+  - name: title
+    type: VARCHAR
+    description: Review title.
+  - name: text
+    type: VARCHAR
+    description: Review text content (may contain HTML like <br />).
+  - name: review_time
+    type: VARCHAR
+    description: Timestamp when review was posted, 'YYYY-MM-DD HH:MM:SS', 1997-08-15..2023-06-14.
+  - name: helpful_vote
+    type: BIGINT
+    description: Number of helpful votes received.
+  - name: verified_purchase
+    type: BIGINT
+    description: 'Whether purchase was verified: 1 = verified, 0 = not.'
+  - name: purchase_id
+    type: VARCHAR
+    description: 'Identifier linking to books_info.book_id: ''purchaseid_<n>'' corresponds to ''bookid_<n>''.'
+relationships:
+- from: review_database.review.purchase_id
+  to: books_database.books_info.book_id
+  type: many_to_one
+  description: 'Join on replace(review.purchase_id, ''purchaseid_'', ''bookid_'') = books_info.book_id;
+    direct equality matches nothing because of the differing prefixes.
+
+    '

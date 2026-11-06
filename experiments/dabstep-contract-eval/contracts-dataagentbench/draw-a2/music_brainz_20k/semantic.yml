@@ -1,0 +1,267 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: music_brainz_20k, author: claudeopus5.5
+metrics:
+- name: total_units_sold
+  description: 'Total units sold: the sum of units_sold over the selected sale records.'
+  sql_expression: SUM(s.units_sold)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: total_revenue_usd
+  description: 'Total revenue in USD: the sum of revenue_usd over the selected sale records. Each row''s
+    revenue_usd is already that sale''s total, so do not multiply it by units_sold.
+
+    '
+  sql_expression: SUM(s.revenue_usd)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: sale_count
+  description: Number of sale records (transactions).
+  sql_expression: COUNT(s.sale_id)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: revenue_per_unit_usd
+  description: 'Average revenue per unit sold, in USD: total revenue / total units.'
+  sql_expression: SUM(s.revenue_usd) / NULLIF(SUM(s.units_sold), 0)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s
+  grain: one sale record
+  domains:
+  - sales
+- name: track_sales_revenue_usd
+  description: 'Revenue in USD with track attributes available, from sales joined to tracks on track_id.
+    Group by t.track_id for per-record figures, or by a normalised title/artist for per-song figures across
+    duplicate records.
+
+    '
+  sql_expression: SUM(s.revenue_usd)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s JOIN tracks_database.tracks t ON s.track_id = t.track_id
+  grain: one sale record joined to its track record
+  domains:
+  - sales
+  - tracks
+- name: track_sales_units
+  description: Units sold with track attributes available, from sales joined to tracks on track_id.
+  sql_expression: SUM(s.units_sold)
+  source_model: sales_database.sales
+  from_sql: sales_database.sales s JOIN tracks_database.tracks t ON s.track_id = t.track_id
+  grain: one sale record joined to its track record
+  domains:
+  - sales
+  - tracks
+- name: track_record_count
+  description: 'Number of track records. Duplicates from different sources are counted separately; see
+    the tracks domain for counting distinct songs.
+
+    '
+  sql_expression: COUNT(t.track_id)
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_length_seconds
+  description: 'Track length in seconds, parsed according to each source''s format, which was found by
+    profiling. Before parsing, the value is lower-cased, whitespace is removed and the letter ''o'' is
+    replaced with 0. Source 1 ''mm:ss''; source 2 plain seconds; source 3 decimal minutes (x60); source
+    4 ''Xm Ysec'' (also ''Xm-Ysec''); source 5 milliseconds (/1000). Values that do not parse (''unknown'',
+    ''unk.'', ''n.a.'', text from another column) give NULL. After this conversion all five sources have
+    a median of about 211-222 s. There are a few extreme outliers caused by typos.
+
+    '
+  sql_expression: "CASE t.source_id\n  WHEN 1 THEN CASE WHEN regexp_full_match(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g'), '\\d+:\\d{1,2}')\n              THEN CAST(split_part(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g'),':',1) AS INT)*60\n                 + CAST(split_part(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g'),':',2) AS INT) END\n  WHEN 2 THEN TRY_CAST(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g') AS DOUBLE)\n  WHEN 3 THEN TRY_CAST(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g') AS DOUBLE) * 60\n  WHEN 4 THEN CASE WHEN regexp_full_match(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g'), '\\d+m-?\\d+sec')\n              THEN CAST(regexp_extract(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g'),'^(\\d+)m',1) AS INT)*60\n                 + CAST(regexp_extract(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g'),'(\\d+)sec$',1) AS INT) END\n  WHEN 5 THEN TRY_CAST(regexp_replace(replace(lower(t.length),'o','0'),'\\\
+    s+','','g') AS DOUBLE) / 1000\nEND\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_publication_year
+  description: 'Year of publication as an integer. The raw value is lower-cased, ''o'' is replaced with
+    0 and whitespace is removed. Sources 2 and 3 store two digits (source 3 with a leading apostrophe,
+    "''94"). The data has no two-digit years from 16 to 20, so 00-20 is read as 20xx and 21-99 as 19xx.
+    Sources 1, 4 and 5 use the first 4-digit run. For source 4 the year column is mostly NULL, so the
+    year falls back to the ''(YYYY)'' suffix of album. A result outside 1900-2025 (typos such as 2092,
+    2996, 9198) is treated as invalid and gives NULL. Single-digit values in sources 2/3 are ambiguous
+    and give NULL. About 72-74% of each source ends up with a year.
+
+    '
+  sql_expression: "CASE WHEN COALESCE(\n    CASE WHEN t.source_id IN (2,3) AND regexp_full_match(regexp_replace(replace(lower(t.year),'o','0'),'\\\
+    s','','g'), '''?\\d{2}')\n         THEN CASE WHEN CAST(right(regexp_replace(replace(lower(t.year),'o','0'),'\\\
+    s','','g'),2) AS INT) <= 20 THEN 2000 ELSE 1900 END\n              + CAST(right(regexp_replace(replace(lower(t.year),'o','0'),'\\\
+    s','','g'),2) AS INT)\n         WHEN t.source_id NOT IN (2,3)\n         THEN TRY_CAST(NULLIF(regexp_extract(regexp_replace(replace(lower(t.year),'o','0'),'\\\
+    s','','g'),'(\\d{4})',1),'') AS INT) END,\n    CASE WHEN t.source_id = 4 THEN TRY_CAST(NULLIF(regexp_extract(t.album,'\\\
+    ((\\d{4})\\)\\s*$',1),'') AS INT) END)\n  BETWEEN 1900 AND 2025\nTHEN COALESCE(\n    CASE WHEN t.source_id\
+    \ IN (2,3) AND regexp_full_match(regexp_replace(replace(lower(t.year),'o','0'),'\\s','','g'), '''?\\\
+    d{2}')\n         THEN CASE WHEN CAST(right(regexp_replace(replace(lower(t.year),'o','0'),'\\s','','g'),2)\
+    \ AS INT) <= 20 THEN 2000 ELSE 1900 END\n              + CAST(right(regexp_replace(replace(lower(t.year),'o','0'),'\\\
+    s','','g'),2) AS INT)\n         WHEN t.source_id NOT IN (2,3)\n         THEN TRY_CAST(NULLIF(regexp_extract(regexp_replace(replace(lower(t.year),'o','0'),'\\\
+    s','','g'),'(\\d{4})',1),'') AS INT) END,\n    CASE WHEN t.source_id = 4 THEN TRY_CAST(NULLIF(regexp_extract(t.album,'\\\
+    ((\\d{4})\\)\\s*$',1),'') AS INT) END)\nEND\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_language
+  description: 'Canonical language name. The raw values contain abbreviations (''Eng.'', ''Ger.''), case
+    variants, inserted, dropped or swapped letters and stray spaces. The value is lower-cased and reduced
+    to letters only. '''' and NULL give NULL. Anything containing ''multipl'' gives ''[Multiple languages]''.
+    Anything containing ''lingu'' gives ''No linguistic content''. unknown, unk, n.a. and null variants
+    give NULL. Everything else takes the best Jaro-Winkler match (>= 0.85) against a list of canonical
+    names: a short value with a dot is compared with the first 3 letters of each name. This is best-effort
+    and was checked by profiling: ''English'' ~10,650 records, German ~590, French ~480, Spanish ~450,
+    Japanese ~380, [Multiple languages] ~370, and about 5,000 NULL or unknown (mostly source 1).
+
+    '
+  sql_expression: "CASE\n  WHEN lower(regexp_replace(t.language,'[^A-Za-z]','','g')) IS NULL OR lower(regexp_replace(t.language,'[^A-Za-z]','','g'))\
+    \ = '' THEN NULL\n  WHEN lower(regexp_replace(t.language,'[^A-Za-z]','','g')) LIKE '%multipl%' OR\
+    \ jaro_winkler_similarity(lower(regexp_replace(t.language,'[^A-Za-z]','','g')),'multiplelanguages')\
+    \ >= 0.9 THEN '[Multiple languages]'\n  WHEN lower(regexp_replace(t.language,'[^A-Za-z]','','g'))\
+    \ LIKE '%lingu%' THEN 'No linguistic content'\n  WHEN lower(regexp_replace(t.language,'[^A-Za-z]','','g'))\
+    \ IN ('unk','na','nul','nll','ull','null','u')\n    OR jaro_winkler_similarity(lower(regexp_replace(t.language,'[^A-Za-z]','','g')),'unknown')\
+    \ >= 0.88\n    OR jaro_winkler_similarity(lower(regexp_replace(t.language,'[^A-Za-z]','','g')),'null')\
+    \ >= 0.88 THEN NULL\n  ELSE list_transform([list_sort(list_transform(\n      ['English','German','French','Spanish','Japanese','Italian','Portuguese','Finnish','Dutch','Swedish','Russian','Turkish','Greek','Polish','Chinese','Mandarin\
+    \ Chinese','Yue Chinese','Norwegian','Norwegian Nynorsk','Danish','Hindi','Korean','Latin','Latvian','Czech','Estonian','Hungarian','Croatian','Catalan','Slovenian','Hebrew','Romanian','Slovak','Panjabi','Serbian','Lithuanian','Afrikaans','Indonesian','Icelandic','Filipino','Bosnian','Basque','Arabic','Vietnamese','Welsh','Yiddish','Galician','Thai','Haitian\
+    \ Creole','Malayalam','Esperanto','Tagalog','Mongolian','Persian','Georgian','Swahili','German, Swiss','Frisian,\
+    \ Western','Kölsch','Jamaican Creole English','Hawaiian','Sanskrit','Occitan','Asturian','Faroese','Greenlandic','Albanian','Belarusian'],\n\
+    \      x -> {'s': CASE WHEN length(lower(regexp_replace(t.language,'[^A-Za-z]','','g'))) <= 4 AND\
+    \ contains(t.language, '.')\n                      THEN jaro_winkler_similarity(lower(regexp_replace(t.language,'[^A-Za-z]','','g')),\
+    \ lower(left(x, 3)))\n                      ELSE jaro_winkler_similarity(lower(regexp_replace(t.language,'[^A-Za-z]','','g')),\
+    \ lower(regexp_replace(x,'[^A-Za-z]','','g'))) END,\n            'l': x}), 'DESC')[1]],\n    b ->\
+    \ CASE WHEN b.s >= 0.85 THEN b.l END)[1]\nEND\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_clean_title
+  description: 'Track title with the source-specific wrapping removed. Source 2 stores ''Artist - Title'',
+    so the part after the first '' - '' is kept. Source 3 stores ''Title - Album'', so the part before
+    the first '' - '' is kept. Source 4 prefixes a 3-character track number and a dash (''001-''), which
+    is stripped. The result is trimmed. Use it with track_clean_artist to find duplicate records of the
+    same song across sources (compare lower-cased).
+
+    '
+  sql_expression: "trim(CASE\n  WHEN t.source_id = 2 AND strpos(t.title, ' - ') > 0 THEN substr(t.title,\
+    \ strpos(t.title, ' - ') + 3)\n  WHEN t.source_id = 3 AND strpos(t.title, ' - ') > 0 THEN substr(t.title,\
+    \ 1, strpos(t.title, ' - ') - 1)\n  WHEN t.source_id = 4 THEN regexp_replace(t.title, '^\\w{3}-',\
+    \ '')\n  ELSE t.title END)\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_clean_artist
+  description: 'Artist name. Source 2 has a NULL artist column and stores the artist before the first
+    '' - '' of title, so that part is used. For the other sources the artist column is trimmed. ''[unknown]''
+    and empty strings become NULL.
+
+    '
+  sql_expression: "NULLIF(NULLIF(trim(CASE\n  WHEN t.source_id = 2 AND t.artist IS NULL AND strpos(t.title,\
+    \ ' - ') > 0 THEN substr(t.title, 1, strpos(t.title, ' - ') - 1)\n  ELSE t.artist END), ''), '[unknown]')\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+- name: track_clean_album
+  description: 'Album name. Source 3 has a NULL album column and stores the album after the first '' -
+    '' of title, so that part is used. Source 4 appends '' (YYYY)'' or '' (unknown)'' to the album, and
+    that suffix is stripped. Other sources use the album column as stored. The result is trimmed.
+
+    '
+  sql_expression: "trim(CASE\n  WHEN t.source_id = 3 AND t.album IS NULL AND strpos(t.title, ' - ') >\
+    \ 0 THEN substr(t.title, strpos(t.title, ' - ') + 3)\n  WHEN t.source_id = 4 THEN regexp_replace(t.album,\
+    \ '\\s*\\((\\d{4}|unknown)\\)\\s*$', '')\n  ELSE t.album END)\n"
+  source_model: tracks_database.tracks
+  from_sql: tracks_database.tracks t
+  grain: one track record
+  domains:
+  - tracks
+tables:
+- schema: tracks_database
+  table: tracks
+  columns:
+  - name: track_id
+    type: BIGINT
+    description: Unique identifier for the track record in this database (19,375 distinct values). Joins
+      to sales.track_id.
+  - name: source_id
+    type: BIGINT
+    description: Identifier of the source the track record comes from (1-5). Each source has its own format
+      for title/artist/album/year/length; see the tracks domain.
+  - name: source_track_id
+    type: VARCHAR
+    description: Original track identifier from the source. Uniqueness is NOT guaranteed. The format depends
+      on the source (WoM<n>, MBox<n>-HH, <n>MB-01, <n>-A0xx, <n>), and it does not link duplicates across
+      sources.
+  - name: title
+    type: VARCHAR
+    description: Title of the track. Source 2 stores 'Artist - Title', source 3 'Title - Album', source
+      4 '001-Title'. Use track_clean_title.
+  - name: artist
+    type: VARCHAR
+    description: Name of the track's artist or band. NULL for source 2, where the artist is inside title.
+      Use track_clean_artist.
+  - name: album
+    type: VARCHAR
+    description: Name of the album the track appears on. NULL for source 3 (inside title). Source 4 appends
+      '(YYYY)'. Use track_clean_album.
+  - name: year
+    type: VARCHAR
+    description: Year of publication, as text. Formats are 4-digit, 2-digit or 'YY, with typos and placeholders.
+      Use track_publication_year.
+  - name: length
+    type: VARCHAR
+    description: Length of the track, in seconds or as a formatted string. The unit depends on the source
+      (mm:ss, seconds, decimal minutes, 'Xm Ysec', milliseconds). Use track_length_seconds.
+  - name: language
+    type: VARCHAR
+    description: Language of the track, as free text with abbreviations and typos. Mostly NULL for source
+      1. Use track_language.
+- schema: sales_database
+  table: sales
+  columns:
+  - name: sale_id
+    type: INTEGER
+    description: Unique identifier for the sale record.
+  - name: track_id
+    type: INTEGER
+    description: Identifier linking the sale to a track in tracks_database.tracks.track_id.
+  - name: country
+    type: VARCHAR
+    description: 'Country in which the sale occurred: USA, UK, Canada, France or Germany.'
+  - name: store
+    type: VARCHAR
+    description: 'Store or platform where the sale occurred: Spotify, Apple Music, iTunes, Google Play
+      or Amazon Music.'
+  - name: units_sold
+    type: INTEGER
+    description: Number of units sold in this transaction (>= 1).
+  - name: revenue_usd
+    type: DOUBLE
+    description: Revenue generated in USD from this sale; it is the sale's total, not a unit price.
+relationships:
+- from: sales_database.sales.track_id
+  to: tracks_database.tracks.track_id
+  type: many_to_one
+  description: Each sale belongs to one track record. Every sale matches a track and every track has at
+    least one sale.

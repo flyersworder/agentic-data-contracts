@@ -1,0 +1,149 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockmarket, author: claudeopus5.5
+metrics:
+- name: etf_count
+  description: 'Number of securities that are ETFs (ETF = ''Y''; stored as a ''Y''/''N'' string). Observed
+    total 2165.
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE "ETF" = 'Y')
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - securities
+- name: nasdaq_listed_count
+  description: 'Number of securities listed on NASDAQ, i.e. Listing Exchange = ''Q'' (INTERPRETATION:
+    standard Nasdaq symbol-directory code). Distinct from the ''Nasdaq Traded'' flag, which is ''Y'' for
+    every row.
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE "Listing Exchange" = 'Q')
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - securities
+- name: non_normal_financial_status_count
+  description: 'Number of securities whose Financial Status is set and not ''N'' (Normal), i.e. deficient,
+    delinquent and/or bankrupt (observed: D = Deficient, 24; H = Deficient and Delinquent, 1). NULL status
+    (non-NASDAQ-listed rows) is excluded.
+
+    '
+  sql_expression: COUNT(*) FILTER (WHERE "Financial Status" IS NOT NULL AND "Financial Status" <> 'N')
+  source_model: stockinfo_database.stockinfo
+  domains:
+  - securities
+- name: trading_date
+  description: 'Trading date as a DATE. Date is stored as VARCHAR ''YYYY-MM-DD'' in every price table.
+    Replace the example table (ITI) with the ticker table you need.
+
+    '
+  sql_expression: CAST("Date" AS DATE)
+  source_model: stocktrade_database.ITI
+  domains:
+  - prices
+- name: daily_price_range
+  description: 'Intraday price range for one day: highest price minus lowest price (High - Low). Per row
+    of a ticker table; replace ITI with the ticker.
+
+    '
+  sql_expression: '"High" - "Low"'
+  source_model: stocktrade_database.ITI
+  domains:
+  - prices
+- name: daily_return
+  description: 'Day-over-day return on adjusted close: Adj Close / previous trading day''s Adj Close -
+    1, ordered by the date. Uses Adj Close so splits and dividends do not appear as jumps. Window expression;
+    replace ITI with the ticker.
+
+    '
+  sql_expression: '"Adj Close" / LAG("Adj Close") OVER (ORDER BY CAST("Date" AS DATE)) - 1'
+  source_model: stocktrade_database.ITI
+  domains:
+  - prices
+- name: average_daily_volume
+  description: 'Mean number of shares traded per trading day over the rows selected. AVG ignores NULL
+    Volume rows (present in the 38 tables where Volume is DOUBLE). Replace ITI with the ticker.
+
+    '
+  sql_expression: AVG("Volume")
+  source_model: stocktrade_database.ITI
+  domains:
+  - prices
+- name: total_volume
+  description: 'Total shares traded over the rows selected (SUM of Volume, NULLs ignored). Replace ITI
+    with the ticker.
+
+    '
+  sql_expression: SUM("Volume")
+  source_model: stocktrade_database.ITI
+  domains:
+  - prices
+- name: trading_day_count
+  description: 'Number of trading days with a closing price (rows where Close is not NULL). Replace ITI
+    with the ticker.
+
+    '
+  sql_expression: COUNT("Close")
+  source_model: stocktrade_database.ITI
+  domains:
+  - prices
+tables:
+- schema: stockinfo_database
+  table: stockinfo
+  columns:
+  - name: Nasdaq Traded
+    type: VARCHAR
+    description: Whether the stock is traded on NASDAQ. 'Y'/'N' string; all rows 'Y'.
+  - name: Symbol
+    type: VARCHAR
+    description: Stock ticker symbol; unique; equals the name of the security's table in stocktrade_database.
+  - name: Listing Exchange
+    type: VARCHAR
+    description: 'Exchange where the stock is listed. Codes (Nasdaq directory standard): A NYSE MKT, N
+      NYSE, P NYSE ARCA, Q NASDAQ, Z BATS, V IEX. Observed A, N, P, Q, Z.'
+  - name: Market Category
+    type: VARCHAR
+    description: Market category classification. Q NASDAQ Global Select, G NASDAQ Global Market, S NASDAQ
+      Capital Market; literal 'Not applicable or not NASDAQ-listed' for non-NASDAQ securities (not NULL).
+  - name: ETF
+    type: VARCHAR
+    description: Whether the security is an ETF. 'Y'/'N' string.
+  - name: Round Lot Size
+    type: DOUBLE
+    description: Standard trading unit size (shares). 100.0 for every row.
+  - name: Test Issue
+    type: VARCHAR
+    description: Whether this is a test issue. 'Y'/'N' string; all rows 'N'.
+  - name: Financial Status
+    type: VARCHAR
+    description: Financial status (delinquent, deficient, etc.), may be null. N Normal, D Deficient, E
+      Delinquent, Q Bankrupt, G Deficient+Bankrupt, H Deficient+Delinquent, J Delinquent+Bankrupt, K Deficient+Delinquent+Bankrupt.
+      NULL for non-NASDAQ-listed securities. Observed N, D, H, NULL.
+  - name: NextShares
+    type: VARCHAR
+    description: NextShares designation. 'Y'/'N' string; one row 'Y'.
+  - name: Company Description
+    type: VARCHAR
+    description: Company name and description; begins with the company/fund name. Search with ILIKE.
+- schema: stocktrade_database
+  table: ITI
+  columns:
+  - name: Date
+    type: VARCHAR
+    description: Trading date, VARCHAR 'YYYY-MM-DD'. Same layout in every ticker table.
+  - name: Open
+    type: DOUBLE
+    description: Opening price.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day.
+  - name: Close
+    type: DOUBLE
+    description: Closing price.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price (split/dividend adjusted).
+  - name: Volume
+    type: BIGINT
+    description: Number of shares traded. BIGINT in 2715 tables, DOUBLE in 38 (which contain NULL rows).

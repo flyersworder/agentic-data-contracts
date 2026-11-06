@@ -1,4 +1,4 @@
-\section{Knowledge Does the Work}
+\section{Knowledge and the Two Facts}
 \label{sec:results}
 \label{sec:knowledge}
 
@@ -35,86 +35,165 @@ end-to-end row also credits an answer given as its final paragraph
 
 The four-arm ablation separates the contract's knowledge from the
 scaffolding that delivers it. \armH{} keeps the contract's tools, its
-instruction to look things up before writing SQL, its table allow-list
-and its operation rules, and empties every description and SQL definition
-(Section~\ref{sec:hollow}). Table~\ref{tab:decomposition} gives the
-hard-task accuracy of all four arms on six models: two panels repeated
-three times, and four single runs. (\mLuna{} did not run the hollow arm.)
+instruction to look things up before writing SQL, its table allow-list,
+its operation rules and every name and type, and empties every description
+and SQL definition (Section~\ref{sec:hollow}). It therefore measures the
+knowledge given that scaffolding, not all knowledge against none.
+Table~\ref{tab:decomposition} gives the hard-task accuracy of all four arms
+on six models: two panels repeated three times, and four single runs.
+(\mLuna{} did not run the hollow arm.)
 
-\textbf{The knowledge step is large and certain on every model that ran
-it.} Restoring
-the knowledge (\armH{} to \armC{}) adds 50.0 hard-task points on \mSol{} (205
-tasks to 12 over the three repeats; 95\% interval over the 38 question
-shapes $+32$ to $+66$, 23 shapes to 5) and 34.5 to 43.8 on \mQwen{}
-depending on the scoring view (189 tasks to 10 and to 8; over shapes, from
-$+24$ at the lowest). On the four single runs it adds 26.2 to 35.8 points.
-It adds the fee procedure: on the 294 hard tasks that concern
-fees the step is $+57.6$ on \mSol{}; on the other 38 it is $-8.8$
-on \mSol{} and $-0.9$ on \mQwen{} (end-to-end), and on the easy tasks $+13$
-and $+12$.
+\textbf{The knowledge step is large on all six models, and robust to
+clustering.} Restoring the knowledge (\armH{} to \armC{}) adds 50.0
+hard-task points on \mSol{} (205 tasks to 12 over the three repeats; 95\%
+interval over the 38 question shapes $+32.1$ to $+66.2$, 23 shapes to 5)
+and 34.5 to 43.8 on \mQwen{} depending on the scoring view (189 tasks to
+10 and to 8; over shapes, from $+24$ at the lowest). On the four single
+runs it adds 26.2 to 35.8 points. Nearly all of it is the fee procedure:
+on the 294 hard tasks that concern fees the step is $+57.6$ on \mSol{}; on
+the other 38 it is $-8.8$ on \mSol{} and $-0.9$ on \mQwen{} (end-to-end).
 
-\textbf{The scaffolding step is small, and its sign depends on the
-model.} In the single runs it is $+0.0$ points on \mDS{}, $+5.4$ on \mGLM{}
-and $+14$ to $+15$ on \mSON{} and \mGPT{}. Repeated, it is negative on the
-newer frontier model: on \mSol{} the empty tools cost 8.5 hard-task points
-(23 tasks to 66; over shapes $-16$ to $-2$, 5 shapes to 15), and the
-deficit is significant in each repeat separately. On \mQwen{} the step is
-$-5.5$ hard-task points under the official verdicts (over shapes $-10.5$ to
-$-1.4$, though the shapes split 6 to 8) and $+0.2$ under the end-to-end
-view ($p{=}0.4$), which also credits an answer given as the
-last paragraph after its working (Section~\ref{sec:grading}). In the single runs the transcripts show how
-empty tools can hurt: the agent calls \texttt{lookup\_domain}, is told
-nothing is available, and searches harder; on \mGLM{} and \mSON{} \armH{}
-burns more reasoning than any other arm (\appref{app:efficiency}). What every run agrees on is the
-ordering of the two steps. \textbf{The knowledge step dominates the
-scaffolding step on all six models}, and the sceptical reading that the
-contract helps by narrowing tables, imposing a procedure or slowing the agent predicts the opposite.
+\textbf{The empty scaffolding is worth $-9$ to $+15$ points, and at most
+$+0.2$ on the repeated panels.} In the single runs the step is $+0.0$ on
+\mDS{}, $+5.4$ on \mGLM{} and $+14$ to $+15$ on \mSON{} and \mGPT{}. On
+\mSol{} the empty tools cost 8.5 hard-task points (23 tasks to 66; over
+shapes $-16$ to $-2$); on \mQwen{} the step is $-5.5$ under the official
+verdicts and $+0.2$ end-to-end. Empty tools can mislead: the agent calls
+\texttt{lookup\_domain}, is told nothing is available, and searches harder
+(\appref{app:efficiency}). On all six models the knowledge step exceeds
+the scaffolding step, the opposite of what a contract that helped by
+narrowing the tables or imposing a procedure would show.
+
+\subsection{The contract's lead over the manual}
+\label{sec:panel-gaps}
 
 The manual pasted into the prompt carries the same domain, and it helps
-too: \armM{} beats \armS{} by 21.6 hard-task points on \mSol{} (112 tasks
-to 27) and by 6.3 or 20.8 on \mQwen{}. The contract beats the manual by
-19.9 hard-task points on \mSol{} (116 tasks to 9; over shapes $+7$ to
-$+34$) and 22.7 to 23.2 on \mQwen{}.
-That gap looks like delivery, and Section~\ref{sec:delivery} takes it
-apart.
+too: \armM{} beats \armS{} by 21.6 hard-task points on \mSol{} and by 6.3
+(official) or 20.8 (end-to-end) on \mQwen{}. The contract leads the manual
+by 19.9 hard-task points on \mSol{} (116 tasks to 9; over shapes $+7$ to
+$+34$) and by 22.7 (official) or 23.2 (end-to-end) on \mQwen{}, on the two
+repeated panels. On \mLuna{}, in its own run, it leads by 42.9 (79.6\%
+against 36.7\%). Both arms hold one domain, so this looks like a delivery
+advantage: the rule one lookup away, against the rule somewhere in a long
+prompt. The rest of this section shows that on \mLuna{} and \mQwen{} it is
+mostly two pieces of data semantics the manual omits.
 
-\subsection{On LiveSQLBench, knowledge helps where it is determined}
-\label{sec:lsb-knowledge}
+\subsection{The first fact: a wildcard stored as an empty list}
+\label{sec:one-fact}
+\label{sec:interpretation}
 
-LiveSQLBench supplies each database's knowledge base (KB), so the knowledge
-arms there are built from the benchmark's own documentation
-(Section~\ref{sec:benchmarks}). On the 302 primary tasks the KB as a manual
-beats the bare schema on both models, as registered in (1): 35.5\%
-against 20.0\% on \mLuna{} (71 tasks to 8, $p{<}10^{-10}$) and 37.3\%
-against 23.2\% on \mQwen{} (68 to 13). The ceiling is low, and a blind test
-says why.
+The manual says a null fee field ``applies to all possible values''. The
+fee data never uses null for its three list-typed fields; it stores ``all''
+as an empty list, on 720 of 1{,}000 rules for \texttt{account\_type}. The
+contract's author took that from the data and built it into the matching
+predicate. \armMw{} is \armM{} plus that one fact as a note, stated once in words
+and without SQL; its plan and the reading of each outcome were committed
+before its first run. The note reads, in full: \emph{``In the
+\texttt{fees} table, the list-typed fields \texttt{account\_type},
+\texttt{aci} and \texttt{merchant\_category\_code} are never null. A rule
+that applies to all values of such a field stores an empty list instead.
+Treat an empty list the way the manual treats null: the rule applies to
+all values of that field.''}
 
-Two model raters (Section~\ref{sec:threats}), each alone and blind to every
-run and contract, read each task's question, gold SQL and result and the
-KB entries the gold uses, and judged whether the question and the KB settle
-every choice that changes the result. Each assigns one of four labels (the
-KB is clear, ambiguous, contradicted by the gold, or silent on what the
-gold needs); they agree on 83\% of tasks, $\kappa{=}0.79$ on settled or
-not. Where both say settled, the task is \emph{determined}: 138 of 302.
-Where both say not, it is \emph{undetermined}: 132; the raters split on
-the other 32. The knowledge arms solve 60\% of determined tasks and 14\% of
-undetermined ones, on each model alike. Because the raters saw the gold,
-``determined'' partly means ``a reader of the KB would reach this gold'',
-and determined tasks are also easier without knowledge (\armS{} 39\%
-against 6\%). The knowledge's own gain over \armS{} is $+21$ points where
-the KB settles the gold and $+8$ where it does not (Mann--Whitney on
-per-task gains, $p{=}0.002$, \emph{expl.}), but from such different
-baselines the comparison depends on the scale. In points the difference is
-$+13$ (95\% interval over databases $+5$ to $+22$); in log-odds the two
-gains are equal ($-0.04$, interval $-0.70$ to $+0.51$), and the 32 tasks the
-raters split on gain the most. What the ratings show robustly is where the
-accuracy is, not that knowledge works differently there. The raters call the KB
-ambiguous on 109 tasks and contradicted by the gold on 43 to 45; in a
-closer reading of 55 tasks the open choices were most often how a
-\texttt{NULL} or an unlisted category is scored, which fields a formula
-averages, and which of two columns holds a quantity.
-Section~\ref{sec:authoring} returns to what an author can and cannot add
-there.
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{\mLuna{}} & \multicolumn{2}{c}{\mQwen{}, e2e} & \multicolumn{2}{c}{\mSol{}} \\
+\tabhead{Arm} & RM & all & RM & all & RM & all \\
+\midrule
+\armM{} & 43.6 & 45.3 & 45.1$^\dagger$ & 48.2$^\dagger$ & 68.5 & 65.1 \\
+\armMw{} (+1 fact) & 52.6 & 58.8 & 43.4 & 56.7 & 69.3$^\dagger$ & 77.3$^\dagger$ \\
+\armMws{} (+2 facts) & 82.4$^\dagger$ & 74.8$^\dagger$ & 86.1 & 80.0 & -- & -- \\
+\armC{} & 82.2 & 81.1 & 79.6 & 67.7 & 79.4 & 81.0 \\
+\bottomrule
+\end{tabular}
+\caption{The manual, the manual with one and with both facts as notes, and
+the contract: accuracy (\%) on the 199 rule-matching tasks (RM) and all 401,
+$k{=}3$. Each column is one co-run block except the cells marked $\dagger$,
+which come from a separate run of the same model. \mQwen{} end-to-end; its
+official view is in the text. \mSol{} was not given the second fact.}
+\label{tab:facts}
+\end{table}
+
+\textbf{The fact acts where it should, and only there.} On \mSol{} it
+recovers 8\% of the manual-to-contract gap on the 199 rule-matching tasks,
+those that match each payment against the table of fee rules (68.5\% to
+69.3\%, against the contract's 79.4\%), and 112\% on the other 202 (expl.:
+the subset was defined after this run). Over all 401 tasks that is 77\% of
+the gap (90 tasks to 28 over \armM{}; over shapes 0.16 to 1.01), against
+41\% on \mQwen{} and 38\% on \mLuna{}; the shares' intervals overlap
+widely, so their order across models is not established. On the three
+families that need only the right set of fee rules \armMw{} reaches the
+contract (180 of 180 task-runs, against 42 for \armM{}); on the three
+total-fee families it does nothing.
+
+\subsection{The second fact: matching fees add up}
+\label{sec:second-fact}
+
+On \mLuna{}'s rule-matching tasks, \armMw{} still trailed the contract by
+29 points. We read the transcripts of the 34 tasks the contract's text
+solved and \armMw{} missed in both of the first two repeats. All 34 add up
+the fees of many transactions, and about 30 turn on what happens when
+several fee rules match one transaction, which the manual never says. The
+contract's total-fee definition sums over every matched pair. That is the
+gold's convention, and neither the manual nor the data settles it: it is a
+choice the contract's author made without marking it as one, and it
+agrees with the grader (Section~\ref{sec:authoring-paths}). The prose arm
+saw the overlap and invented a one-rule policy; twice it computed the gold
+and rejected it as double counting.
+
+\armMws{} adds that convention to \armMw{} as a second note:
+\emph{``Several fee rules can match the same transaction; when they do,
+each of them applies. Total fees over a set of transactions are the fees
+summed over every matching (transaction, rule) pair. A transaction that no
+rule matches adds nothing.''} The cleanest
+test is \mQwen{}'s, registered as (28Q) on a model none of whose
+transcripts was read: it lifts the prose on the rule-matching tasks by 42.7
+points (112 tasks to 4; over shapes 20 to 0). On \mLuna{} the registered
+lift (28) is 28.5 points (95 tasks to 4), but it reuses the runs that chose
+the 34 tasks; on the third repeat alone, which played no part in choosing
+them, it is $+28.6$. On the 165 rule-matching tasks not read, the lift is
+$+19.2$ points on \mLuna{} (64 tasks to 4) and $+33.9$ on \mQwen{} (78 to
+4); those tasks are held out by task, not by question shape, and on the
+105 in shapes no read task belongs to it is $+4.1$ (14 to 4) and $+10.8$
+(23 to 3) (expl.). The fact acts mostly in the summing shapes, as it
+should.
+
+\textbf{Stated in prose, the two facts recover most of the contract's
+lead on \mLuna{}, and on \mQwen{} all of it end-to-end}
+(Table~\ref{tab:facts}). On \mLuna{}'s rule-matching tasks \armMws{}
+reaches 82.4\% against the contract's 82.2\% (separate runs); over all 401
+it recovers 82\% of the lead (74.8\% against 45.3\% and 81.1\%, across
+runs). Run together in experiment~5e, the two score 82.4\% and 81.9\%
+($+0.5$, 90\% interval $-6.9$ to $+8.2$ over shapes): level in estimate,
+but too wide for the registered non-inferiority (51), which fails. On \mQwen{}, in one co-run block, the
+prose with both facts \emph{outscores} the governed contract end-to-end:
+86.1\% against 79.6\% on the rule-matching tasks and 80.0\% against 67.7\%
+over all 401. On the official view the contract keeps a lead on the
+rule-matching tasks, 51.6\% against 45.6\%, and trails over all 401,
+51.0\% against 54.4\%.
+
+\subsection{How plainly the facts are stated}
+\label{sec:plain}
+
+On \mQwen{} the prose with both notes beats the contract's own text by
+16.6 points on the rule-matching tasks end-to-end (69 tasks to 14,
+$p{=}7{\times}10^{-10}$; registered tie (29Q), failed), and the gap survives
+clustering and every rater family. The contract's text carries both
+semantics, but less plainly: it speaks of each transaction ``joined to
+\emph{the} fee rule'' before saying to sum, and its empty-list clause
+comes 28{,}000 characters after a matching rule that mentions null only.
+\mQwen{} often took ``the fee rule'' at its word: an approximate keyword
+count finds single-rule reasoning in 103 of its 199 rule-matching runs on
+the contract's text, against 37 on \mLuna{}. Adding the two notes to the
+contract's text lifts it by 18.9 points end-to-end (15.7 official; (31Q)).
+\textbf{On \mQwen{}, whether a fact is stated is not enough; how plainly
+it is stated moves accuracy by as much as the fact itself.} On \mLuna{}
+the prose and the contract's text do not differ detectably (registered
+tie (29), not rejected).
 
 \subsection{What a pre-computed layer would add}
 \label{sec:ceiling}
@@ -131,16 +210,14 @@ gap} is 39.2 points on \mGLM{}, 37.3 on \mDS{}, 26.1 on \mSON{} and 5.1 on
 \mGPT{}, falling with capability (single runs, so a trend, not a
 per-model estimate), while
 the shortfall on the 148 tasks that need reasoning beyond the views moves
-under no ordering (\appref{app:buckets}). Pre-computing a metric pays
-where agents fail to derive it, and on the strongest of the four that is
-5 points of the tasks the views cover. The contract's gain also stays
-inside its domain: on the hard tasks that do not concern fees it holds no
-detectable advantage in any of the four runs (\appref{app:domain}).
+under no ordering (\appref{app:buckets}). This is a coverage diagnostic,
+not a comparison with executable semantic layers. The contract's gain also
+stays inside its domain: on the hard tasks that do not concern fees it
+holds no detectable advantage in any of the four runs
+(\appref{app:domain}).
 \else
-Compiling the contract's own SQL expressions into two views gives an
-oracle for a pre-computed layer: instantiated by us, they reproduce the
-gold on all 176 hard tasks whose shape they cover. The four single runs
-miss 39.2, 37.3, 26.1 and 5.1 points of those tasks, falling with
-capability (\appref{app:buckets}): pre-computing a metric pays where agents
-fail to derive it, which on the strongest model is little.
+Compiling the contract's own SQL into two views reproduces the gold on all
+176 hard tasks whose shape they cover; the four single runs miss 39.2 to
+5.1 points of those, falling with capability. This is a coverage
+diagnostic (\appref{app:buckets}).
 \fi

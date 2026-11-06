@@ -1,0 +1,27 @@
+[
+ {
+  "id": "crmarenapro-1",
+  "cls": "data-discoverable",
+  "text": "About 25% of ID-like fields include a leading # (e.g. #001Wt00000PFj4zIAD)."
+ },
+ {
+  "id": "crmarenapro-2",
+  "cls": "data-discoverable",
+  "text": "About 20% of text fields contain trailing whitespace (e.g. \"Company Name \")."
+ },
+ {
+  "id": "crmarenapro-3",
+  "cls": "data-discoverable",
+  "text": "The corruption appears in the fields Id, AccountId, ContactId, Name, FirstName, LastName, Email, Subject and Status."
+ },
+ {
+  "id": "crmarenapro-4",
+  "cls": "guidance",
+  "text": "Handling the corruption is needed for reliable joins."
+ },
+ {
+  "id": "crmarenapro-5",
+  "cls": "guidance",
+  "text": "Domain-specific CRM knowledge is required."
+ }
+]

@@ -1,0 +1,760 @@
+{
+ "dataset": "PANCANCER_ATLAS",
+ "draws": {
+  "draw-a1": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "PANCANCER_ATLAS-1",
+     "cls": "definition",
+     "category": "partial",
+     "text_reading": {
+      "quote": "INTERPRETATION (common practice, not in the documentation): mean of log2(normalized_count + 1). Valid for all values since the minimum is about -0.99. Use only when a log-scale expression is asked for.",
+      "where": "semantic.yml metrics.mean_log2_expression.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.mean_log2_expression.sql_expression",
+      "summary": "AVG(LOG2(r.normalized_count + 1)) over RNASeq_Expression rows"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Per gene symbol over every RNASeq_Expression row, AVG of the draw's log2(normalized_count + 1) against the reference AVG(log10(normalized_count + 1)): agrees on 272 of 20,502 symbols, exactly the 272 whose mean is 0 (all values 0), where the base does not matter; elsewhere it is the reference times 1/log10(2) = 3.3219 (TP53: 10.369632 against 3.121570).",
+     "right_part": "The construction: log of (normalized_count + 1) taken per value, then averaged over the rows, nulls ignored. Wrong part: base 2 instead of base 10; the contract never states log10.",
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "PANCANCER_ATLAS-2",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "JOIN TO CLINICAL: Mutation_Data.ParticipantBarcode = the barcode extracted from clinical_info.Patient_description (metric clinical_participant_barcode); 9,854 mutation patients match a clinical row.",
+      "where": "contract.yml domains.mutations.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.clinical_mutation_join.from_sql, metrics.clinical_expression_join.from_sql, metrics.cohort_gene_mutation_frequency.from_sql",
+      "summary": "ON <molecular>.ParticipantBarcode = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'), the reference key. clinical_mutation_join and clinical_expression_join agree on 11,041/11,041 keys; cohort_gene_mutation_frequency (LEFT JOIN, with FILTER = 'PASS' AND Hugo_Symbol = 'TP53' in the ON clause as a template filter) agrees on 11,041/11,041 against the reference restricted to PASS TP53 rows."
+     },
+     "agree": 11041,
+     "total": 11041,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Scored on the join as built (ruling): each from_sql run on the built file, grouped by the molecular ParticipantBarcode and the barcode extracted from c.Patient_description; per patient key, the clinical row paired and the number of molecular rows joined compared with the reference (molecular-only keys must join no clinical row). Per-key comparisons held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-2-<metric>.csv. No key paired with a different clinical row."
+    },
+    {
+     "id": "PANCANCER_ATLAS-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Free text holding patient barcode (TCGA-XX-XXXX), UUID, gender (FEMALE/MALE), cancer type study name and vital status (Alive/Dead).",
+      "where": "semantic.yml tables.clinical_info.columns.Patient_description.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.clinical_participant_barcode, metrics.patient_gender, metrics.patient_vital_status (sql_expression)",
+      "summary": "Barcode, gender and vital status extracted from Patient_description by metrics; no metric extracts the UUID."
+     },
+     "agree": 10761,
+     "total": 10761,
+     "computation_check": null,
+     "right_part": "Barcode, gender and vital status: built and agree with the reference on all 10,761 records (vital status NULL for the 4 'nan' and 1 '[Discrepancy]' records, which the references accept). UUID: named in the text as held in Patient_description, but no metric extracts it (stated, not built). agree/total count the three built fields.",
+     "class_note": null,
+     "notes": "Per-record comparison held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-3-compare.csv."
+    },
+    {
+     "id": "PANCANCER_ATLAS-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No chi-square statistic, formula or metric anywhere in the contract."
+    },
+    {
+     "id": "PANCANCER_ATLAS-5",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "WHEN c.Patient_description ILIKE '%Brain Lower Grade Glioma%' THEN 'LGG' ... ILIKE '%Breast invasive carcinoma%' THEN 'BRCA'",
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression",
+      "summary": "CASE mapping study name to acronym, case-insensitive; on the built file LGG selects the 513 'Brain lower grade glioma' rows and BRCA the 1,087 'Breast invasive carcinoma' rows; all 32 names map to their standard acronyms."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The equivalent is stated in the contract as the metric's CASE mapping (readable by the agent), not in prose; read as stating it. contract.yml domains.clinical.description adds: 'cancer_type_acronym maps the 32 study names present (no LAML patients exist) to the TCGA acronyms'."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "Do NOT build it as 'TCGA-'||tissue_source_site|| '-'||patient_id: for the 7 Uterine Carcinosarcoma patients of site 'NA' the tissue_source_site was loaded as NULL",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "Note \"Uterine Carcinosarcoma\" contains the substring \"sarcoma\", so UCS must be tested before SARC.",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "bracketed placeholders '[Not Applicable]', '[Not Available]', '[Unknown]', '[Not Evaluated]', '[Discrepancy]'",
+     "confirmed": "yes",
+     "note": "Present in clinical_info: [Not Applicable], [Unknown], [Not Evaluated], [Discrepancy] (and [Not Reported], unlisted); '[Not Available]' does not occur.",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "age_at_initial_pathologic_diagnosis in years (10-90, 49 NULL)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "FILTER = 'PASS' marks reliable calls (1,780,124 of 2,127,885 rows)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "Variant_Classification values present: Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Frame_Shift_Ins, Splice_Site, In_Frame_Del, In_Frame_Ins, Translation_Start_Site, Nonstop_Mutation",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "Normal_SampleTypeLetterCode NB = blood normal, NT = solid tissue normal, NBC = buccal cell normal",
+     "confirmed": "yes",
+     "note": "The three codes are the only values present; their expansions are the TCGA convention.",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "a patient can have several mutations in one gene ... \"patients with a mutation in gene X\" is COUNT(DISTINCT ParticipantBarcode)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "TP Primary solid Tumor, TM Metastatic, TR Recurrent Solid Tumor, TB Primary Blood Derived Cancer - Peripheral Blood, TAP Additional - New Primary, TAM Additional Metastatic, NT Solid Tissue Normal",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "normalized_count has 177,196 NULLs (ignored by AVG), ranges from about -0.99 to 9.2 million, median ~199",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "Symbol '?' (14,142 rows) is an unannotated gene",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "about 6,300 (SampleBarcode, Symbol) pairs appear more than once",
+     "confirmed": "no",
+     "note": "4,228 (SampleBarcode, Symbol) pairs have more than one row (10,545 rows); 4,114 of them under Symbol '?'.",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "characters 14-15 = sample type: 01 primary, 02 recurrent, 03 blood primary, 05 additional primary, 06 metastatic",
+     "confirmed": "yes",
+     "note": "Exactly the codes 01, 02, 03, 05, 06 occur; the meanings are the TCGA convention.",
+     "where": "semantic.yml tables.Mutation_Data.columns.Tumor_SampleBarcode.description"
+    },
+    {
+     "quote": "Height (cm, 61-197); Weight (kg, 31-292)",
+     "confirmed": "yes",
+     "where": "semantic.yml tables.clinical_info.columns.height/weight"
+    },
+    {
+     "quote": "overall_survival_days: days_to_death for Dead, otherwise days_to_last_followup",
+     "confirmed": "cannot be checked",
+     "note": "A survival-time convention; the TRY_CAST behaviour it relies on is confirmed.",
+     "where": "semantic.yml metrics.overall_survival_days.description"
+    },
+    {
+     "quote": "5 rows say 'nan' or '[Discrepancy]' and return NULL",
+     "confirmed": "yes",
+     "where": "semantic.yml metrics.patient_vital_status.description"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a2": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "PANCANCER_ATLAS-1",
+     "cls": "definition",
+     "category": "partial",
+     "text_reading": {
+      "quote": "log2(normalized_count + 1), the usual log transform of the normalized count. Small negative counts (> -1) still give a finite value; NULL stays NULL.",
+      "where": "semantic.yml metrics.log2_expression.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.log2_expression.sql_expression",
+      "summary": "log2(r.normalized_count + 1) per row (no aggregate; an average needs AVG around it)"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "Per gene symbol over every RNASeq_Expression row, AVG of the draw's log2(normalized_count + 1) against the reference AVG(log10(normalized_count + 1)): agrees on 272 of 20,502 symbols, exactly the 272 whose mean is 0 (all values 0), where the base does not matter; elsewhere it is the reference times 1/log10(2) = 3.3219 (TP53: 10.369632 against 3.121570). The draw's metric is per row; it was averaged per symbol for the check.",
+     "right_part": "The transform's +1 pseudocount and per-value log. Wrong or absent: base 2 instead of base 10, and the averaging across samples is not stated or built.",
+     "class_note": null,
+     "notes": ""
+    },
+    {
+     "id": "PANCANCER_ATLAS-2",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The join key is the TCGA participant barcode: regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}') = m.ParticipantBarcode (or r.ParticipantBarcode). Do not join on patient_id.",
+      "where": "contract.yml domains.cross_database.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.mutated_patients_with_clinical.from_sql, metrics.expression_with_clinical_mean.from_sql",
+      "summary": "ON <molecular>.ParticipantBarcode = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'), the reference key. Both agree on 11,041/11,041 keys."
+     },
+     "agree": 11041,
+     "total": 11041,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Scored on the join as built (ruling): each from_sql run on the built file, grouped by the molecular ParticipantBarcode and the barcode extracted from c.Patient_description; per patient key, the clinical row paired and the number of molecular rows joined compared with the reference (molecular-only keys must join no clinical row). Per-key comparisons held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-2-<metric>.csv. No key paired with a different clinical row."
+    },
+    {
+     "id": "PANCANCER_ATLAS-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Free-text sentence holding the TCGA barcode, UUID, gender (MALE/FEMALE), cancer type name and vital status (Alive/Dead).",
+      "where": "semantic.yml tables.clinical_info.columns.Patient_description.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.participant_barcode, metrics.patient_gender, metrics.vital_status (sql_expression)",
+      "summary": "Barcode, gender and vital status extracted from Patient_description by metrics; no metric extracts the UUID."
+     },
+     "agree": 10761,
+     "total": 10761,
+     "computation_check": null,
+     "right_part": "Barcode, gender and vital status: built and agree with the reference on all 10,761 records (vital status NULL for the 4 'nan' and 1 '[Discrepancy]' records, which the references accept). UUID: named in the text as held in Patient_description, but no metric extracts it (stated, not built). agree/total count the three built fields.",
+     "class_note": null,
+     "notes": "Per-record comparison held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-3-compare.csv."
+    },
+    {
+     "id": "PANCANCER_ATLAS-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No chi-square statistic, formula or metric anywhere in the contract."
+    },
+    {
+     "id": "PANCANCER_ATLAS-5",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "WHEN c.Patient_description ILIKE '%Brain Lower Grade Glioma%' THEN 'LGG' ... ILIKE '%Breast invasive carcinoma%' THEN 'BRCA'",
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression",
+      "summary": "CASE mapping study name to acronym, case-insensitive; on the built file LGG selects the 513 'Brain lower grade glioma' rows and BRCA the 1,087 'Breast invasive carcinoma' rows; all 32 names map to their standard acronyms."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The equivalent is stated in the contract as the metric's CASE mapping (readable by the agent), not in prose; read as stating it. The description adds 'Counts verified e.g. BRCA 1087'."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "patient_id is ONLY the last 4 characters of the barcode",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "never match 'MALE' with LIKE (it also matches 'FEMALE') and never match '%Sarcoma%' without first excluding 'Uterine Carcinosarcoma'",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "32 cancer types present; no LAML patients",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "bracketed placeholders '[Not Applicable]', '[Not Available]', '[Unknown]', '[Not Evaluated]', '[Discrepancy]', plus real NULLs (no empty strings were found)",
+     "confirmed": "yes",
+     "note": "Present in clinical_info: [Not Applicable], [Unknown], [Not Evaluated], [Discrepancy] (and [Not Reported], unlisted); '[Not Available]' does not occur. No empty strings in any VARCHAR column: confirmed.",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "days_to_death: 7,332 '[Not Applicable]' (alive patients), 12 NULL, 1 '[Discrepancy]'. days_to_last_followup: 1,839 NULL, 7 '[Discrepancy]', 14 negative values.",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "age_at_initial_pathologic_diagnosis in years (10-90, 49 NULL)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "Variant_Classification values present: Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Frame_Shift_Ins, Splice_Site, In_Frame_Del, In_Frame_Ins, Translation_Start_Site, Nonstop_Mutation",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "Normal_SampleTypeLetterCode NB = blood normal, NT = solid tissue normal, NBC = buccal cell normal",
+     "confirmed": "yes",
+     "note": "The three codes are the only values present; their expansions are the TCGA convention.",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "only the exact value 'PASS' is a reliable call; other values may be comma-combined (e.g. 'common_in_exac,wga')",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "TP Primary solid Tumor, TM Metastatic, TR Recurrent Solid Tumor, TB Primary Blood Derived Cancer - Peripheral Blood, TAP Additional - New Primary, TAM Additional Metastatic, NT Solid Tissue Normal",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "177,196 normalized_count values are NULL and 53,907 are slightly negative (min about -0.99); max about 9.2 million",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "Symbol '?' appears for 29 different Entrez IDs (unannotated genes) and SLC35E2 has two Entrez IDs",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "9,854 of 10,063 mutation participants and 9,711 of 9,921 expression participants have a clinical row",
+     "confirmed": "yes",
+     "where": "contract.yml domains.cross_database.description"
+    },
+    {
+     "quote": "FILTER = 'PASS' exactly (1,780,124 of ~2.13M rows)",
+     "confirmed": "yes",
+     "where": "semantic.yml metrics.is_reliable_mutation.description"
+    },
+    {
+     "quote": "overall_survival_days: days_to_death for Dead, otherwise days_to_last_followup",
+     "confirmed": "cannot be checked",
+     "note": "A survival-time convention; the TRY_CAST behaviour it relies on is confirmed.",
+     "where": "semantic.yml metrics.overall_survival_days.description"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-a3": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "PANCANCER_ATLAS-1",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No log transform anywhere; the only expression metrics average the raw normalized_count (mean_normalized_count, tumor_expression_with_clinical)."
+    },
+    {
+     "id": "PANCANCER_ATLAS-2",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Clinical and molecular data are joined only on the 12-character TCGA participant barcode: molecular ParticipantBarcode = regexp_extract(clinical_info.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}').",
+      "where": "contract.yml rules.join_on_participant_barcode.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.patients_with_mutation_by_cancer_type.from_sql, metrics.tumor_expression_with_clinical.from_sql",
+      "summary": "ON <molecular>.ParticipantBarcode = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'), the reference key. Both agree on 11,041/11,041 keys (the TP filter of tumor_expression_with_clinical is in the aggregate, not the join)."
+     },
+     "agree": 11041,
+     "total": 11041,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Scored on the join as built (ruling): each from_sql run on the built file, grouped by the molecular ParticipantBarcode and the barcode extracted from c.Patient_description; per patient key, the clinical row paired and the number of molecular rows joined compared with the reference (molecular-only keys must join no clinical row). Per-key comparisons held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-2-<metric>.csv. No key paired with a different clinical row."
+    },
+    {
+     "id": "PANCANCER_ATLAS-3",
+     "cls": "data-discoverable",
+     "category": "partial",
+     "text_reading": {
+      "quote": "Free-text sentence holding the TCGA barcode, UUID, gender (FEMALE/MALE), cancer type full name and vital status (Alive/Dead).",
+      "where": "semantic.yml tables.clinical_info.columns.Patient_description.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.clinical_participant_barcode, metrics.patient_gender, metrics.vital_status (sql_expression)",
+      "summary": "Barcode, gender and vital status extracted from Patient_description by metrics; no metric extracts the UUID."
+     },
+     "agree": 10761,
+     "total": 10761,
+     "computation_check": null,
+     "right_part": "Barcode, gender and vital status: built and agree with the reference on all 10,761 records (vital status NULL for the 4 'nan' and 1 '[Discrepancy]' records, which the references accept). UUID: named in the text as held in Patient_description, but no metric extracts it (stated, not built). agree/total count the three built fields.",
+     "class_note": null,
+     "notes": "Per-record comparison held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-3-compare.csv. The metrics have no from_sql and use the bare column name; run over clinical_database.clinical_info."
+    },
+    {
+     "id": "PANCANCER_ATLAS-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No chi-square statistic, formula or metric anywhere in the contract."
+    },
+    {
+     "id": "PANCANCER_ATLAS-5",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "WHEN c.Patient_description ILIKE '%Brain Lower Grade Glioma%' THEN 'LGG' ... ILIKE '%Breast invasive carcinoma%' THEN 'BRCA'",
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression",
+      "summary": "CASE mapping study name to acronym, case-insensitive; on the built file LGG selects the 513 'Brain lower grade glioma' rows and BRCA the 1,087 'Breast invasive carcinoma' rows; all 32 names map to their standard acronyms."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "The equivalent is stated in the contract as the metric's CASE mapping (readable by the agent), not in prose; read as stating it. The clinical domain also says the full study name appears in the text, e.g. \"Brain lower grade glioma\", and the acronym (BRCA, LUAD, ...) is derived by cancer_type_acronym. The CASE here reads 'Brain lower grade glioma' in the data's case."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "DATA CHECK: 10,761 rows, 10,761 distinct barcodes",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "The patient_id column holds only the last four characters of the barcode",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "32 cancer types present; no LAML patients",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "bracketed placeholders '[Not Applicable]', '[Not Available]', '[Unknown]', '[Not Evaluated]', '[Discrepancy]' as well as NULL/empty string",
+     "confirmed": "yes",
+     "note": "Present in clinical_info: [Not Applicable], [Unknown], [Not Evaluated], [Discrepancy] (and [Not Reported], unlisted); '[Not Available]' does not occur. No empty strings occur.",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "FILTER values are 'PASS' (1,780,124 rows) and comma-separated failure flags such as 'wga', 'oxog', 'common_in_exac', 'native_wga_mix', 'nonpreferredpair', 'filterr'",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "Variant_Classification values present: Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Frame_Shift_Ins, Splice_Site, In_Frame_Del, In_Frame_Ins, Translation_Start_Site, Nonstop_Mutation (no Silent)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "Normal_SampleTypeLetterCode NB = blood normal, NT = solid tissue normal, NBC = buccal cell normal",
+     "confirmed": "yes",
+     "note": "The three codes are the only values present; their expansions are the TCGA convention.",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "TP Primary solid Tumor, TM Metastatic, TR Recurrent Solid Tumor, TB Primary Blood Derived Cancer - Peripheral Blood, TAP Additional - New Primary, TAM Additional Metastatic, NT Solid Tissue Normal",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "14,142 rows have Symbol = '?' (29 Entrez IDs without symbol)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "The table covers 20,502 symbols but only ~940 genes per sample",
+     "confirmed": "yes",
+     "note": "Median 936 symbols per sample (833 to 1,846).",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "normalized_count is NULL in 177,196 rows and has a few small negative values (min about -0.99)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "overall_survival_days: days_to_death for Dead, otherwise days_to_last_followup",
+     "confirmed": "cannot be checked",
+     "note": "A survival-time convention; the TRY_CAST behaviour it relies on is confirmed.",
+     "where": "semantic.yml metrics.overall_survival_days.description"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "draw-b": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "PANCANCER_ATLAS-1",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Average log10-transformed expression is the mean of log10(normalized_count + 1) across samples (metric avg_log10_expression).",
+      "where": "contract.yml domains.expression.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.avg_log10_expression.sql_expression; metrics.avg_log10_expression_by_clinical.sql_expression",
+      "summary": "AVG(LOG10(r.normalized_count + 1)), on RNASeq_Expression and on its join to clinical_info"
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "avg_log10_expression per symbol agrees with the reference on 20,502/20,502 symbols (TP53 3.121570); avg_log10_expression_by_clinical, run as written on its join, agrees on 20,502/20,502 with the reference applied to the clinically matched rows.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "Also rule log10_plus_one: 'AVG(LOG10(normalized_count + 1)), never LOG10(AVG(...)) and never log10 without the +1.'"
+    },
+    {
+     "id": "PANCANCER_ATLAS-2",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Match molecular data to clinical data by the barcode embedded in clinical_info.Patient_description and ParticipantBarcode: regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}') = m.ParticipantBarcode",
+      "where": "contract.yml domains.integration.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.avg_log10_expression_by_clinical.from_sql, metrics.mutated_patient_count_by_clinical.from_sql",
+      "summary": "ON <molecular>.ParticipantBarcode = regexp_extract(c.Patient_description, 'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}'), the reference key. Both agree on 11,041/11,041 keys."
+     },
+     "agree": 11041,
+     "total": 11041,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Scored on the join as built (ruling): each from_sql run on the built file, grouped by the molecular ParticipantBarcode and the barcode extracted from c.Patient_description; per patient key, the clinical row paired and the number of molecular rows joined compared with the reference (molecular-only keys must join no clinical row). Per-key comparisons held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/<draw>-PANCANCER_ATLAS-2-<metric>.csv. No key paired with a different clinical row."
+    },
+    {
+     "id": "PANCANCER_ATLAS-3",
+     "cls": "data-discoverable",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "The patient's barcode, UUID, gender, vital status and cancer type are NOT separate columns: they are embedded in the free-text column Patient_description ... Extract them with the metrics patient_barcode ..., patient_uuid (case varies, some UUIDs are upper case), patient_gender ..., patient_vital_status ...",
+      "where": "contract.yml domains.clinical.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.patient_barcode, patient_uuid, patient_gender, patient_vital_status (sql_expression)",
+      "summary": "All four fields extracted from Patient_description; UUID lower-cased."
+     },
+     "agree": 10761,
+     "total": 10761,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "All four fields agree on all 10,761 records under the references' rules: UUIDs compare case-insensitively (the metric lower-cases them); patient_vital_status returns '' for the 4 'nan' and 1 '[Discrepancy]' records, and the contract states '' means unknown, so read as the stated recoding of missing. Per-record comparison held in ~/data/dce-held-results/exp7/recovery/PANCANCER_ATLAS/draw-b-PANCANCER_ATLAS-3-compare.csv."
+    },
+    {
+     "id": "PANCANCER_ATLAS-4",
+     "cls": "definition",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "CHI-SQUARE: compute the statistic as chi2 = SUM over cells of (O_ij - E_ij)^2 / E_ij, where E_ij = (row_total * col_total) / grand_total, over the full contingency table (metric chi_square_statistic).",
+      "where": "contract.yml domains.integration.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.chi_square_statistic.sql_expression and from_sql",
+      "summary": "SUM(POWER(o - e, 2) / e) with e = row sum * column sum / total from window functions over grouped cells; example table gender x vital status, unknown vital status excluded."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": "On its own example (the references' instance, 10,756 patients) the metric gives 16.98252689524114; the reference gives 16.98252689524114.",
+     "right_part": null,
+     "class_note": null,
+     "notes": "The from_sql cells come from GROUP BY, so a zero cell would be dropped; the metric's description says so and tells the agent to build the full grid (CROSS JOIN of keys, LEFT JOIN counts, COALESCE 0) when a cell can be empty, and the domain says 'over the full contingency table'. The instance has no zero cell."
+    },
+    {
+     "id": "PANCANCER_ATLAS-5",
+     "cls": "world",
+     "category": "recovered",
+     "text_reading": {
+      "quote": "Cancer type acronyms: LGG means Brain lower grade glioma; BRCA means Breast Invasive Carcinoma (matching in the text must be case-insensitive: the text says \"Brain lower grade glioma\" and \"Breast invasive carcinoma\").",
+      "where": "contract.yml domains.clinical.description"
+     },
+     "sql_reading": {
+      "where": "semantic.yml metrics.cancer_type_acronym.sql_expression",
+      "summary": "CASE mapping, case-insensitive; LGG selects 513 rows, BRCA 1,087; all 32 names map to their standard acronyms."
+     },
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": ""
+    }
+   ],
+   "additions": [
+    {
+     "quote": "The column patient_id is only the last 4 characters of the barcode (e.g. '1953') and is not unique across cohorts",
+     "confirmed": "no",
+     "note": "Last four characters: confirmed. Not unique: wrong on the built file, where patient_id has 10,761 distinct values over 10,761 rows.",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "patient_gender ('FEMALE' 5,623 or 'MALE' 5,138 ...), patient_vital_status ('Alive' 7,326 / 'Dead' 3,430; 5 rows carry 'nan' or '[Discrepancy]')",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "32 cancer types present; no LAML patients",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "SQL NULL plus TCGA placeholder strings '[Not Applicable]', '[Unknown]', '[Not Evaluated]', '[Discrepancy]' (and '[Not Available]' style variants)",
+     "confirmed": "yes",
+     "note": "Present in clinical_info: [Not Applicable], [Unknown], [Not Evaluated], [Discrepancy] (and [Not Reported], unlisted); '[Not Available]' does not occur.",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "FILTER is the filter status: 'PASS' marks reliable calls (1,780,124 rows); other values are failure flags such as wga, oxog, common_in_exac, native_wga_mix, nonpreferredpair, filterr, and comma-joined combinations",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "Variant_Classification values present: Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, Frame_Shift_Ins, Splice_Site, In_Frame_Del, In_Frame_Ins, Translation_Start_Site, Nonstop_Mutation",
+     "confirmed": "yes",
+     "where": "contract.yml domains.mutations.description"
+    },
+    {
+     "quote": "TP Primary solid Tumor, TM Metastatic, TR Recurrent Solid Tumor, TB Primary Blood Derived Cancer - Peripheral Blood, TAP Additional - New Primary, TAM Additional Metastatic, NT Solid Tissue Normal",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "normalized_count ... NULL in ~177k rows and can be slightly negative (minimum about -0.99, always > -1)",
+     "confirmed": "yes",
+     "where": "contract.yml domains.expression.description"
+    },
+    {
+     "quote": "9,854 of 10,063 mutation participants match",
+     "confirmed": "yes",
+     "where": "contract.yml domains.integration.description"
+    },
+    {
+     "quote": "LGG: Astrocytoma, Oligodendroglioma, Oligoastrocytoma; BRCA: Infiltrating Ductal Carcinoma, Infiltrating Lobular Carcinoma, ...",
+     "confirmed": "yes",
+     "where": "semantic.yml tables.clinical_info.columns.histological_type.description"
+    }
+   ],
+   "correctable_errors": []
+  },
+  "no-data": {
+   "accepted_contract": true,
+   "items": [
+    {
+     "id": "PANCANCER_ATLAS-1",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Only mean_normalized_expression (raw AVG); no log transform."
+    },
+    {
+     "id": "PANCANCER_ATLAS-2",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No clinical-to-molecular join: the only relationship links the two molecular tables; clinical_info.patient_id is described as 'The documentation does not state how it corresponds to the molecular ParticipantBarcode; inspect the data before joining.' No metric reads clinical_info."
+    },
+    {
+     "id": "PANCANCER_ATLAS-3",
+     "cls": "data-discoverable",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "Patient_description is described only as 'Patient description; not further documented.'"
+    },
+    {
+     "id": "PANCANCER_ATLAS-4",
+     "cls": "definition",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No chi-square statistic, formula or metric anywhere in the contract."
+    },
+    {
+     "id": "PANCANCER_ATLAS-5",
+     "cls": "world",
+     "category": "missed",
+     "text_reading": null,
+     "sql_reading": null,
+     "agree": null,
+     "total": null,
+     "computation_check": null,
+     "right_part": null,
+     "class_note": null,
+     "notes": "No acronym or cancer-type mapping; the description's 'cancer type acronyms' is repeated without saying where they are."
+    }
+   ],
+   "additions": [
+    {
+     "quote": "many numeric-sounding fields (days_to_death, days_to_last_followup, lymph_node_examined_count, ...) are stored as VARCHAR and may need TRY_CAST",
+     "confirmed": "yes",
+     "where": "contract.yml domains.clinical.description"
+    },
+    {
+     "quote": "Entrez gene ID (documented as string, stored as BIGINT)",
+     "confirmed": "yes",
+     "where": "semantic.yml tables.RNASeq_Expression.columns.Entrez.description"
+    },
+    {
+     "quote": "Both tables identify the patient by ParticipantBarcode",
+     "confirmed": "yes",
+     "where": "semantic.yml relationships[0]"
+    }
+   ],
+   "correctable_errors": []
+  }
+ }
+}

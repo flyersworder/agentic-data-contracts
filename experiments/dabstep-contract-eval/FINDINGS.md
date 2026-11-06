@@ -1654,7 +1654,7 @@ drift check (`analysis/contract_noted.py --model luna|qwen`).
   every subset (largest: luna's `contract_text` on the rule-matching tasks,
   -2.8 points, 8 tasks to 22), so experiments 5 and 5b stand.
 - **On the other 202 tasks the models part.** Luna's noted text leads the
-  prose by 9.5 points (51 tasks to 14), most of it in the average-fee
+  prose by 9.6 points (51 tasks to 14), most of it in the average-fee
   families. Qwen's is behind by 5.3 points, not significantly (37 to 47,
   p = 0.33): it wins the credit family (35 of 57 task-runs against 3) and
   loses `fee_ids_by_at_aci` (17 of 60 against 60). There Qwen, reading the
@@ -1701,6 +1701,464 @@ On the 165 unread ones it is +2.2 and not significant. On Qwen it holds at
 So "with the facts stated alike, the contract's form adds to them" stands on
 Qwen. On luna it rests largely on the tasks whose transcripts suggested the
 note.
+
+### Tools with the facts stated alike: predictions (41)-(42Q)
+
+Experiment 5 found the governed tools ahead of the same contract pasted as
+text by 10.1 points on Qwen's rule-matching tasks, and level on luna's. Both
+arms carried the contract's original wording, which Qwen read as one rule
+per transaction in about half its runs; experiment 5c then lifted Qwen's text
+arm by 18.9 points with the two notes. So the +10.1 may be the wording, not
+the route. Two reviews of the paper asked exactly this.
+
+Experiment 5d tests it. `contract_noted` is `contract`, the governed arm,
+plus `DATA_NOTE` and `SUM_NOTE` after its prompt, word for word and under the
+headings `contract_text_noted` and `manual_summed` have them. Against
+`contract_text_noted` it states the same facts in the same words and differs
+only in the contract's route. `contract`, `contract_text_noted` and
+`contract_noted` run together in each repeat, gpt-6-luna then Qwen 3.8, k=3,
+`--retry-pass`; the two older arms are rerun so every test pairs within a
+run, and their earlier files (experiments 5 and 5c) serve as a drift check
+(`analysis/governed_noted.py --model luna|qwen`). Primary subset and measure
+as experiments 5 and 5c.
+
+- **(41)** gpt-6-luna and **(41Q)** Qwen 3.8: `contract_noted` and
+  `contract_text_noted` tie on the rule-matching tasks: within 5 points and
+  two-sided p >= 0.10.
+- **(42Q)** Qwen 3.8: `contract_noted` beats `contract` there, one-sided
+  p < 0.05: the notes repair the governed arm as they repaired the text.
+- **(42)** gpt-6-luna: `contract_noted` and `contract` tie there.
+
+Fixed before the run, how the outcomes read:
+- (41Q) holding means Qwen's +10.1 for the tools was the original wording,
+  not the route.
+- (41Q) failing with the governed arm ahead means the lookup adds to the
+  facts on Qwen even when they are stated alike: a delivery effect, and a
+  model-dependent one if (41) holds.
+- Failing with the text ahead means the route costs Qwen accuracy once the
+  facts are plain.
+
+**Results.** Run commit `9cb3643` (tag `exp5d-run`), all 401 tasks in each of
+the six repeats, every row with its transcript. Qwen's retry pass reran 15
+errored runs, and the last row of each counts. Cost: $9.01 on luna, $2.29 on
+Qwen.
+
+End-to-end strict, three repeats:
+
+| model | subset | tasks | `contract` | `contract_text_noted` | `contract_noted` |
+|---|---|---:|---:|---:|---:|
+| gpt-6-luna | rule-matching | 199 | 82.2% | 88.1% | 86.3% |
+| | rest | 202 | 78.2% | 79.5% | 76.7% |
+| | all | 401 | 80.2% | 83.8% | 81.5% |
+| qwen3.8-27b | rule-matching | 199 | 79.7% | 88.9% | 86.8% |
+| | rest | 202 | 55.4% | 73.1% | 78.2% |
+| | all | 401 | 67.5% | 81.0% | 82.5% |
+
+- **(41) holds.** On luna, `contract_noted` is 1.8 points below
+  `contract_text_noted` on the rule-matching tasks: 16 tasks to 23,
+  p = 0.34.
+- **(41Q) fails narrowly, with the text ahead.** On Qwen the gap is
+  -2.2 points, inside the 5-point bound, but 10 tasks to 21 gives
+  p = 0.071, below the registered 0.10. The task interval is [-4.5, +0.2].
+  Clustered over question shapes, it is [-6.9, +1.9] (p = 0.39). Over fee
+  families, it is [-5.8, +1.0] (p = 0.0015).
+- **(42Q) holds.** The notes lift Qwen's governed arm by 7.0 points on the
+  rule-matching tasks: 36 tasks to 9, one-sided p = 3e-5. The interval is
+  [+4.2, +10.2]; over shapes, [+1.8, +13.2]. On the rest the lift is
+  22.8 points (91 to 5), and over all 401 it is 15.0.
+- **(42) fails: the notes lift luna's governed arm too.** The lift is
+  +4.0 points on the rule-matching tasks: 22 tasks to 6, p = 0.004. The
+  interval is [+1.8, +6.4]; over shapes, [+0.7, +8.4]. On the rest it is
+  -1.5 (20 to 21, p = 1). The prediction assumed luna read the contract's
+  original wording correctly. On these tasks, a plainer statement of the
+  same two facts still adds 4 points.
+
+As fixed before the run, (41Q) failing with the text ahead reads: **the
+route costs Qwen accuracy once the facts are plain.** The size is about
+2 points, and the significance depends on the clustering. Neither model
+shows the tools ahead once both arms state the facts alike:
+- luna: -1.8 on the rule-matching tasks, -2.3 over all 401;
+- Qwen: -2.2 on the rule-matching tasks, +1.5 over all 401 (58 tasks to 53,
+  p = 0.7).
+
+Qwen's +10.1 for the tools in experiment 5, under the original wording,
+does not survive stating the facts plainly in both arms, end-to-end. This
+does not prove that the +10.1 was the wording: the route's effect on Qwen
+depends on the wording and on the scoring view (below).
+
+The other comparisons:
+- **`contract` against `contract_text_noted`.** It is what experiment 5's
+  pairing becomes once only the text arm carries the notes. On the
+  rule-matching tasks, the text leads by 5.9 points on luna (11 to 27,
+  p = 0.014) and by 9.2 on Qwen (7 to 43, p = 2e-7). The notes account for
+  most of each gap: 4.0 of luna's 5.9, and 7.0 of Qwen's 9.2.
+- **The official view.** It agrees on luna, whose answers are formatted the
+  same in both views. On Qwen, the official scorer puts `contract_noted`
+  ahead of `contract_text_noted` on the rule-matching tasks: 57.8% against
+  52.4%, 75 tasks to 49, p = 0.024. The end-to-end view puts it 2.2 points
+  behind. As in experiments 5 and 5c, Qwen's official scores turn on answer
+  format, which differs by arm. Any route effect on Qwen is stated with its
+  scoring view.
+- **Drift.** Every rerun arm is within 3.0 points of its earlier files on
+  every subset, so none is flagged. The largest gap is Qwen's
+  `contract_text_noted` on the rest: +3.0, 39 tasks to 31.
+- **Cost per run.**
+
+  | model | arm | cost | turns | input tokens |
+  |---|---|---:|---:|---:|
+  | gpt-6-luna | `contract_noted` | 2.93 m$ | 7.2 | 70k |
+  | gpt-6-luna | `contract_text_noted` | 1.58 m$ | 5.4 | 80k |
+  | qwen3.8-27b | `contract_noted` | | 7.1 | 93k |
+  | qwen3.8-27b | `contract_text_noted` | | 7.8 | 239k |
+
+  Qwen's route meters output only. At the size of a single DABStep
+  contract, the text arm is the cheaper of the two on luna, as at 1x in
+  experiment 6.
+
+Record: (41) and (42Q) hold; (41Q) and (42) fail. Both failures point the
+same way as the thesis. Stating the two facts plainly helps both models'
+governed arm. Once that is done, the route shows no advantage end-to-end
+on either model, and on Qwen it may cost about 2 points. On Qwen's official
+view, it leads by 5.4.
+
+### A second benchmark, DataAgentBench: predictions (43)-(48)
+
+Experiment 7 asks whether a contract an author writes from the data recovers
+the knowledge DataAgentBench's builders wrote down as hints, and whether it
+does the hints' work for an agent. Design:
+`docs/superpowers/specs/2026-11-01-experiment-7-dataagentbench-design.md`.
+Nine datasets, 40 queries (the leaderboard's set without MongoDB and
+PATENTS), DAB pinned at bcc2e1b; its data, golds and validators are not
+committed.
+
+Offline, already scored (`contracts-dataagentbench/RECOVERY.md`, recovery
+commit 898373b, before any agent run): **(43) fails** (draw A recovers 12 of
+36 data-discoverable item-draws), **(43c) holds**, **(43w) fails** pooled.
+
+Five arms run together in each repeat, gpt-6-luna and qwen3.8-27b, k=5,
+`--retry-pass`: `dab_desc` (description only), `dab_hints` (plus DAB's hints),
+`dab_contract` (plus the governed contract, draw A1), `dab_contract_text`
+(draw A1's files in the prompt, plain tools) and `dab_hints_contract` (hints
+plus the governed contract, draw B, corrected). Primary measure: DAB's own
+`validate.py` on the harness's final answer. Analysis:
+`analysis/dataagentbench.py`.
+
+- **(44)** `dab_hints` beats `dab_desc` (manipulation check).
+- **(45)** `dab_contract` beats `dab_desc`.
+- **(46)** The recovered share, (`dab_contract` - `dab_desc`) / (`dab_hints`
+  - `dab_desc`), is at least 0.5; falsified if its 95% interval (bootstrap
+  over datasets) lies below 0.5; spanning 0.5 with the point below is
+  inconclusive.
+- **(47)** `dab_contract` and `dab_contract_text` show no detectable
+  difference: within 5 points and two-sided p >= 0.10.
+- **(48)** `dab_hints_contract` beats `dab_hints`.
+
+Each directional test is a one-sided task-level sign test over the 40
+queries on each query's pass rate over the five repeats, p < 0.05, and holds
+only if the direction also holds on a majority of the datasets where the
+arms differ. Every test is reported leaving out one dataset at a time; the
+leaderboard form (mean of per-dataset pass rates) beside it, untested.
+Leniency: overlong passes (an answer more than 200 characters longer than
+the gold) per arm; arms more than 5 points apart in them are also compared
+without those rows.
+
+Fixed before the run, how the outcomes read: (44) failing means the hints do
+not bite in this harness on this subset, and (45)-(48) are reported but not
+read as support. (43) failing and (45) holding would mean the contract helps
+through what the rubric scored partial or stated. (43c) holding means
+recovery comes from the data, not from memory of DAB.
+
+The pilot gate (`prep/dataagentbench/PILOT.md`, bd3ade4) ran before this
+commit: neither floor rule fires, no dataset is left out, and on luna's one
+repeat `dab_hints` did not lead `dab_desc` (23 against 25 of 40). Its rows
+enter no test.
+
+The runs are on the cluster, as designed, after experiment 5e frees the
+namespace's scratch space. A local start at c6544a0 was stopped after 35
+rows (25 luna, 10 Qwen, all repeat 1): about a row a minute, too slow for
+the laptop. Those rows are kept apart (`~/data/dce-held-results/exp7/
+aborted-local/`) and enter no test. To fit the 5 GiB scratch quota, the job
+builds one dataset at a time (each checked against the committed content
+digest, its raw source deleted once built) and runs one dataset at a time
+with two workers, clearing the per-worker working copies between datasets.
+The harness is unchanged. Rows `results/dataagentbench/exp7-<model>-r<i>.jsonl`.
+
+#### Results (2026-11-06): (44) fails on both models, so (45)-(48) are not read as support
+
+Run commit 77ca57c, every row; 200 units per model and repeat (Qwen's files
+carry 0 to 2 retry-pass rows more), k=5, a transcript for every row, no
+corrupted working copy. Analysis output: `uv run python
+analysis/dataagentbench.py`. No dataset excluded (the pilot gate).
+
+Accuracy, pooled over 40 queries x 5 repeats (leaderboard form beside):
+
+| | `dab_desc` | `dab_hints` | `dab_contract` | `dab_contract_text` | `dab_hints_contract` |
+|---|---|---|---|---|---|
+| luna | 64.5 (61.2) | 64.0 (64.4) | 64.5 (60.8) | 64.5 (61.4) | 74.5 (73.6) |
+| Qwen | 59.5 (61.0) | 67.5 (68.0) | 67.5 (69.3) | 70.0 (73.9) | 74.5 (78.4) |
+
+Registered:
+
+- **(44) fails on both models.** luna: hints - description -0.5 points,
+  queries 10 to 9, p = 0.50. Qwen: +8.0, queries 12 to 6, p = 0.12, the
+  direction holding in 7 of 8 differing datasets. The hints do not bite
+  detectably in this harness on these 40 queries; the pilot's luna repeat
+  had shown the same. By the reading fixed in advance, (45)-(48) below are
+  reported, not read as support.
+- (45) fails on both: contract - description luna +0.0 (8 to 10), Qwen
+  +8.0 (11 to 7, p = 0.24).
+- (46): luna undefined (no hints gain); Qwen 1.00, 95% [0.10, 2.88] over
+  datasets, which would hold.
+- (47) holds on both: contract looked up against pasted, luna +0.0 (8 to 6,
+  p = 0.79), Qwen -2.5 (6 to 7, p = 1.0).
+- (48): luna holds, +10.5 (14 to 5, p = 0.032; 6 of 9 datasets), but
+  leaving out any one of crmarenapro, googlelocal, music_brainz_20k or
+  stockmarket it fails, and most of it is music_brainz_20k (+46.7) and
+  googlelocal (+30.0); Qwen fails, +7.0 (8 to 6, p = 0.40).
+
+Leniency. Overlong passes (answer more than 200 characters longer than the
+gold) are 6.5 to 11.5% of luna's runs per arm, under the 5-point trigger.
+On Qwen they are 30.5 to 41.5%: Qwen states its working, and the
+validators accept a long answer that contains the gold. The arms differ by
+more than 5 points, so the comparisons are also read without those rows:
+(45) +5.3 (9 to 3, p = 0.073); (46) 0.43, 95% [-0.67, 2.22], inconclusive;
+(47) fails, -12.4 (3 to 6, p = 0.51) with few queries left; (48) +6.0, p =
+0.39. Qwen's DataAgentBench results depend on how lenient the validators
+are with a verbose answer.
+
+What it means. On this benchmark's 40 queries, with these two models, the
+benchmark's own hints do not detectably help, so it cannot test whether a
+contract reproduces the hints' effect: the knowledge premise the DABStep
+results rest on is not present here. Two readings hold up regardless: the
+route makes no detectable difference with lenient grading on either model
+(the DABStep delivery result, on a second benchmark), and the contract
+added to the hints gives the highest accuracy on both models (74.5%),
+concentrated in two datasets and not established. The author, with the
+data, recovered a third of what the data reveals ((43)). Per-query
+estimates over 40 queries in 9 datasets of 2 to 13 queries are noisy; the
+leave-one-out readings above show how much one dataset moves each test.
+
+### The two facts written into the contract: predictions (49)-(53)
+
+Experiment 5d pasted the two notes into both arms' prompts, so it tested
+governed delivery of the rest of the contract, not whether lookup delivers
+the deciding facts better. Experiment 5e writes the facts into the contract
+itself, at the point where each is used, in the notes' exact words, and puts
+them in no prompt (`dce.plain`, the derived contract in `contract_plain/`;
+`contract/` is unchanged). The governed arm's system prompt is identical to
+`contract`'s, so it reaches the facts only by lookup: one
+`lookup_domain("fees")` returns both.
+
+Six arms run together in each repeat, gpt-6-luna then Qwen 3.8, k=3,
+`--retry-pass`: `contract`, `contract_text`, `contract_plain`,
+`contract_plain_text` (a 2x2 of route by wording), `contract_noted` (5d) and
+`manual_summed` (5b). A scale block on Qwen, k=3, runs `manual_scaled_all`
+(the prose KB at all 22 databases), `contract_scaled_all`,
+`manual_scaled_1x` and `contract_scaled_1x` on experiment 6's 60 questions.
+Design: `docs/superpowers/specs/2026-11-03-experiment-5e-facts-in-the-contract-design.md`.
+Analysis: `analysis/facts_placed.py`.
+
+Inference, one registered engine (`dce.inference`): the task scored as its
+mean over the three repeats; the task-weighted mean difference; a two-sided
+sign-flip test over the per-shape sums of the 25 rule-matching shapes
+(enumerated when 16 or fewer shapes are non-zero, else 100,000 flips, fixed
+seed); 90% and 95% intervals by inverting the same test. The shape bootstrap
+and the task-level sign test are reported beside and decide nothing. Holm
+over the four confirmatory predictions. Primary view: end-to-end on the 199
+rule-matching tasks; all 401 and the official and exact views are
+exploratory.
+
+- **(49)** gpt-6-luna and **(49Q)** Qwen 3.8: with the facts in place, the
+  governed route (`contract_plain`) does not lead the pasted contract
+  (`contract_plain_text`) by 5 points or more: the 90% interval's upper end
+  is below +5.
+- **(50Q)** Qwen 3.8: `contract_plain` beats `contract`: shape-level
+  p < 0.05 and a positive estimate.
+- **(51)** gpt-6-luna: `manual_summed` is not worse than `contract` by 5
+  points or more: the 90% interval's lower end is above -5.
+- Estimates, no verdict: (50) luna, `contract_plain` - `contract`; (51Q)
+  Qwen, `manual_summed` - `contract`.
+- **(52)** Qwen 3.8: `manual_scaled_all` loses no more than 5 points against
+  `manual_scaled_1x`: the exact 95% upper bound on runs lost, widened by the
+  design effect over the six knowledge pieces, is below 5%. Run health
+  first: a `manual_scaled_all` run that overflows the context or truncates
+  a request is reported and counted wrong.
+- **(53)** Qwen 3.8: `contract_scaled_all` uses fewer input tokens per run
+  (fresh plus cached) than `manual_scaled_all`: one-sided sign test over the
+  60 questions' mean input tokens, p < 0.05.
+- **Drift check:** `contract` and `contract_noted` against 5d,
+  `contract_text` and `manual_summed` against 5c, each within 3 points on
+  every subset; a larger drift is reported and that arm's cross-run
+  comparisons are not made.
+
+Fixed before the run, how the outcomes read:
+- An interval reaching past +5 or -5 is inconclusive and supports no claim
+  of no effect. Said in advance: under this engine 5d's luna route interval
+  was [-9.1, +5.6] (8 of 25 shapes non-zero), so a repeat of that spread
+  leaves (49) inconclusive; that outcome is reported as such.
+- (49Q) failing with the governed arm ahead means lookup delivers the
+  deciding facts better than paste on Qwen, the effect 5d could not test.
+- (50Q) holding means the plain wording repairs the governed arm without any
+  prompt note; set beside `contract_plain` - `contract_noted`, it says
+  whether the facts work as well placed in the contract as pasted in the
+  prompt.
+- (51) holding puts the prose manual with the two facts level with the
+  contract on luna within one run, the comparison the paper so far made
+  across runs.
+
+#### Results (2026-11-05): (49), (49Q), (52), (53) hold; (50Q), (51) fail
+
+Run commit 4897bfe (tag `exp5e-run`), every row; 2,406 units per model and
+repeat (the Qwen files carry 7 to 15 retry-pass rows more, which the
+analysis resolves), 240 per scale repeat, a transcript for every row. Drift:
+every rerun arm within 1.8 points of its earlier run on every subset, so all
+cross-run comparisons stand. One corrupted working copy in 15,191 rows, in
+Qwen r3's `manual_summed`, whose prompt does not state the forbidden
+operations. Analysis output: `uv run python analysis/facts_placed.py
+--traces <held transcripts>`.
+
+Accuracy, end-to-end strict, k=3, rule-matching (199) / all (401):
+
+| | `contract` | `contract_text` | `contract_plain` | `contract_plain_text` | `contract_noted` | `manual_summed` |
+|---|---|---|---|---|---|---|
+| luna | 81.9 / 79.9 | 80.4 / 76.1 | 86.4 / 82.0 | 88.9 / 81.2 | 85.3 / 81.3 | 82.4 / 75.4 |
+| Qwen | 79.1 / 67.0 | 72.0 / 67.1 | 83.8 / 72.7 | 89.6 / 79.6 | 87.4 / 82.0 | 84.8 / 79.7 |
+
+Registered, rule-matching, end-to-end; Holm over the four:
+
+- **(49) holds.** luna R (`contract_plain` - `contract_plain_text`): -2.5
+  points, 90% [-8.3, +3.1], shape p = 0.61 (7 of 25 shapes non-zero); Holm
+  p = 0.012. The upper end clears +5, so the governed route does not lead.
+  It is non-superiority, not equivalence: the lower end reaches -8.3, and
+  read as a tie it is inconclusive. The outcome said in advance to be
+  likely (an interval past +5) did not occur.
+- **(49Q) holds**, with the paste ahead. Qwen R: -5.9 points, 90% [-12.8,
+  -0.4], 95% [-14.3, -0.0], shape p = 0.077, tasks 5 to 30; Holm
+  p = 4e-5. With the facts in place the governed route does not deliver
+  them better on Qwen; the pasted contract leads at the task level, not
+  significantly at the shape level.
+- **(50Q) fails.** Qwen P (`contract_plain` - `contract`): +4.7 points, 90%
+  [+0.6, +8.5], shape p = 0.059 (Holm 0.12), tasks 32 to 10. Positive, as
+  predicted, but the shape-level test does not reach 0.05.
+- **(51) fails** (inconclusive). luna H (`manual_summed` - `contract`):
+  +0.5 points, 90% [-6.9, +8.2], shape p = 0.95. Within one run the prose
+  manual with the two facts and the contract are level in estimate, but the
+  interval reaches past -5.
+- Estimates: (50) luna P +4.5 points, 90% [-0.4, +10.3], shape p = 0.2,
+  tasks 25 to 7; (51Q) Qwen H +5.7, 90% [-2.0, +14.5], shape p = 0.34.
+- **(52) holds.** No `manual_scaled_all` run overflowed or truncated (180
+  runs). It lost 0 of 180 runs against `manual_scaled_1x` (100.0% against
+  97.2%); exact 95% upper bound 2.0%, design effect 1.00.
+- **(53) holds.** `contract_scaled_all` used fewer input tokens on all 60
+  questions, one-sided p = 9e-19: 133k against 920k a run. At one fixed
+  price ($2 per million input tokens, uncached) $0.29 against $1.91 a run;
+  cached, $0.05 against $0.26. Qwen's own meter bills output only: 0.34 and
+  0.96 thousandths of a dollar.
+
+Exploratory, rule-matching unless said:
+
+- **The plain wording helps the paste more than the lookup on Qwen.** The
+  interaction RxW (R minus R0, task by task) is -12.9 points, 90% [-22.6,
+  -2.9], shape p = 0.016: in the original wording the governed route leads
+  its paste by 7.0 (R0, shape p = 0.056); in the plain wording it trails by
+  5.9. On luna RxW is -4.0, shape p = 0.23.
+- **Facts placed against facts noted.** `contract_plain` - `contract_noted`:
+  luna +1.2 (shape p = 0.28); Qwen -3.7 (90% [-8.0, -0.0], shape p = 0.1),
+  and -9.3 over all 401 (shape p = 0.012). On Qwen the facts work less well
+  placed in the contract and looked up than pasted as prompt notes beside
+  the governed contract.
+- **F, the pasted plain contract against the prose manual with the facts**
+  (`contract_plain_text` - `manual_summed`): luna +6.5 (90% [+2.0, +11.5],
+  shape p = 0.014); Qwen +4.9 (90% [+0.9, +8.4], shape p = 0.059). Over all
+  401, luna +5.8 (p = 0.038), Qwen -0.1. With the same facts in the same
+  words, the contract's text leads the prose on the rule-matching tasks on
+  both models: the form result of 5c, now within one run.
+- **Scoring views.** luna's official view equals its end-to-end view;
+  exact matching moves R, P and F toward zero (R -1.0, P +0.5, F +4.4,
+  shape p = 0.012) and H to -2.8 (shape p = 0.18). On Qwen the official view reverses R (+7.5, shape
+  p = 0.19) and exact final-paragraph gives R +1.5: Qwen's R is largely
+  about answer format. Its P holds in every view (official +11.4, shape
+  p = 0.0075; exact final paragraph +4.7, p = 0.0011).
+- **Lookup log.** Before the first query naming `fees`,
+  `lookup_domain("fees")` came in 83% of luna's governed runs and 81 to 82%
+  of Qwen's, alike across the three governed arms; `list_metrics(fees)` in
+  56 to 62% of luna's runs and 1 to 5% of Qwen's. Every wrong governed run
+  on a rule-matching task the governed arm lost to its paste had fetched
+  the fees domain first (luna 31 and 34 runs, Qwen 37 and 52): "fetched,
+  not used", none "never fetched". The governed arm's losses are not
+  failures to look the facts up.
+
+What it means. With the facts written into the contract and found only by
+lookup, the route does not beat the paste on either model, and on Qwen the
+paste leads at the task level. This extends 5d's finding, that the route
+adds nothing once the facts are stated alike, from notes in both prompts to
+facts written into the contract. The plain
+wording helps the governed contract on both models (luna +4.5, Qwen +4.7,
+neither shape-significant), and helps the paste more. Every lost governed
+run had fetched the facts, so the difference is in use, not retrieval. At
+22 databases the prose KB held its accuracy on Qwen and cost about seven
+times the input of lookup.
+
+### Exact-match sensitivity of the form and route effects
+
+The small effects rest on DABStep's scorer, which tolerates format
+differences. A round-3 reviewer found luna's form effect falls from +3.7 to
+about +1.8 when an answer must match the gold exactly. This sensitivity
+covers every small effect (`analysis/exact_match.py`, not registered).
+Exact match is `analysis/leniency.py`'s: strip whitespace and bold, compare
+to the gold. Two variants keep leniency apart from final-paragraph
+recovery:
+- *exact, full message*: officially correct, and the whole answer is the
+  gold;
+- *exact, final paragraph*: correct end-to-end, and the text that was
+  graded is the gold.
+
+Rule-matching tasks (199), co-run, k=3. The gap is arm a minus arm b in
+points, with the task sign test (two-sided) and the interval clustered over
+question shapes:
+
+| contrast | model | official | end-to-end | exact, full | exact, paragraph |
+|---|---|---|---|---|---|
+| form (5c): text with notes − prose with notes | luna | +3.7, p = 0.007, [+0.6, +7.9] | same | +1.8, p = 0.08, [-2.0, +6.6] | same |
+| | Qwen | +8.9, p = 0.01, [-1.3, +20.5] | +5.5, p = 3e-4, [-0.4, +10.4] | +9.7, p = 0.005, [+1.3, +21.2] | +4.7, p = 0.013, [-0.8, +9.9] |
+| route (5): governed − text | luna | -0.7, p = 0.73 | same | 0.0, p = 1 | same |
+| | Qwen | +10.1, p = 0.002, [+5.1, +15.5] | +10.1, p = 6e-8, [+3.1, +16.7] | +8.7, p = 0.014, [+2.4, +15.4] | +5.7, p = 0.002, [-1.0, +12.1] |
+| route, notes in both (5d) | luna | -1.8, p = 0.34 | same | +0.8, p = 0.85 | same |
+| | Qwen | +5.4, p = 0.024, [-7.1, +18.1] | -2.2, p = 0.071, [-6.9, +1.9] | +10.1, p = 8e-4, [+0.4, +20.0] | -0.7, p = 0.77, [-4.1, +2.5] |
+
+luna's official and end-to-end views coincide: every correct luna answer
+is the answer alone.
+
+- **luna's form effect is the one that weakens.** On the rule-matching
+  tasks it falls to +1.8 (22 tasks to 11, p = 0.08), and its shape interval
+  crosses zero. On the other 202 tasks it holds: +7.9 (50 to 18,
+  p = 1e-4). Over all 401 it is +4.9 (p = 2e-5).
+- **Qwen's form effect keeps its direction under both exact variants:**
+  +9.7 on the full message and +4.7 on the paragraph, both with p < 0.05.
+  The paragraph variant's shape interval crosses zero, as the end-to-end
+  one does.
+- **Qwen's route effect in experiment 5 keeps its direction:** +8.7 full,
+  +5.7 paragraph (p = 0.002). The paragraph variant's shape interval
+  crosses zero.
+- **On Qwen, the views split by which text is scored, not by tolerance.**
+  The two whole-message views (official and exact, full) put the governed
+  arm ahead in 5d, +5.4 and +10.1. The two final-paragraph views
+  (end-to-end and exact, paragraph) find no advantage, -2.2 and -0.7.
+- **The mechanism is answer format.** Of Qwen's answers that are correct
+  end-to-end on the rule-matching tasks, the share that is the answer alone
+  (officially correct too):
+
+  | experiment | governed | text |
+  |---|---:|---:|
+  | 5 | 65% (308 of 475) | 60% (248 of 415) |
+  | 5d | 67% (345 of 518) | 59% (313 of 531) |
+  | 5c, form | 61% (text with notes) | 54% (prose with notes) |
+
+  On luna the share is 100% in every arm. On Qwen, the governed route and
+  the contract's text make Qwen more likely to answer with the value
+  alone, as the prompt asks. Part of every Qwen effect under whole-message
+  scoring is that compliance, not a more often correct value. This is
+  descriptive: which arm complies more was not predicted.
 
 ### Gaps the documentation leaves open: predictions (32)-(36)
 
@@ -3835,7 +4293,7 @@ to `manual_prompt` and compare against what Adyen actually returned:
 The contract row is circular — it is the calibration. **The `manual_prompt`
 row is not**, and the point estimates agree. Do not read 0.1 pp as precision:
 on 18 flags the realised conversion (10/18) carries a Wilson 95% interval of
-roughly [0.34, 0.76], so a measured bias anywhere between ~1.8 and ~4.1 pp
+roughly [0.34, 0.75], so a measured bias anywhere between ~1.8 and ~4.1 pp
 would have been equally consistent. The assumption survives its first test; it
 is not confirmed by it. So the estimator is no longer a sensitivity analysis standing in
 for a measurement; on the one cross-arm transfer available it is a validated
@@ -4120,6 +4578,12 @@ its unstated arms (44 of 8,421) give p = 2e-7. **The operative variable is
 whether the rules are stated, not whether they are enforced.** Only Qwen
 supports the contrast on its own; the other models' unstated cells hold 0
 to 3 events.
+
+**Update (2026-11-03), with experiment 5d.** 5d's three arms all state the
+rules, which adds 7,218 stated runs with no corruption: 0 of 36,574 stated
+against 50 of 21,790 unstated (`analysis/corruption.py`). The TEXT arms are
+now 9,624 runs (4,812 per model); Qwen's 0 of 4,812 against its 44 of 8,421
+gives p = 3e-9.
 
 ### Operating numbers, the k=3 runs
 

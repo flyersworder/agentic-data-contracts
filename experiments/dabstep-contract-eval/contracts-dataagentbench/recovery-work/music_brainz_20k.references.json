@@ -1,0 +1,53 @@
+{
+ "dataset": "music_brainz_20k",
+ "items": [
+  {
+   "id": "music_brainz_20k-1",
+   "cls": "described",
+   "text": "The tracks table has duplicates: different track_ids can be the same real-world track.",
+   "kind": "statement",
+   "equivalent": "The contract says that track_id identifies a stored track record, not a real-world track: the tracks table holds duplicate records (from different sources), so several track_ids can be the same track. Saying only that source_track_id is not unique, or that sources differ in format, is not equivalent.",
+   "computation": false,
+   "reference_sql": null,
+   "reference_value": null,
+   "notes": "Statement of a property; no computation implied (resolving the duplicates is item 2). Confirmed on the built file: track_id is unique (19375 rows, 19375 distinct), yet 10627 track_ids fall in 3993 groups that share a normalized title and artist under item 2's reference, mostly one record per source (5 sources). Described class taken as given.",
+   "held_file": null
+  },
+  {
+   "id": "music_brainz_20k-2",
+   "cls": "guidance",
+   "text": "Duplicate tracks need not match exactly (e.g. different year formats or small attribute differences), so they are resolved by comparing title, artist, album, year and so on.",
+   "kind": "statement",
+   "equivalent": "The contract says that duplicate tracks are identified by comparing their attributes (title and artist, with album, year and the like as further evidence), tolerating format differences between records (year written as 2002 / 02 / '02, case, punctuation, artist folded into the title, small spelling differences), not by track_id, source_track_id or exact equality of the raw columns.",
+   "computation": true,
+   "reference_sql": "WITH parsed AS (\n  SELECT track_id,\n    CASE source_id\n      WHEN 1 THEN regexp_replace(title, '\\s*\\([^()]*\\)\\s*$', '')\n      WHEN 2 THEN CASE WHEN strpos(title, ' - ') > 0 THEN substr(title, strpos(title, ' - ') + 3) ELSE title END\n      WHEN 3 THEN regexp_replace(title, '\\s+-\\s+[^-]*$', '')\n      WHEN 4 THEN regexp_replace(title, '^\\d+-', '')\n      ELSE title END AS t,\n    CASE WHEN source_id = 2 AND strpos(title, ' - ') > 0 THEN substr(title, 1, strpos(title, ' - ') - 1) ELSE artist END AS a\n  FROM tracks_database.tracks),\nnorm AS (\n  SELECT track_id,\n    regexp_replace(lower(coalesce(t, '')), '[^\\p{L}\\p{N}]', '', 'g') AS nt,\n    regexp_replace(lower(coalesce(a, '')), '[^\\p{L}\\p{N}]', '', 'g') AS na\n  FROM parsed),\nkeyed AS (\n  SELECT track_id, CASE WHEN nt <> '' AND na <> '' THEN nt || '|' || na ELSE 'id:' || track_id END AS k\n  FROM norm),\ngrp AS (SELECT k, count(*) AS n FROM keyed GROUP BY k)\nSELECT (SELECT count(*) FROM keyed) AS track_ids,\n       (SELECT count(*) FROM grp) AS resolved_tracks,\n       (SELECT count(*) FROM grp WHERE n > 1) AS duplicate_groups,\n       (SELECT sum(n) FROM grp WHERE n > 1) AS track_ids_in_duplicate_groups,\n       (SELECT max(n) FROM grp) AS largest_group",
+   "reference_value": "19375 track_ids resolve to 12741 tracks; 3993 duplicate groups hold 10627 track_ids; largest group 6. For contrast, exact (lower, trimmed) title+artist gives 19181 distinct pairs, i.e. almost no merging, because sources store title/artist in different layouts.",
+   "held_file": "~/data/dce-held-results/exp7/recovery/music_brainz_20k/music_brainz_20k-2.csv",
+   "notes": "Per-source layouts found on the built file and parsed by the reference: source 1 appends \" (album)\" to the title; source 2 stores \"Artist - Title\" in title with artist null and a 2-digit year; source 3 stores \"Title - Album\" in title with album null and year as '05; source 4 prefixes the title with a track number \"003-\" and suffixes album with \" (year)\" or \" (unknown)\"; source 5 is plain. Records with an empty normalized title or artist stay singletons. The data also carries injected typos (e.g. doubled or swapped letters), which an exact normalized key cannot merge, so the reference count is an upper bound on distinct tracks; it is the checker's reading, not the benchmark's. Proposed check for phase 2, because the item names a method and no single count: a metric performs the computation when it groups tracks on normalized title and artist (optionally album/year) across the source layouts, not on ids or raw-column equality; its resolved count and its per-track grouping are compared with the held file and the difference reported. A metric that groups on ids or raw columns performs it wrongly. A metric whose grouping follows the method but differs from the reference only through a different tolerance (e.g. fuzzy matching of typos) is read as agreeing on the method; the numeric 1e-6 rule cannot apply to a fuzzy match. Held file maps each track_id to its resolved key."
+  },
+  {
+   "id": "music_brainz_20k-3",
+   "cls": "data-discoverable",
+   "text": "The sales table records sales in five countries: USA, UK, Canada, Germany and France.",
+   "kind": "records",
+   "record_query": "SELECT sale_id, country FROM sales_database.sales ORDER BY sale_id",
+   "count": 58049,
+   "reading": "Every sale record has country equal to one of exactly five stored strings, spelled as stored: 'USA', 'UK', 'Canada', 'Germany', 'France' (no nulls, no other values, no padding). Each record is a sale in the country its value names; a contract reading 'United States' or 'United Kingdom', or listing a different set, disagrees on the records of that value.",
+   "reference_sql": "SELECT sale_id, country AS reference_country FROM sales_database.sales WHERE country IN ('USA', 'UK', 'Canada', 'Germany', 'France') ORDER BY sale_id",
+   "held_file": "~/data/dce-held-results/exp7/recovery/music_brainz_20k/music_brainz_20k-3.csv",
+   "notes": "Per-value record counts: Canada 11684, France 11712, Germany 11549, UK 11589, USA 11515 (sum 58049; the reference_sql also returns 58049, so the IN list covers every record). Scored per record on whether the contract's stated or computed country values match the stored string for that record."
+  },
+  {
+   "id": "music_brainz_20k-4",
+   "cls": "data-discoverable",
+   "text": "Sales occur on five platforms or stores: iTunes, Spotify, Apple Music, Amazon Music and Google Play.",
+   "kind": "records",
+   "record_query": "SELECT sale_id, store FROM sales_database.sales ORDER BY sale_id",
+   "count": 58049,
+   "reading": "Every sale record has store equal to one of exactly five stored strings, spelled and cased as stored: 'iTunes', 'Spotify', 'Apple Music', 'Amazon Music', 'Google Play' (no nulls, no other values). Each record is a sale on the platform its value names; a contract using another spelling (e.g. 'Itunes', 'Amazon') or a different set disagrees on the records of that value.",
+   "reference_sql": "SELECT sale_id, store AS reference_store FROM sales_database.sales WHERE store IN ('iTunes', 'Spotify', 'Apple Music', 'Amazon Music', 'Google Play') ORDER BY sale_id",
+   "held_file": "~/data/dce-held-results/exp7/recovery/music_brainz_20k/music_brainz_20k-4.csv",
+   "notes": "Per-value record counts: Amazon Music 11495, Apple Music 11622, Google Play 11748, Spotify 11549, iTunes 11635 (sum 58049; reference_sql returns 58049). Every country x store pair occurs (25 cells, 2241-2413 records each)."
+  }
+ ]
+}

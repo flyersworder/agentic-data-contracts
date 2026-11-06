@@ -1,0 +1,22 @@
+[
+ {
+  "id": "stockmarket-1",
+  "cls": "world",
+  "text": "Listing exchange codes: A = NYSE MKT, N = NYSE, P = NYSE ARCA, Z = BATS, V = IEXG, Q = NASDAQ Global Select Market."
+ },
+ {
+  "id": "stockmarket-2",
+  "cls": "world",
+  "text": "Financial status codes: D = deficient, E = delinquent, Q = bankrupt, N = normal, G = deficient and bankrupt, H = deficient and delinquent, J = delinquent and bankrupt, K = deficient, delinquent and bankrupt."
+ },
+ {
+  "id": "stockmarket-3",
+  "cls": "definition",
+  "text": "A company is financially troubled if it is deficient, delinquent, or both."
+ },
+ {
+  "id": "stockmarket-4",
+  "cls": "world",
+  "text": "Market category codes: Q = NASDAQ Global Select Market, G = NASDAQ Global Market, S = NASDAQ Capital Market."
+ }
+]

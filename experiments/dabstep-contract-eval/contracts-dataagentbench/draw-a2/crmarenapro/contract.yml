@@ -1,0 +1,172 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: crmarenapro, author: claudeopus5.5
+version: '1.0'
+name: crmarenapro
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: core_crm
+    description: 'Core CRM data from Salesforce CRMArena: User (sales team information), Account (company/customer
+      data), Contact (individual contacts). Documented as a SQLite database; here a DuckDB schema.'
+    tables:
+    - Account
+    - Contact
+    - User
+  - schema: sales_pipeline
+    description: 'Sales pipeline data: Contract (signed contracts), Lead (sales leads), Opportunity (sales
+      deals), OpportunityLineItem (deal line items), Quote (price quotes), QuoteLineItem (quote details).'
+    tables:
+    - Contract
+    - Lead
+    - Opportunity
+    - OpportunityLineItem
+    - Quote
+    - QuoteLineItem
+  - schema: support
+    description: 'Customer support data: Case (support cases), knowledge__kav (knowledge articles), issue__c
+      (custom issues), casehistory__c (case history), emailmessage (email communications), livechattranscript
+      (chat logs). Documented as PostgreSQL; here a DuckDB schema.'
+    tables:
+    - Case
+    - casehistory__c
+    - emailmessage
+    - issue__c
+    - knowledge__kav
+    - livechattranscript
+  - schema: products_orders
+    description: 'Product catalog and order data: ProductCategory (product categories), Product2 (product
+      catalog), ProductCategoryProduct, Pricebook2 and PricebookEntry (pricing and mapping tables), Order
+      (customer orders), OrderItem (order details).'
+    tables:
+    - Order
+    - OrderItem
+    - Pricebook2
+    - PricebookEntry
+    - Product2
+    - ProductCategory
+    - ProductCategoryProduct
+  - schema: activities
+    description: 'Activity data: Event (calendar events), Task (activities and tasks), VoiceCallTranscript__c
+      (call records).'
+    tables:
+    - Event
+    - Task
+    - VoiceCallTranscript__c
+  - schema: territory
+    description: 'Sales territory management: Territory2 (sales territories), UserTerritory2Association
+      (territory assignments of users).'
+    tables:
+    - Territory2
+    - UserTerritory2Association
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: data_quality
+    summary: How identifiers, text and numbers are stored across all six schemas
+    description: 'All six logical databases are schemas of one DuckDB database (<db_name>.<table_name>);
+      cross-database joins are plain DuckDB SQL. Checked with queries: (1) Roughly a quarter of Salesforce
+      Id values -- both primary keys and foreign keys (e.g. Opportunity.Id 294 of 1170, Opportunity.AccountId
+      286 of 1170, Case.ownerid 38 of 153) -- carry a spurious leading ''#''. Always compare IDs as ltrim(trim(x),
+      ''#'') on both sides, and strip it when returning an Id. (2) Text categoricals and names carry trailing/leading
+      spaces (e.g. Case.status ''Waiting on Customer   '', Contract.Status ''Activated  '', Account.Name
+      ''NaviCorp Tech ''). Always trim() before comparing or grouping. (3) Many numeric and date columns
+      are VARCHAR: Quantity, UnitPrice, TotalPrice, Discount, Probability, ContractTerm, DurationInMinutes
+      -- CAST to DOUBLE. Timestamps are ISO strings like ''2024-07-27T09:30:00.000+0000'' (UTC) -- CAST
+      to TIMESTAMPTZ; dates like ''2024-02-15'' -- CAST to DATE. All values checked cast cleanly. (4)
+      Salesforce Id prefixes identify object type: 001 Account, 003 Contact, 005 User, 006 Opportunity,
+      00Q Lead, 500 Case, 800 Contract, 801 Order, 802 OrderItem, 0Q0 Quote, 01t Product2, 01s Pricebook2,
+      01u PricebookEntry, a03 issue__c. Polymorphic columns (Event/Task.WhatId, emailmessage.relatedtoid/parentid/toids)
+      point at whichever object the prefix shows.
+
+      '
+    tables: []
+  - name: sales
+    summary: Leads, opportunities, quotes, contracts
+    description: 'Opportunity.StageName values (trimmed): Qualification, Discovery, Quote, Negotiation,
+      Closed. There is no separate won/lost stage. Opportunity.Amount is DOUBLE; Probability is a VARCHAR
+      percent (e.g. ''75.0''). Opportunity.ContractID__c links a deal to its Contract (163 filled). Quote.Status
+      values: Draft, Needs Review, Need Review (1 row, variant spelling), In Review, Approved, Presented,
+      Accepted, Rejected, Denied. QuoteLineItem.Discount is a percent (0-30): TotalPrice = Quantity *
+      UnitPrice * (1 - Discount/100), verified on all 2966 rows. Lead.Status values: New, Working, Qualified,
+      Converted. CAUTION: 384 leads have Status ''Converted'' but IsConverted = 0 and no ConvertedDate;
+      IsConverted = 1 (885 leads) is the flag with conversion details (ConvertedAccountId/ContactId/Date).
+      Contract.Status is always ''Activated''; ContractTerm is months (12, 24, 36).
+
+      '
+    tables:
+    - sales_pipeline.Opportunity
+    - sales_pipeline.Quote
+    - sales_pipeline.QuoteLineItem
+    - sales_pipeline.Lead
+    - sales_pipeline.Contract
+    - sales_pipeline.OpportunityLineItem
+  - name: support
+    summary: Support cases, history, issues, knowledge, chats and emails
+    description: 'Case.status values (trimmed): Closed, Working, Waiting on Customer. closeddate is filled
+      exactly for the 75 Closed cases. Case.priority: High, Medium, Low. casehistory__c.field__c values:
+      Case Creation, Owner Assignment (newvalue__c = new owner User Id), Case Closed. Case.issueid__c
+      links to issue__c; Case.orderitemid__c links to products_orders.OrderItem. emailmessage.toids is
+      a JSON array string of recipient Ids (e.g. ''["005Wt..."]''); parentid / relatedtoid hold the related
+      Case or Opportunity Id. Chat and voice transcripts contain HTML entities such as &#39;.
+
+      '
+    tables:
+    - support.Case
+    - support.casehistory__c
+    - support.issue__c
+    - support.knowledge__kav
+    - support.emailmessage
+    - support.livechattranscript
+  - name: products_orders
+    summary: Catalog, price books and orders
+    description: 'OrderItem.Quantity and UnitPrice are VARCHAR numbers; line value = Quantity * UnitPrice.
+      Product categories map to products through ProductCategoryProduct (ProductCategoryId, ProductId).
+      Order.Status is always ''Activated''.
+
+      '
+    tables:
+    - products_orders.Order
+    - products_orders.OrderItem
+    - products_orders.Product2
+    - products_orders.ProductCategory
+    - products_orders.ProductCategoryProduct
+    - products_orders.Pricebook2
+    - products_orders.PricebookEntry
+  - name: activities_territory
+    summary: Events, tasks, call transcripts and sales territories
+    description: 'Task.Status: Not Started, In Progress, Deferred, Waiting, Completed; Task.Priority:
+      High, Normal, Low. Event.DurationInMinutes is VARCHAR minutes. Territory2.Description is a comma-separated
+      list of US state codes (e.g. ''MO,KS,OK'') that matches core_crm.Account.ShippingState; users are
+      assigned to territories through UserTerritory2Association.
+
+      '
+    tables:
+    - activities.Event
+    - activities.Task
+    - activities.VoiceCallTranscript__c
+    - territory.Territory2
+    - territory.UserTerritory2Association
+  rules:
+  - name: normalize_ids
+    description: Join and filter on Ids only after ltrim(trim(id), '#') on both sides; a leading '#' is
+      a storage artifact.
+    enforcement: warn
+  - name: trim_text
+    description: Trim categorical text (status, stage, priority, names) before comparing or grouping.
+    enforcement: warn
+  - name: cast_varchar_numbers
+    description: Cast VARCHAR numeric/date columns (Quantity, UnitPrice, TotalPrice, Discount, Probability,
+      ContractTerm, DurationInMinutes, dates) before arithmetic or comparison.
+    enforcement: warn

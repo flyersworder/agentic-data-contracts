@@ -1,0 +1,96 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: DEPS_DEV_V1, author: claudeopus5.5
+version: '1.0'
+name: deps-dev-v1
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: package_database
+    description: Metadata of software packages, including licensing information, version release data,
+      dependency details, and registry metadata (documented as stored in SQLite; queried here as a DuckDB
+      schema).
+    preferred: true
+    tables:
+    - packageinfo
+  - schema: project_database
+    description: GitHub project information and mappings between projects and their package versions (documented
+      as stored in DuckDB).
+    tables:
+    - project_info
+    - project_packageversion
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: packages
+    summary: Package versions, licenses, advisories, release metadata and dependency processing
+    description: 'One row of package_database.packageinfo is one package version, identified by (System,
+      Name, Version). System is the package ecosystem (e.g. NPM, Maven). Licenses is a JSON-like array
+      of the license(s) associated with the package. Links is a JSON-like list of relevant links (e.g.
+      origin, documentation, source code). Advisories is a JSON-like list of security advisories related
+      to the package. VersionInfo is a JSON-like object with release metadata (e.g. IsRelease, Ordinal)
+      - see metrics version_is_release and version_ordinal. Hashes is a JSON-like list of file hashes.
+      DependenciesProcessed is a boolean (stored as BIGINT 0/1): whether dependencies have been processed
+      successfully. DependencyError is a boolean (stored as BIGINT 0/1): whether a dependency processing
+      error occurred. UpstreamPublishedAt is a Unix timestamp in MILLISECONDS for when the upstream release
+      was published - divide by 1000 before converting (metric upstream_published_at). Registries is a
+      JSON-like list of registries where the package is published. SLSAProvenance is the SLSA provenance
+      level if available. UpstreamIdentifiers is a JSON-like list of upstream identifiers. Purl is the
+      package URL in purl format, if available (typed DOUBLE in the schema, typically null).
+
+      '
+    tables:
+    - package_database.packageinfo
+  - name: projects
+    summary: GitHub projects and their mapping to package versions
+    description: 'project_database.project_packageversion maps package versions (System, Name, Version)
+      to projects: ProjectType is the type of project (e.g. GITHUB); ProjectName is the repository path
+      in owner/repo format; RelationProvenance is the provenance of the relationship data; RelationType
+      is the type of relationship (e.g. source repository type). It joins to package_database.packageinfo
+      on System, Name and Version together. project_database.project_info holds project details: Project_Information
+      is a textual description of the project (may include name, owner and general purpose); Licenses
+      is a JSON-like array of the project''s license(s); Description is the project description field
+      (may differ from Project_Information); Homepage is the homepage URL, if available; OSSFuzz is an
+      OSSFuzz status indicator (if applicable). project_info has no ProjectName column; the documentation
+      states no join key to project_packageversion, so any link (e.g. matching owner/repo text inside
+      Project_Information) must be established by inspecting the data.
+
+      '
+    tables:
+    - project_database.project_packageversion
+    - project_database.project_info
+  rules:
+  - name: no_select_star
+    description: Queries must name their columns; use preview_table to explore
+    enforcement: block
+    query_check:
+      no_select_star: true
+  - name: package_version_key
+    description: 'A package version is identified by System, Name and Version together; joins between
+      packageinfo and project_packageversion must match on all three columns.
+
+      '
+    enforcement: warn
+  - name: timestamp_milliseconds
+    description: 'UpstreamPublishedAt is Unix time in milliseconds; convert with to_timestamp(UpstreamPublishedAt
+      / 1000), never treat it as seconds.
+
+      '
+    enforcement: warn
+  - name: json_like_fields
+    description: 'Licenses, Links, Advisories, VersionInfo, Hashes, Registries and UpstreamIdentifiers
+      are JSON-like text; parse them with DuckDB JSON functions rather than comparing raw strings.
+
+      '
+    enforcement: warn

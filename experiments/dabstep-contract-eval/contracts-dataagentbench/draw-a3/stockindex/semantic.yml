@@ -1,0 +1,121 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+metrics:
+- name: trade_date
+  description: 'The trading date parsed to a DATE. Date is stored in three formats (''%Y-%m-%d %H:%M:%S'',
+    ''%d %b %Y, %H:%M'', ''%B %d, %Y at %I:%M %p''); this COALESCE of try_strptime parses all 104,224
+    rows (verified, no NULLs).
+
+    '
+  sql_expression: "CAST(COALESCE(try_strptime(Date, '%Y-%m-%d %H:%M:%S'),\n              try_strptime(Date,\
+    \ '%d %b %Y, %H:%M'),\n              try_strptime(Date, '%B %d, %Y at %I:%M %p')) AS DATE)\n"
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: intraday_range
+  description: 'Daily price range: highest minus lowest price during the day (High - Low), in index points.'
+  sql_expression: High - Low
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: intraday_change
+  description: Close minus Open for the day, in index points (positive = closed above open).
+  sql_expression: '"Close" - "Open"'
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: intraday_return_pct
+  description: 'Percent change from opening to closing price within the day: (Close - Open) / Open * 100.'
+  sql_expression: ("Close" - "Open") / NULLIF("Open", 0) * 100
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: daily_return_pct
+  description: 'Close-to-close percent change versus the index''s previous trading day, ordered by the
+    parsed trade_date (never by the raw Date string).
+
+    '
+  sql_expression: "(\"Close\" / NULLIF(LAG(\"Close\") OVER (PARTITION BY \"Index\" ORDER BY\n  CAST(COALESCE(try_strptime(Date,\
+    \ '%Y-%m-%d %H:%M:%S'),\n                try_strptime(Date, '%d %b %Y, %H:%M'),\n                try_strptime(Date,\
+    \ '%B %d, %Y at %I:%M %p')) AS DATE)), 0) - 1) * 100\n"
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: average_close_usd
+  description: Average closing price in USD (CloseUSD) over the rows in scope; use for cross-index comparison
+    in a common currency.
+  sql_expression: AVG(CloseUSD)
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: index_exchange
+  description: 'INTERPRETATION: the exchange an index symbol tracks, by the standard meaning of the symbol
+    (no key in the data links the two tables). Values match index_info.Exchange exactly.
+
+    '
+  sql_expression: "CASE \"Index\"\n  WHEN 'NYA' THEN 'New York Stock Exchange'\n  WHEN 'IXIC' THEN 'NASDAQ'\n\
+    \  WHEN 'HSI' THEN 'Hong Kong Stock Exchange'\n  WHEN '000001.SS' THEN 'Shanghai Stock Exchange'\n\
+    \  WHEN 'N225' THEN 'Tokyo Stock Exchange'\n  WHEN 'N100' THEN 'Euronext'\n  WHEN '399001.SZ' THEN\
+    \ 'Shenzhen Stock Exchange'\n  WHEN 'GSPTSE' THEN 'Toronto Stock Exchange'\n  WHEN 'NSEI' THEN 'National\
+    \ Stock Exchange of India'\n  WHEN 'GDAXI' THEN 'Frankfurt Stock Exchange'\n  WHEN 'KS11' THEN 'Korea\
+    \ Exchange'\n  WHEN 'SSMI' THEN 'SIX Swiss Exchange'\n  WHEN 'TWII' THEN 'Taiwan Stock Exchange'\n\
+    \  WHEN 'J203.JO' THEN 'Johannesburg Stock Exchange'\nEND\n"
+  source_model: indextrade_database.index_trade
+  domains:
+  - exchanges
+- name: index_currency
+  description: 'Trading currency of the exchange an index tracks (index_info.Currency), joined via the
+    index_exchange mapping. Grain: one index_trade row.
+
+    '
+  sql_expression: i.Currency
+  source_model: indextrade_database.index_trade
+  from_sql: "indextrade_database.index_trade t LEFT JOIN indexinfo_database.index_info i ON i.Exchange\
+    \ = CASE t.\"Index\"\n  WHEN 'NYA' THEN 'New York Stock Exchange'\n  WHEN 'IXIC' THEN 'NASDAQ'\n \
+    \ WHEN 'HSI' THEN 'Hong Kong Stock Exchange'\n  WHEN '000001.SS' THEN 'Shanghai Stock Exchange'\n\
+    \  WHEN 'N225' THEN 'Tokyo Stock Exchange'\n  WHEN 'N100' THEN 'Euronext'\n  WHEN '399001.SZ' THEN\
+    \ 'Shenzhen Stock Exchange'\n  WHEN 'GSPTSE' THEN 'Toronto Stock Exchange'\n  WHEN 'NSEI' THEN 'National\
+    \ Stock Exchange of India'\n  WHEN 'GDAXI' THEN 'Frankfurt Stock Exchange'\n  WHEN 'KS11' THEN 'Korea\
+    \ Exchange'\n  WHEN 'SSMI' THEN 'SIX Swiss Exchange'\n  WHEN 'TWII' THEN 'Taiwan Stock Exchange'\n\
+    \  WHEN 'J203.JO' THEN 'Johannesburg Stock Exchange'\nEND\n"
+  grain: one index_trade row (index, trading day) with its exchange's currency
+  domains:
+  - exchanges
+tables:
+- schema: indexinfo_database
+  table: index_info
+  columns:
+  - name: Exchange
+    type: VARCHAR
+    description: Full name of the stock exchange.
+  - name: Currency
+    type: VARCHAR
+    description: Trading currency of the exchange (ISO code, e.g. USD, HKD, CNY).
+- schema: indextrade_database
+  table: index_trade
+  columns:
+  - name: Index
+    type: VARCHAR
+    description: Abbreviated index symbol (13 distinct, e.g. NYA, IXIC, HSI, N225). Quote as "Index".
+  - name: Date
+    type: VARCHAR
+    description: Trading date, text in three mixed formats; parse with metric trade_date before any date
+      logic.
+  - name: Open
+    type: DOUBLE
+    description: Opening price (local currency index points).
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day.
+  - name: Close
+    type: DOUBLE
+    description: Closing price (local currency).
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price. Quote as "Adj Close".
+  - name: CloseUSD
+    type: DOUBLE
+    description: Closing price in USD; equals Close times a constant per-index factor.

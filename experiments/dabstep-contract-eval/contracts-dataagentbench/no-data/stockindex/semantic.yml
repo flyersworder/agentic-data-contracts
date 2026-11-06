@@ -1,0 +1,109 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: stockindex, author: claudeopus5.5
+metrics:
+- name: trading_day_count
+  description: 'Number of trading days (rows) in index_trade. One row is one index on one trading date.
+    Group by "Index" to get the count per index.
+
+    '
+  sql_expression: COUNT(*)
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: trading_date
+  description: 'The trading date as a DATE. index_trade.Date is stored as text.
+
+    '
+  sql_expression: TRY_CAST("Date" AS DATE)
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: average_close_usd
+  description: 'Average closing price in USD (CloseUSD). Use this to compare indices, since CloseUSD is
+    the only price in a common currency.
+
+    '
+  sql_expression: AVG(CloseUSD)
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: average_close
+  description: 'Average closing price (Close), in the index''s own trading currency. Do not compare it
+    across indices that trade in different currencies.
+
+    '
+  sql_expression: AVG("Close")
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: average_adj_close
+  description: 'Average adjusted closing price ("Adj Close"), in the index''s own trading currency.
+
+    '
+  sql_expression: AVG("Adj Close")
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: intraday_range
+  description: 'Daily price range for one row: the highest price during the day minus the lowest price
+    during the day (High - Low), in local currency. INTERPRETATION: the documentation defines High and
+    Low but not this difference.
+
+    '
+  sql_expression: High - Low
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: daily_open_to_close_change
+  description: 'Change from the opening price to the closing price within one trading day (Close - Open),
+    in local currency. INTERPRETATION: this is derived from the documented Open and Close fields and is
+    not a stated definition.
+
+    '
+  sql_expression: '"Close" - "Open"'
+  source_model: indextrade_database.index_trade
+  domains:
+  - index_prices
+- name: exchange_count
+  description: Number of distinct stock exchanges (full names) in index_info.
+  sql_expression: COUNT(DISTINCT Exchange)
+  source_model: indexinfo_database.index_info
+  domains:
+  - exchanges
+tables:
+- schema: indexinfo_database
+  table: index_info
+  columns:
+  - name: Exchange
+    type: VARCHAR
+    description: Full name of the stock exchange.
+  - name: Currency
+    type: VARCHAR
+    description: Trading currency of the exchange.
+- schema: indextrade_database
+  table: index_trade
+  columns:
+  - name: Index
+    type: VARCHAR
+    description: Abbreviated index symbol. Quote it as "Index" in SQL.
+  - name: Date
+    type: VARCHAR
+    description: Trading date, stored as text. Use TRY_CAST("Date" AS DATE).
+  - name: Open
+    type: DOUBLE
+    description: Opening price, in the index's own trading currency.
+  - name: High
+    type: DOUBLE
+    description: Highest price during the day, in local currency.
+  - name: Low
+    type: DOUBLE
+    description: Lowest price during the day, in local currency.
+  - name: Close
+    type: DOUBLE
+    description: Closing price, in local currency.
+  - name: Adj Close
+    type: DOUBLE
+    description: Adjusted closing price, in local currency. Quote it as "Adj Close" in SQL.
+  - name: CloseUSD
+    type: DOUBLE
+    description: Closing price in USD. Use it for comparisons across indices.

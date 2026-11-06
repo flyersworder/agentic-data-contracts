@@ -1,0 +1,91 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: googlelocal, author: claudeopus5.5
+version: '1.0'
+name: googlelocal
+semantic:
+  source:
+    type: yaml
+    path: ./semantic.yml
+  allowed_tables:
+  - schema: review_database
+    description: Review information from Google Maps (reviewer name, ratings, text, etc.) collected up
+      to September 2021 in the United States. Originally described as stored in SQLite; here it is a schema
+      of one DuckDB database, queried in DuckDB SQL.
+    tables:
+    - review
+  - schema: business_database
+    description: Business metadata from Google Maps (business name, description, hours, etc.) collected
+      up to September 2021 in the United States. Originally described as stored in PostgreSQL; here it
+      is a schema of one DuckDB database, queried in DuckDB SQL.
+    tables:
+    - business_description
+  forbidden_operations:
+  - DELETE
+  - DROP
+  - TRUNCATE
+  - UPDATE
+  - INSERT
+  - CREATE
+  - ALTER
+  - MERGE
+  - GRANT
+  - REVOKE
+  - COPY
+  domains:
+  - name: reviews
+    summary: 'Google Maps reviews: reviewer, timestamp, 1-5 rating, text'
+    description: 'review_database.review holds one row per review from Google Maps, collected up to September
+      2021 in the United States. Fields: name = name of the reviewer (NOT the business name); time = timestamp
+      of the review, stored as text (VARCHAR) — inspect its format before parsing it; rating = rating
+      given by the reviewer on a 1-5 scale (integer); text = review text content; gmap_id = Google Maps
+      business identifier, which links the review to business_database.business_description.gmap_id.
+
+      '
+    tables:
+    - review_database.review
+  - name: businesses
+    summary: 'Google Maps business metadata: name, description, hours, MISC, operating status'
+    description: 'business_database.business_description holds business metadata from Google Maps, collected
+      up to September 2021 in the United States. Fields: name = business name; gmap_id = Google Maps business
+      identifier (links to review_database.review.gmap_id); description = business description; num_of_reviews
+      = total number of reviews for this business (a stored attribute; it may differ from the count of
+      rows present in review_database.review); hours = operating hours information, a list stored as text;
+      MISC = additional miscellaneous business information, a dict stored as text; state = business operating
+      status (e.g. open, closed, temporarily closed) — it is NOT a US state / geographic field.
+
+      '
+    tables:
+    - business_database.business_description
+  - name: cross_database
+    summary: Joining reviews to businesses on gmap_id
+    description: 'The two databases are schemas of one DuckDB database, so a cross-database query is a
+      plain join written in DuckDB SQL: review_database.review r JOIN business_database.business_description
+      b ON r.gmap_id = b.gmap_id. Both tables have a `name` column with different meanings (reviewer name
+      vs business name); always qualify it.
+
+      '
+    tables:
+    - review_database.review
+    - business_database.business_description
+  rules:
+  - name: join_on_gmap_id
+    description: 'Reviews and businesses are linked only through gmap_id (review.gmap_id = business_description.gmap_id);
+      never join on name, since review.name is the reviewer and business_description.name is the business.
+
+      '
+    enforcement: warn
+  - name: rating_scale
+    description: review.rating is on a 1-5 scale; treat values outside 1-5 as invalid.
+    enforcement: warn
+  - name: state_is_operating_status
+    description: 'business_description.state is the business operating status (e.g. open, closed, temporarily
+      closed), not a geographic US state.
+
+      '
+    enforcement: warn
+  - name: data_coverage
+    description: 'Both databases cover Google Maps data collected up to September 2021 in the United States;
+      no data after that is available.
+
+      '
+    enforcement: warn

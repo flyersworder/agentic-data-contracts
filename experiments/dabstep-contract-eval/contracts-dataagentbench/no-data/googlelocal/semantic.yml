@@ -1,0 +1,100 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: googlelocal, author: claudeopus5.5
+metrics:
+- name: review_count
+  description: Number of reviews (rows of review_database.review) in the population analysed.
+  sql_expression: COUNT(*)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: average_rating
+  description: Mean reviewer rating (1-5 scale) over the reviews analysed.
+  sql_expression: AVG(rating)
+  source_model: review_database.review
+  domains:
+  - reviews
+- name: business_review_count
+  description: 'Number of reviews present in review_database.review per business, joined to business metadata
+    on gmap_id. Group by b.gmap_id (and b.name). This counts review rows; the stored total is `listed_num_of_reviews`.
+
+    '
+  sql_expression: COUNT(r.gmap_id)
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN business_database.business_description b ON r.gmap_id = b.gmap_id
+  grain: one row per review joined to its business
+  domains:
+  - cross_database
+- name: business_average_rating
+  description: 'Average reviewer rating (1-5 scale) per business, from reviews joined to the business
+    on gmap_id. Group by b.gmap_id (and b.name).
+
+    '
+  sql_expression: AVG(r.rating)
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN business_database.business_description b ON r.gmap_id = b.gmap_id
+  grain: one row per review joined to its business
+  domains:
+  - cross_database
+- name: listed_num_of_reviews
+  description: Total number of reviews for the business as stored in business_description.num_of_reviews
+    (summed over the businesses analysed).
+  sql_expression: SUM(num_of_reviews)
+  source_model: business_database.business_description
+  domains:
+  - businesses
+- name: business_count
+  description: Number of distinct businesses (gmap_id) in business_description.
+  sql_expression: COUNT(DISTINCT gmap_id)
+  source_model: business_database.business_description
+  domains:
+  - businesses
+tables:
+- schema: review_database
+  table: review
+  columns:
+  - name: name
+    type: VARCHAR
+    description: Name of the reviewer (not the business).
+  - name: time
+    type: VARCHAR
+    description: Timestamp of the review, stored as text; check its format before casting. Data collected
+      up to September 2021.
+  - name: rating
+    type: BIGINT
+    description: Rating given by the reviewer, 1-5 scale.
+  - name: text
+    type: VARCHAR
+    description: Review text content.
+  - name: gmap_id
+    type: VARCHAR
+    description: Google Maps business identifier; joins to business_database.business_description.gmap_id.
+- schema: business_database
+  table: business_description
+  columns:
+  - name: name
+    type: VARCHAR
+    description: Business name.
+  - name: gmap_id
+    type: VARCHAR
+    description: Google Maps business identifier (links to review_database.review.gmap_id).
+  - name: description
+    type: VARCHAR
+    description: Business description.
+  - name: num_of_reviews
+    type: BIGINT
+    description: Total number of reviews for this business.
+  - name: hours
+    type: VARCHAR
+    description: Operating hours information (a list, stored as text).
+  - name: MISC
+    type: VARCHAR
+    description: Additional miscellaneous business information (a dict, stored as text).
+  - name: state
+    type: VARCHAR
+    description: Business operating status (e.g., open, closed, temporarily closed); not a geographic
+      state.
+relationships:
+- from: review_database.review.gmap_id
+  to: business_database.business_description.gmap_id
+  type: many_to_one
+  description: Each review belongs to the business with the same Google Maps identifier.

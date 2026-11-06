@@ -1,0 +1,181 @@
+# Authored by dce.author -- do not edit; re-author instead.
+# benchmark: dataagentbench, database: bookreview, author: claudeopus5.5
+metrics:
+- name: review_book_join
+  description: 'Join predicate linking a review to its book: numeric suffix of review.purchase_id (''purchaseid_N'')
+    equals numeric suffix of books_info.book_id (''bookid_N''). Verified: all 1833 reviews match exactly
+    one of the 200 books.
+
+    '
+  sql_expression: replace(r.purchase_id,'purchaseid_','') = replace(b.book_id,'bookid_','')
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN books_database.books_info b ON replace(r.purchase_id,'purchaseid_','')
+    = replace(b.book_id,'bookid_','')
+  grain: one row per review, with its book's attributes
+  domains:
+  - reviews
+- name: review_count
+  description: Number of reviews (rows in review). Group by b.book_id or a book attribute for per-book
+    counts.
+  sql_expression: COUNT(*)
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN books_database.books_info b ON replace(r.purchase_id,'purchaseid_','')
+    = replace(b.book_id,'bookid_','')
+  grain: one row per review, with its book's attributes
+  domains:
+  - reviews
+- name: average_rating
+  description: 'Mean reviewer rating (1-5 scale) over the reviews in scope. rating is BIGINT, so AVG returns
+    a DOUBLE; no NULL ratings in the data.
+
+    '
+  sql_expression: AVG(r.rating)
+  source_model: review_database.review
+  from_sql: review_database.review r JOIN books_database.books_info b ON replace(r.purchase_id,'purchaseid_','')
+    = replace(b.book_id,'bookid_','')
+  grain: one row per review, with its book's attributes
+  domains:
+  - reviews
+- name: verified_purchase_share
+  description: Share of reviews whose purchase was verified (verified_purchase stored as 0/1, 1 = verified).
+  sql_expression: AVG(CASE WHEN r.verified_purchase = 1 THEN 1.0 ELSE 0.0 END)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: total_helpful_votes
+  description: Sum of helpful votes received by the reviews in scope.
+  sql_expression: SUM(r.helpful_vote)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: review_timestamp
+  description: review_time (VARCHAR 'YYYY-MM-DD HH:MM:SS') cast to TIMESTAMP; all rows cast cleanly.
+  sql_expression: CAST(r.review_time AS TIMESTAMP)
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: review_year
+  description: Year the review was posted, from review_time.
+  sql_expression: year(CAST(r.review_time AS TIMESTAMP))
+  source_model: review_database.review
+  from_sql: review_database.review r
+  grain: one row per review
+  domains:
+  - reviews
+- name: author_name
+  description: 'Author name parsed from the JSON-string author field ($.name). NULL for the 51 books whose
+    author is NULL; the store column ("Name (Author), ...") is an alternative source.
+
+    '
+  sql_expression: json_extract_string(b.author, '$.name')
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+- name: primary_category
+  description: 'First category after the top-level "Books" in the JSON-string categories list (element
+    index 1). NULL when categories is ''[]'' (14 books).
+
+    '
+  sql_expression: b.categories->>1
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+- name: has_category
+  description: 'Whether a book''s categories list contains a given category name (replace ''X'' with the
+    exact category string); categories is a JSON string, so it is parsed to a list first.
+
+    '
+  sql_expression: list_contains(CAST(json_extract_string(b.categories, '$[*]') AS VARCHAR[]), 'X')
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+- name: publication_year
+  description: 'Publication year extracted from the free-text details prose: the 4-digit year of the first
+    "Month D, YYYY" date (e.g. "on May 8, 2012"). NULL for 11 of 200 books whose details give no such
+    date; check details/subtitle directly for those.
+
+    '
+  sql_expression: TRY_CAST(regexp_extract(b.details, '(January|February|March|April|May|June|July|August|September|October|November|December)
+    \d{1,2}, (\d{4})', 2) AS INTEGER)
+  source_model: books_database.books_info
+  from_sql: books_database.books_info b
+  grain: one row per book
+  domains:
+  - books
+tables:
+- schema: books_database
+  table: books_info
+  columns:
+  - name: title
+    type: VARCHAR
+    description: Book title.
+  - name: subtitle
+    type: VARCHAR
+    description: Book subtitle (often format/edition and date, e.g. 'Hardcover – May 8, 2012').
+  - name: author
+    type: VARCHAR
+    description: Book author(s); JSON-object string {avatar, name, about}; NULL for 51 books. Use json_extract_string(author,'$.name').
+  - name: rating_number
+    type: BIGINT
+    description: Total number of ratings received.
+  - name: features
+    type: VARCHAR
+    description: Book features, stored as a string representation of a list (JSON); may be '[]'.
+  - name: description
+    type: VARCHAR
+    description: Book description, stored as a string representation of a list (JSON); may be '[]'.
+  - name: price
+    type: DOUBLE
+    description: Book price; NULL for 10 books.
+  - name: store
+    type: VARCHAR
+    description: 'Store information: contributor names with roles, e.g. ''Marcus Luttrell (Author),  James
+      D. Hornfischer''.'
+  - name: categories
+    type: VARCHAR
+    description: Book categories, string representation of a JSON list e.g. ["Books", "Reference", ...];
+      '[]' for 14 books.
+  - name: details
+    type: VARCHAR
+    description: 'Additional book details as prose: publisher, date, edition, language, format, pages,
+      ISBN, weight, dimensions, reading age.'
+  - name: book_id
+    type: VARCHAR
+    description: Unique book identifier 'bookid_N'; same entity as review.purchase_id 'purchaseid_N' (join
+      on N).
+- schema: review_database
+  table: review
+  columns:
+  - name: rating
+    type: BIGINT
+    description: Rating given by reviewer, 1-5 scale (integers 1..5 here).
+  - name: title
+    type: VARCHAR
+    description: Review title.
+  - name: text
+    type: VARCHAR
+    description: Review text content (may contain HTML like <br />).
+  - name: review_time
+    type: VARCHAR
+    description: Timestamp when review was posted, 'YYYY-MM-DD HH:MM:SS' text; cast to TIMESTAMP.
+  - name: helpful_vote
+    type: BIGINT
+    description: Number of helpful votes received.
+  - name: verified_purchase
+    type: BIGINT
+    description: 'Whether purchase was verified: 1 = verified, 0 = not.'
+  - name: purchase_id
+    type: VARCHAR
+    description: '''purchaseid_N''; links to books_info.book_id ''bookid_N'' by the numeric suffix N.'

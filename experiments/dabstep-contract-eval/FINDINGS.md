@@ -1883,6 +1883,61 @@ digest, its raw source deleted once built) and runs one dataset at a time
 with two workers, clearing the per-worker working copies between datasets.
 The harness is unchanged. Rows `results/dataagentbench/exp7-<model>-r<i>.jsonl`.
 
+#### Results (2026-11-06): (44) fails on both models, so (45)-(48) are not read as support
+
+Run commit 77ca57c, every row; 200 units per model and repeat (Qwen's files
+carry 0 to 2 retry-pass rows more), k=5, a transcript for every row, no
+corrupted working copy. Analysis output: `uv run python
+analysis/dataagentbench.py`. No dataset excluded (the pilot gate).
+
+Accuracy, pooled over 40 queries x 5 repeats (leaderboard form beside):
+
+| | `dab_desc` | `dab_hints` | `dab_contract` | `dab_contract_text` | `dab_hints_contract` |
+|---|---|---|---|---|---|
+| luna | 64.5 (61.2) | 64.0 (64.4) | 64.5 (60.8) | 64.5 (61.4) | 74.5 (73.6) |
+| Qwen | 59.5 (61.0) | 67.5 (68.0) | 67.5 (69.3) | 70.0 (73.9) | 74.5 (78.4) |
+
+Registered:
+
+- **(44) fails on both models.** luna: hints - description -0.5 points,
+  queries 10 to 9, p = 0.50. Qwen: +8.0, queries 12 to 6, p = 0.12, the
+  direction holding in 7 of 8 differing datasets. The hints do not bite
+  detectably in this harness on these 40 queries; the pilot's luna repeat
+  had shown the same. By the reading fixed in advance, (45)-(48) below are
+  reported, not read as support.
+- (45) fails on both: contract - description luna +0.0 (8 to 10), Qwen
+  +8.0 (11 to 7, p = 0.24).
+- (46): luna undefined (no hints gain); Qwen 1.00, 95% [0.10, 2.88] over
+  datasets, which would hold.
+- (47) holds on both: contract looked up against pasted, luna +0.0 (8 to 6,
+  p = 0.79), Qwen -2.5 (6 to 7, p = 1.0).
+- (48): luna holds, +10.5 (14 to 5, p = 0.032; 6 of 9 datasets), but
+  leaving out any one of crmarenapro, googlelocal, music_brainz_20k or
+  stockmarket it fails, and most of it is music_brainz_20k (+46.7) and
+  googlelocal (+30.0); Qwen fails, +7.0 (8 to 6, p = 0.40).
+
+Leniency. Overlong passes (answer more than 200 characters longer than the
+gold) are 6.5 to 11.5% of luna's runs per arm, under the 5-point trigger.
+On Qwen they are 30.5 to 41.5%: Qwen states its working, and the
+validators accept a long answer that contains the gold. The arms differ by
+more than 5 points, so the comparisons are also read without those rows:
+(45) +5.3 (9 to 3, p = 0.073); (46) 0.43, 95% [-0.67, 2.22], inconclusive;
+(47) fails, -12.4 (3 to 6, p = 0.51) with few queries left; (48) +6.0, p =
+0.39. Qwen's DataAgentBench results depend on how lenient the validators
+are with a verbose answer.
+
+What it means. On this benchmark's 40 queries, with these two models, the
+benchmark's own hints do not detectably help, so it cannot test whether a
+contract reproduces the hints' effect: the knowledge premise the DABStep
+results rest on is not present here. Two readings hold up regardless: the
+route makes no detectable difference with lenient grading on either model
+(the DABStep delivery result, on a second benchmark), and the contract
+added to the hints gives the highest accuracy on both models (74.5%),
+concentrated in two datasets and not established. The author, with the
+data, recovered a third of what the data reveals ((43)). Per-query
+estimates over 40 queries in 9 datasets of 2 to 13 queries are noisy; the
+leave-one-out readings above show how much one dataset moves each test.
+
 ### The two facts written into the contract: predictions (49)-(53)
 
 Experiment 5d pasted the two notes into both arms' prompts, so it tested

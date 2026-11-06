@@ -1,8 +1,10 @@
 # Notice: material derived from DataAgentBench
 
 The files in this directory, in `prep/dataagentbench/` and in
-`results/dataagentbench/`, and the adapted system prompt in
-`dce/benchmarks/dataagentbench.py`, are derived from DataAgentBench:
+`results/dataagentbench/`, the adapted system prompt in
+`dce/benchmarks/dataagentbench.py`, and the `traces-exp7-*` transcript
+archives attached to the release `dabstep-eval-2026-11` (and archived with
+it on Zenodo), are derived from DataAgentBench:
 
 > Ruiying Ma, Shreya Shankar, Ruiqi Chen, Yiming Lin, Sepanta Zeighami,
 > Rajoshi Ghosh, Abhinav Gupta, Anushrut Gupta, Tanmai Gopal and Aditya G.
@@ -23,8 +25,12 @@ What they contain:
 - The contracts, author logs, checker references and result rows hold SQL
   written against the benchmark's datasets, small samples of its query
   results, and agents' answers to its queries.
+- The `traces-exp7-*` transcripts record the adapted system prompt, the
+  benchmark's queries as posed to the agent, and the results of queries on
+  its datasets.
 
-These files are not covered by this repository's MIT license. The
+These files are not covered by this repository's MIT license, nor the
+transcripts by the Zenodo record's CC BY 4.0 license. The
 DataAgentBench text quoted here belongs to its authors, and each underlying
 dataset keeps the license of its original source. They are published only to
 document and reproduce the experiment reported in the accompanying paper. The

@@ -39,8 +39,8 @@ The later runs are attached to the release tagged `dabstep-eval-2026-10`, one ar
 
 The paper v3 runs (experiments 5d, 5e and 7) are attached to the release tagged `dabstep-eval-2026-11`, one archive per run, with digests in `SHA256SUMS-2026-11`. Zenodo archives them as a new version of the same transcript record, [10.5281/zenodo.24015263](https://doi.org/10.5281/zenodo.24015263), which also keeps the 70 files of `dabstep-eval-2026-10` unchanged, and the code at that tag as [10.5281/zenodo.24015265](https://doi.org/10.5281/zenodo.24015265). The all-versions DOIs, [10.5281/zenodo.23598749](https://doi.org/10.5281/zenodo.23598749) for the transcripts and [10.5281/zenodo.23598671](https://doi.org/10.5281/zenodo.23598671) for the code, always resolve to the latest version.
 
-- **Coverage:** every one of those runs' 24,428 rows has a transcript, and `MISSING-2026-11.tsv` is empty. Across both releases, 82,054 of 82,262 rows have one; the 208 without are the ones above.
-- **DataAgentBench:** the `traces-exp7-*` archives are derived from DataAgentBench and are not covered by the record's CC BY 4.0; see `contracts-dataagentbench/NOTICE.md`.
+- **Coverage:** every one of those runs' 24,428 rows has a transcript, and `MISSING-2026-11.tsv` is empty. Across `dabstep-eval-2026-10` and `dabstep-eval-2026-11`, 82,054 of 82,262 rows have one; the 208 without are the ones above. The DataAgentBench pilot gate (`results/dataagentbench/pilot-luna.jsonl`, 80 rows) is not an experiment run, and its transcripts are not released.
+- **DataAgentBench:** the `traces-exp7-*` archives are derived from DataAgentBench and are not covered by the record's CC BY 4.0; see [`contracts-dataagentbench/NOTICE.md`](../contracts-dataagentbench/NOTICE.md).
 
 ## Reading one
 

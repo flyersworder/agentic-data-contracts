@@ -600,8 +600,12 @@ reconstructed golds, and they found a real one-sided bias in them. See
   their labels. The raters' notes, the failure audits and the metric reviews
   quote the LiveSQLBench gold and stay private.
 * **Transcripts** are release assets, not tracked: one archive per run with
-  SHA-256 digests (`dce.trace.read_trace` reads them). 208 rows of the later
-  runs have none (a pod restart lost them; `traces/README.md`). LiveSQLBench
+  SHA-256 digests (`dce.trace.read_trace` reads them). 208 rows of the
+  `dabstep-eval-2026-10` runs have none (a pod restart lost them;
+  `traces/README.md`); every row of the `dabstep-eval-2026-11` runs
+  (experiments 5d, 5e and 7) has one. The DataAgentBench transcripts
+  (`traces-exp7-*`) are derived material outside the Zenodo record's
+  CC BY 4.0; see `contracts-dataagentbench/NOTICE.md`. LiveSQLBench
   transcripts are withheld: a transcript graded correct is a working solution
   to a task whose solution the benchmark keeps private.
 

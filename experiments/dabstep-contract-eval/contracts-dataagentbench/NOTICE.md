@@ -29,8 +29,9 @@ What they contain:
   benchmark's queries as posed to the agent, and the results of queries on
   its datasets.
 
-These files are not covered by this repository's MIT license, nor the
-transcripts by the Zenodo record's CC BY 4.0 license. The
+These files are not covered by this repository's MIT license, which also
+applies to the Zenodo archive of the code. The `traces-exp7-*` transcripts
+are not covered by the CC BY 4.0 license of the Zenodo transcript record. The
 DataAgentBench text quoted here belongs to its authors, and each underlying
 dataset keeps the license of its original source. They are published only to
 document and reproduce the experiment reported in the accompanying paper. The

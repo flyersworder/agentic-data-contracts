@@ -27,9 +27,10 @@ repurposed. Its knowledge is spread across many entries, most of them used by a
 single task, rather than concentrated in one procedure. BIRD-Interact builds on
 LiveSQLBench by masking knowledge on purpose~\cite{bird-interact}; we ask
 how much of it the released KB leaves open without masking. Enterprise
-benchmarks whose schemas exceed a context window~\cite{spider2,beaver} and
-data-agent benchmarks spanning several database systems~\cite{dab-berkeley}
-are outside our scope: both of ours fit one DuckDB session.
+benchmarks whose schemas exceed a context window~\cite{spider2,beaver} are
+outside our scope; of DataAgentBench, whose datasets span several database
+systems~\cite{dab-berkeley}, we load nine into DuckDB for one registered
+test (Section~\ref{sec:threats}).
 
 \subsection{Three kinds of layer}
 \label{sec:layers}
@@ -125,7 +126,7 @@ deployment should keep.
 What is new here is a protocol that holds knowledge equal where it
 matters: a control that removes the content while holding the scaffolding
 fixed, notes that add one fact at a time in identical words, and the same
-knowledge by two routes, with 63 predictions committed in advance. Its
+knowledge by two routes, with 76 predictions committed in advance. Its
 finding is specific: an apparent delivery advantage on DABStep is mostly
 two pieces of data semantics one side omits. We do not rank contracts
 against documentation retrieval, which no arm runs; we attribute what a

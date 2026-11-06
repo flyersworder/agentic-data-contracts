@@ -71,14 +71,15 @@ matched shapes.
 \ref{sec:gaps} & gaps & 4b & gaps in the documentation, and an author who can query the data & constructed, 60 & \mLuna{}, \mQwen{}, \mSol{} & 3 & 7/7 \\
 \midrule
 \ref{sec:scale} & scale & 6 & the contract grown from one database to 22 & constructed, 60 & \mLuna{}, \mSol{}, \mQwen{} & 3 & 2+1/5 \\
+\ref{sec:threats} & DataAgentBench & 7 & a contract written from the data, without the questions, against the benchmark's hints & DataAgentBench, 40 & \mLuna{}, \mQwen{} & 5 & 1/5 \\
 \bottomrule
 \end{tabular}
 \caption{The experiments, in the order the paper reports them. \emph{ID}:
 the label the run commits and the prediction index use; the runs went
 roughly in the order panels, one fact, LSB 1--3, load, 4, 5, 5b, 5c, 4b,
-6, 5d, 5e. \emph{Held}: registered predictions that held, of those fixed;
+6, 5d, 5e, 7. \emph{Held}: registered predictions that held, of those fixed;
 ``+$n$'' counts predictions that held in part (LSB 1, compiler) or were
-read as equivalent (scale). \appref{app:predictions} lists all 63.}
+read as equivalent (scale); for 7, of the 5 read. \appref{app:predictions} lists all 76.}
 \label{tab:experiments}
 \end{table*}
 
@@ -234,10 +235,11 @@ predictions; every result row stamps the commit it ran on. One commit,
 LiveSQLBench's (6), came after two repeats' per-arm totals were seen but
 before the statistic it predicts, and says so. The single runs and the
 panels fixed a design but no predictions, so the headline decomposition
-(Section~\ref{sec:decomposition}) has no registered outcome. Of the 63
-predictions, fixed in 17 commits, 25 directional ones held, 7 ties were
-not rejected, 3 one-sided bounds held, one was read as equivalent as its
-commit allowed, 3 held in part and 24 failed (\appref{app:predictions}). Analyses chosen after a
+(Section~\ref{sec:decomposition}) has no registered outcome. Of the 76
+predictions, fixed in 18 commits, 25 directional ones held, 7 ties were
+not rejected, 4 one-sided bounds held, one was read as equivalent as its
+commit allowed, 3 held in part, 28 failed and 8 were not read because a
+manipulation check failed (\appref{app:predictions}). Analyses chosen after a
 result was seen are exploratory.
 
 The unit is the task. With $k$ repeats a task scores 0 to $k$ for each

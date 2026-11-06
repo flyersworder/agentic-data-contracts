@@ -1,13 +1,16 @@
 \section{Threats to Validity}
 \label{sec:threats}
 
-\paragraph{Two benchmarks, one natural procedure.} The contract's form gain
-is measured on tasks governed by a rule-matching procedure, and the only
-natural one in either benchmark is DABStep's fee matching. The constructed questions add three more,
-but they are ours, and complete prose carries them at the ceiling. A second, independent benchmark whose documentation states
-rules once for many tasks would test the form result properly; EntSQL,
-DataSpace and BI-Bench give nearly every task its own document or project,
-leaving no rules to state once~\cite{entsql,dataspace,bi-bench}.
+\paragraph{One natural procedure.} The contract's form gain is measured on
+tasks governed by a rule-matching procedure, and the only natural one is
+DABStep's fee matching; the constructed questions add three, but they are
+ours, and complete prose carries them at the ceiling. EntSQL, DataSpace and
+BI-Bench give nearly every task its own document, leaving no rules to state
+once~\cite{entsql,dataspace,bi-bench}. DataAgentBench's hints hold for many
+queries, so we registered a test on 40 of them (\appref{app:dab}), but its
+own hints did not detectably help either model ($-0.5$ and $+8.0$ points,
+$p{=}0.12$), so whether a contract does their work could not be read; the
+route again made no detectable difference.
 
 \paragraph{The raters are models.} The gap raters were \mSol{} and
 Opus~5.5; the raters of determinacy and procedural load, the failure
@@ -99,10 +102,10 @@ the Qwen scaffolding step's sign are not established over shapes.
 A near-replicate of \mGLM{}'s contract arm disagreed with the original on
 94 of 401 tasks, so the four single runs are read only through paired
 tests. Apart from Holm within experiment~5e, no multiplicity correction is
-applied across the 63 predictions. At the task level, the unit of their
+applied across the 76 predictions. At the task level, the unit of their
 registered tests, every registered directional prediction that held
 survives a Bonferroni correction over the 57 fixed before 5e except (19),
-marginally, and (35) at the cluster level; 5e's (53) survives over all 63. At the shape level, with 5e's engine applied afterwards (expl.), (28Q)
+marginally, and (35) at the cluster level; 5e's (53) survives over all 76. At the shape level, with 5e's engine applied afterwards (expl.), (28Q)
 survives over the 165 unread tasks ($p{=}3{\times}10^{-5}$) but not over the
 105 in unread shapes ($p{=}0.004$), nor does (27) ($p{=}0.02$); the eight
 registered ties read one equivalent within $\pm$5 points, one different

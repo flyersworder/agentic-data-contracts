@@ -86,25 +86,34 @@ DABStep 5e, facts in the contract & (49), (49Q) & \armCp{} does not lead \armTp{
  & (51) & \armMws{} is not 5 points below \armC{}, \mLuna{} & \texttt{4897bfe} & fails \\
 LiveSQLBench 5e, scale & (52) & the prose KB at 22 databases is at most 5 points below itself at 1x, \mQwen{} & \texttt{4897bfe} & holds \\
  & (53) & the governed arm uses fewer input tokens there & \texttt{4897bfe} & holds \\
+\midrule
+DataAgentBench 7 & (43) & an author with the data recovers half the data-discoverable hint items & \texttt{93649d8} & fails \\
+ & (43c) & the control without data recovers at most a third as many & \texttt{93649d8} & holds \\
+ & (43w) & the author recovers fewer items of the other classes & \texttt{93649d8} & fails \\
+ & (44), (44Q) & the hints beat the description & \texttt{93649d8} & fail \\
+ & (45)--(48), (45Q)--(48Q) & the contract beats the description; recovers half the hints' gain; ties its paste; adds to the hints & \texttt{93649d8} & not read$^d$ \\
 \bottomrule
 \end{tabular}
-\caption{The prediction index; totals and notes $a$--$c$ follow the table.}
+\caption{The prediction index; totals and notes $a$--$d$ follow the table.}
 \label{tab:predictions}
 \end{table*}
 
-The table holds 63 predictions in 17 commits, 53 before experiment~5d, 4
-for it and 6 for 5e: 35 held (25 directional, 7 registered ties, which hold
-by not rejecting, and 3 one-sided bounds, which hold by an interval), 3
-held in part (``mostly holds'' is counted here), 24 failed,
+The table holds 76 predictions in 18 commits, 53 before experiment~5d, 4
+for it, 6 for 5e and 13 for experiment~7: 36 held (25 directional, 7
+registered ties, which hold by not rejecting, and 4 one-sided bounds,
+which hold by an interval), 3 held in part (``mostly holds'' is counted
+here), 28 failed, 8 were not read$^d$,
 and one was read as equivalent, which its commit registered as a separate
 outcome. Rows listing several numbers count each. LiveSQLBench's (6) was fixed after \mQwen{}'s per-arm totals for two
 repeats were seen, before the statistic it predicts. Experiment 4b's
 predictions were first written in its design (\texttt{d76d21e}) and
 re-specified in \texttt{a7ee6b4}, before any contract was authored. Grades
-are as made at the time; three notes from review: $^a$the compiled
+are as made at the time; notes $a$--$c$ are from review: $^a$the compiled
 contract's 45.6\% and the manual's 45.3\% come from different runs, so
 ``between'' is not established; $^b$the test is over questions, which come
 from five gaps, and over gaps it is four to none with one tie, one-sided
 $p{=}0.06$; $^c$(32) holds with 12 of 15 gap-draws, crediting three
 wildcard draws that never compute specificity; scored partial, recovery is
-9 of 15 and (32) fails.
+9 of 15 and (32) fails. $^d$Fixed before the run: when the manipulation
+check (44) fails, (45)--(48) are reported (\appref{app:dab}) and not read as
+support.

@@ -1,0 +1,69 @@
+\section{A Second Benchmark: DataAgentBench}
+\label{app:dab}
+
+DataAgentBench~\cite{dab-berkeley} asks natural-language questions over
+datasets spread across several database systems. For each dataset its
+builders supply a description and a file of hints that hold for many
+queries, the property Section~\ref{sec:threats} asks for. We used the 40
+leaderboard queries of the nine datasets that need no MongoDB, loaded each
+dataset into one DuckDB session, and graded every answer with the query's
+own validator. We asked the maintainers whether these adaptations, and
+publishing material derived from the data, are acceptable; they had not
+answered at the time of writing.
+
+\textbf{Contracts.} An Opus~5.5 author session per dataset had the
+description, the schema, sample rows and read-only SQL on the data, and
+neither the questions nor the hints (three draws, \emph{A}); one more had
+the hints too (\emph{B}); a control had no data. Before any agent ran, a
+checker that never saw the questions scored, for each hint item, whether a
+draw's contract recovered it. Draw~A recovered 12 of 36 data-discoverable
+item-draws, against a registered half ((43) fails), and 31 of 57 items of
+the other classes ((43w), which predicted fewer, fails). The control without
+data recovered 1 of 12 ((43c) holds), so recovery came from the data, not
+from memory of the benchmark.
+
+\textbf{Agent runs.} Five arms ran together, $k{=}5$, on \mLuna{} and
+\mQwen{}: the description alone; with the hints; with draw~A1's contract
+behind the governed tools; with its files in the prompt over plain tools;
+and with the hints and draw~B's governed contract.
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+& desc. & +hints & +contract & +text & +hints+contract \\
+\midrule
+\mLuna{} & 64.5 & 64.0 & 64.5 & 64.5 & 74.5 \\
+\mQwen{} & 59.5 & 67.5 & 67.5 & 70.0 & 74.5 \\
+\bottomrule
+\end{tabular}
+\caption{DataAgentBench, accuracy (\%) pooled over 40 queries and five
+repeats, by the queries' own validators.}
+\label{tab:dab}
+\end{table}
+
+The registered manipulation check (44), that the hints beat the
+description, fails on both models: $-0.5$ points on \mLuna{} (10 queries
+to 9) and $+8.0$ on \mQwen{} (12 to 6, $p{=}0.12$, in the hints' favour on
+7 of the 8 datasets where the arms differ). By the reading fixed before
+the run, the four predictions that rest on it are reported and not read as
+support. The contract alone does not beat the description ((45): $+0.0$
+and $+8.0$). The route makes no detectable difference ((47) holds on both:
+$+0.0$ and $-2.5$ points). The hints with draw~B's contract score highest
+on both models, $+10.5$ and $+7.0$ points over the hints ((48): $p{=}0.032$
+on \mLuna{}, failing whenever one of four datasets is left out, and
+$p{=}0.40$ on \mQwen{}).
+
+\textbf{Leniency.} A validator accepts an answer that contains the gold,
+however long. Such passes, more than 200 characters longer than the gold,
+are 6.5 to 11.5\% of \mLuna{}'s runs per arm and 30.5 to 41.5\% of
+\mQwen{}'s, which writes out its working. Read without them, as registered
+where arms differ by more than 5 points in them, \mQwen{}'s route contrast
+becomes $-12.4$ points (3 queries to 6) and (47) fails.
+
+With 2 to 13 queries per dataset, one dataset moves every test, and the
+benchmark's own hints did not detectably help either model. The test of
+whether a contract does the hints' work therefore could not be read; the
+route result is the one this benchmark repeats.

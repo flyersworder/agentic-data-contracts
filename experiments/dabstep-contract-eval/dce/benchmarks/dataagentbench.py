@@ -5,7 +5,11 @@
 Named `dataagentbench`, not `dab`, to keep it apart from DABStep. Everything
 DAB ships stays in `DAB_DATA` (default `~/data/dataagentbench`, built by
 `dce.benchmarks.dab_data`) and is never committed: the descriptions, the
-hints, the queries, the golds and the validators. Tasks are the 40 queries of
+queries, the golds and the validators. The hints are quoted only as the 37
+items scored in experiment 7 (`prep/dataagentbench/hint-items.json`). The
+adapted system prompt below is DAB's; like every file derived from DAB, it is
+not covered by this repository's MIT license
+(`contracts-dataagentbench/NOTICE.md`). Tasks are the 40 queries of
 the nine phase-1 datasets, `<dataset>/<n>`, grouped by dataset; each dataset
 is one DuckDB file, a schema per logical database.
 

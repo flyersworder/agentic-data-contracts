@@ -38,14 +38,18 @@ tracked at \url{https://github.com/flyersworder/agentic-data-contracts}
 and archived on Zenodo, \url{https://doi.org/10.5281/zenodo.23598671}.
 Every row records its commit, contract digest, gold-set hash, scorer,
 model, endpoint, token counts, cost and a post-run integrity check of its
-database copy. The transcripts of the DABStep and constructed-question
-runs are attached to the releases tagged \texttt{dabstep-eval-2026-09}
-and \texttt{dabstep-eval-2026-10}, with SHA-256 digests, and the later
-ones are archived as \url{https://doi.org/10.5281/zenodo.23598749}; 208 of the later
-runs' 57{,}834 rows have none, because a pod restart lost the transcripts
-written before it, and the release lists them. LiveSQLBench's
+database copy. The transcripts of the DABStep, constructed-question and
+DataAgentBench runs are attached to the releases tagged
+\texttt{dabstep-eval-2026-09}, \texttt{dabstep-eval-2026-10} and
+\texttt{dabstep-eval-2026-11}, with SHA-256 digests, and the last two
+are archived as \url{https://doi.org/10.5281/zenodo.23598749}. The
+DataAgentBench transcripts are derived from that benchmark and are not
+covered by the archive's CC~BY~4.0 license. 208 of the 82{,}262 rows in
+those two releases have no transcript, because a pod restart lost the
+transcripts written before it, and \texttt{dabstep-eval-2026-10} lists
+them. LiveSQLBench's
 private gold, test cases and task mapping are not redistributed, nor are
-its transcripts, since one graded correct is a solution the benchmark
+the transcripts of its own tasks, since one graded correct is a solution the benchmark
 keeps private; its rows carry a hash of the gold result, and the analyses
 that use the gold print aggregates only.
 \else

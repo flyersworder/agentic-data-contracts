@@ -878,10 +878,13 @@ semantic:
 
 Ossie standardises what a metric *is*; this library enforces what an agent may *do* with it. So the spec is a strict subset of the vocabulary here — an Ossie `Metric` carries only `name`, `expression`, `description`, `datatype`, and `ai_context`.
 
+A document is one model, with its `name`, `datasets`, `relationships` and `metrics` at the root, as the current spec defines it. A file in the earlier shape, with models in a `semantic_model` list, is still read and logs a warning saying it is legacy. A file with neither shape is refused at load rather than read as an empty model.
+
 | Ossie | Read as |
 | --- | --- |
 | `datasets[].source` + `fields[]` | Table schemas. A three-part `database.schema.table` is keyed on its trailing `schema.table`; a query-backed dataset registers no table |
-| `metrics[].expression.dialects[]` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then `Ossie_SQL_2026`, then the first declared entry |
+| `metrics[].expression` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then Ossie SQL (`expression.sql`, which overrides a `dialects` entry for `OSSIE_SQL_2026`), then the first declared entry |
+| `datasets[].metrics[]` | A metric named `dataset.metric`, as the spec references it, with the dataset's table as its `source_model`. Its expression is passed through unchanged, so it names the dataset's fields, not physical columns |
 | `relationships[]` | `Relationship`, with cardinality *derived from both sides* — see below |
 | `ai_context` (anywhere) | Carried into `get_extras()["ossie_ai_context"]`, keyed by model then entity kind, never interpreted |
 | `custom_extensions[]` | Ours read as real vocabulary; every other vendor's carried into `get_extras()["ossie_custom_extensions"]`, keyed by model then vendor |
@@ -933,7 +936,7 @@ Ossie stores extension payloads as a JSON *string*, so `data` is JSON nested ins
 
 `expected_extras` does not apply to an Ossie source: its extras are synthesized by the parser under fixed keys, not authored as free top-level sections. Declaring it on a non-`yaml` source logs a warning rather than being silently dropped.
 
-> The spec is at `0.2.0.dev0` with no tagged releases yet, so expect churn. `dialect` is deliberately treated as an opaque string and never validated against the enum, since the accepted expression-language proposal adds `Ossie_SQL_2026` and makes it the default.
+> The spec is at `0.2.0.dev0` with no tagged releases yet, so expect churn. `dialect` is deliberately treated as an opaque string and never validated, as the spec itself accepts any non-empty string. Producers that export Ossie, such as NVIDIA Auto-Ontology's Import / Export, are read directly; `tests/fixtures/ossie_flat_nvidia_auto_ontology.yml` is that converter's real output.
 
 ## Table Relationships
 

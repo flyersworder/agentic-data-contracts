@@ -24,10 +24,10 @@ places them in the prompt, but never interprets them.
 Churn
 -----
 The spec is ``0.2.0.dev0`` with no tagged releases yet (apache/ossie#102),
-and the accepted expression-language proposal adds an ``Ossie_SQL_2026``
-dialect that is not in today's enum. So ``dialect`` is treated as an opaque
-string here and never validated against the enum — a closed check would
-break on the next spec bump for no benefit.
+and it has changed shape under this module: the ``semantic_model`` wrapper
+was removed (#383), ``expression.sql`` was added (#617), and metrics may sit
+on a dataset (#591). ``dialect`` is treated as an opaque string and never
+validated, as the spec itself now accepts any non-empty string.
 """
 
 from __future__ import annotations
@@ -67,10 +67,14 @@ logger = logging.getLogger(__name__)
 #: is a free-form string, so a namespace is claimed by convention, not registry.
 OSSIE_VENDOR = "AGENTIC_DATA_CONTRACTS"
 
-#: Dialect preference when the caller names none. ``ANSI_SQL`` is the current
-#: portable default; ``Ossie_SQL_2026`` is the one the accepted expression-
-#: language proposal promotes to default, listed ahead of its arrival.
-_DEFAULT_DIALECT_PREFERENCE = ("ANSI_SQL", "Ossie_SQL_2026")
+#: The one dialect the spec defines, and the language of ``expression.sql``.
+_OSSIE_SQL = "OSSIE_SQL_2026"
+
+#: Dialect preference when the caller names none. ``ANSI_SQL`` comes first
+#: because it is what a warehouse runs; Ossie SQL reserves constructs such as
+#: ``AGG()`` that none does. ``Ossie_SQL_2026`` is the proposal's spelling,
+#: kept so documents written before the spec settled on upper case still match.
+_DEFAULT_DIALECT_PREFERENCE = ("ANSI_SQL", _OSSIE_SQL, "Ossie_SQL_2026")
 
 #: Cardinality by ``(from_columns are a key, to_columns are a key)``. Ossie
 #: never states the join type, so it is read off which endpoints are unique.
@@ -131,6 +135,54 @@ def _table_key(source: str) -> str | None:
     return ".".join(parts[-2:])
 
 
+def _models(raw: Any, path: str | Path) -> list[dict[str, Any]]:
+    """The models an Ossie document holds, in either shape the spec has had.
+
+    The current spec (apache/ossie#383) makes a document one model, with its
+    ``name``, ``datasets`` and ``metrics`` at the root, and rejects the earlier
+    ``semantic_model`` array. That array is still read, so files written before
+    the change keep working, but it is named as legacy.
+
+    Every way of finding no model is an error rather than an empty source. An
+    empty source enforces nothing an agent can see, and nothing downstream
+    tells it apart from a model that has no metrics: reading a current
+    document through the old wrapper looked exactly like that.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Ossie model {path}: expected a mapping with `datasets` at the"
+            f" root, got {type(raw).__name__}."
+        )
+    flat, wrapped = "datasets" in raw, "semantic_model" in raw
+    if flat and wrapped:
+        raise ValueError(
+            f"Ossie model {path} has both root `datasets` and a legacy"
+            " `semantic_model` list; reading either would drop the other's"
+            " models. Keep one model per document, at the root."
+        )
+    if flat:
+        return [raw]
+    if not wrapped:
+        raise ValueError(
+            f"Ossie model {path} has no `datasets` at the root. A current"
+            " Ossie document is one model, with `name` and `datasets` at the"
+            " root (the earlier `semantic_model` list is also read)."
+        )
+    models = entry_list(raw.get("semantic_model"), where="semantic_model")
+    if not models:
+        raise ValueError(
+            f"Ossie model {path}: the `semantic_model` list holds no model."
+        )
+    logger.warning(
+        "OssieSource: %s uses the `semantic_model` list, which the current"
+        " Ossie spec no longer accepts (apache/ossie#383). It is still read;"
+        " to migrate, write one model per document with its properties at the"
+        " root.",
+        path,
+    )
+    return models
+
+
 class OssieSource:
     """Loads metric and table definitions from an Apache Ossie semantic model."""
 
@@ -171,12 +223,7 @@ class OssieSource:
         self._ai_context: dict[str, dict[str, dict[str, Any]]] = {}
         self._foreign_extensions: dict[str, dict[str, Any]] = {}
 
-        if not isinstance(raw, dict):
-            raise ValueError(
-                "An Ossie model file must be a mapping with a `semantic_model`"
-                f" key, got {type(raw).__name__}."
-            )
-        for model in entry_list(raw.get("semantic_model"), where="semantic_model"):
+        for model in _models(raw, path):
             self._load_model(model)
 
         self._rel_index = build_relationship_index(self._relationships)
@@ -197,6 +244,11 @@ class OssieSource:
 
         name_to_table: dict[str, str] = {}
         keys_by_dataset: dict[str, list[tuple[str, ...]]] = {}
+        # (name, source_model, metric). Model-scoped metrics are named bare and
+        # anchored by their own `dataset.field` references. A dataset-scoped one
+        # (apache/ossie#591) is named `dataset.metric`, as the spec references
+        # it, and its unqualified expression is anchored by its dataset's table.
+        metrics: list[tuple[str, str, dict[str, Any]]] = []
 
         for dataset in entry_list(
             model.get("datasets"), where=f"{model_name} datasets"
@@ -214,6 +266,13 @@ class OssieSource:
 
             raw_source = str(dataset.get("source", ""))
             key = _table_key(raw_source)
+            metrics.extend(
+                (f"{name}.{m['name']}", key or "", m)
+                for m in entry_list(
+                    dataset.get("metrics"), where=f"dataset {name} metrics"
+                )
+                if m.get("name")
+            )
             if key is None:
                 # A query-defined dataset legitimately has no table to key on,
                 # so that case stays at debug. A single-part or empty source is
@@ -266,8 +325,13 @@ class OssieSource:
         # default to the whole list would stamp one model's house convention
         # onto another's. Ossie namespaces entities per model; so does this.
         first_metric = len(self._metrics)
+        metrics.extend(
+            (m["name"], "", m)
+            for m in entry_list(model.get("metrics"), where=f"{model_name} metrics")
+            if m.get("name")
+        )
         self._load_metrics(
-            model,
+            metrics,
             model_name,
             entry_mapping(overlay.get("metrics"), where="vendor block metrics"),
         )
@@ -373,12 +437,12 @@ class OssieSource:
             )
 
     def _load_metrics(
-        self, model: dict[str, Any], model_name: str, overlay: dict[str, Any]
+        self,
+        metrics: list[tuple[str, str, dict[str, Any]]],
+        model_name: str,
+        overlay: dict[str, Any],
     ) -> None:
-        for metric in entry_list(model.get("metrics"), where=f"{model_name} metrics"):
-            name = metric.get("name")
-            if not name:
-                continue
+        for name, source_model, metric in metrics:
             self._record_ai_context(model_name, "metrics", name, metric)
             extra = overlay.get(name, {})
             self._metrics.append(
@@ -386,7 +450,7 @@ class OssieSource:
                     name=require_text(name, where="Ossie metric name"),
                     description=as_text(metric.get("description")),
                     sql_expression=self._pick_expression(metric),
-                    source_model=as_text(extra.get("source_model")),
+                    source_model=as_text(extra.get("source_model")) or source_model,
                     filters=as_list(extra.get("filters")),
                     domains=as_list(extra.get("domains")),
                     tier=as_list(extra.get("tier")),
@@ -465,6 +529,13 @@ class OssieSource:
             for d in dialects
             if d.get("dialect")
         }
+        # `sql` is the spec's primary portable expression, written in Ossie SQL
+        # and authoritative over a `dialects` entry for it (apache/ossie#617).
+        portable = (
+            as_text(expression.get("sql")) if isinstance(expression, dict) else ""
+        )
+        if portable:
+            by_dialect[_OSSIE_SQL] = portable
         for preferred in self._dialect_preference:
             if preferred in by_dialect:
                 return by_dialect[preferred]

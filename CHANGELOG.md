@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.63.0] - 2026-11-07
+
+### Fixed
+
+- **`OssieSource` reads current-spec Ossie documents.** apache/ossie#383 made a document one model, with `name` and `datasets` at the root, and the spec no longer accepts the earlier `semantic_model` list. `OssieSource` read only that list, so a current-spec document loaded as a source with no tables, metrics or relationships, and nothing reported it. The contract's own allowlist and forbidden operations were still enforced; the agent lost the metrics and joins. NVIDIA Auto-Ontology's Ossie export is in the current shape, and its real converter output is now a test fixture. A document in the legacy shape is still read and logs a warning.
+- **A metric written with only `expression.sql` has an expression.** The spec added `sql` as the primary portable expression (apache/ossie#617); such a metric loaded with an empty `sql_expression`. `sql` is read as Ossie SQL and overrides a `dialects` entry for `OSSIE_SQL_2026`. `ANSI_SQL` is still preferred over both. The dialect is matched in the spec's spelling, `OSSIE_SQL_2026`, as well as the proposal's `Ossie_SQL_2026`.
+
+### Added
+
+- **Dataset-scoped Ossie metrics** (`datasets[].metrics`, apache/ossie#591), which were not read. Each is named `dataset.metric`, the form the spec references it by, and its `source_model` is the dataset's table. Our vendor block's `metrics` reaches it by that name. Its expression is passed through unchanged, as a model-scoped one's is: it names the dataset's fields, not physical columns.
+
+### Changed
+
+- **An Ossie document that holds no model is refused at load** with a `ValueError` naming the file, instead of loading as an empty source. That covers a document with neither `datasets` at the root nor a `semantic_model` list, an empty `semantic_model` list, and a document with both, where reading either would drop the other's models.
+
 ## [0.62.1] - 2026-10-16
 
 ### Fixed

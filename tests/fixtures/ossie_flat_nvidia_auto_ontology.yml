@@ -8,6 +8,10 @@
 # Auto-Ontology's Settings -> Import / Export produces, so it pins the real
 # shape a producer emits rather than our reading of the spec. Do not edit by
 # hand; regenerate it.
+#
+# Not a spec-valid example: `revenue_per_customer` reads `orders.subtotal`, which
+# no field declares, and `customer_name` is a field over the column `name`.
+# Both are what a real export does, and both are what the tests pin.
 version: 0.2.0.dev0
 name: sales
 datasets:

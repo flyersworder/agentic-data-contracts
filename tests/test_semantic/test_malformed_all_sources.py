@@ -247,8 +247,8 @@ _OSSIE: dict[str, Any] = {
                         ]
                     },
                 },
-                {"name": "a", "expression": {"dialects": []}},
-                {"name": "b", "expression": {"dialects": []}},
+                {"name": "a", "expression": {"sql": "SUM(orders.a)"}},
+                {"name": "b", "expression": {"sql": "SUM(orders.b)"}},
             ],
         }
     ]

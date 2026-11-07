@@ -198,12 +198,16 @@ def test_a_dataset_scoped_metric_is_named_as_the_spec_references_it(
     assert metric.description == "Number of orders"
 
 
-def test_a_dataset_scoped_metric_names_its_table_as_source_model(
-    tmp_path: Path,
-) -> None:
-    """Its expression is unqualified, so the table is what anchors it."""
-    source = _load(tmp_path, _with_dataset_metric())
-    assert _get(source, "orders.order_count").source_model == ("public.orders")
+def test_a_dataset_scoped_metric_claims_no_source_model(tmp_path: Path) -> None:
+    """A ``source_model`` with no ``from_sql`` says the expression reads that
+    table alone, but this expression names the dataset's *fields*, which may
+    be renamed or computed. Unset, as a model-scoped metric's is."""
+    doc = _with_dataset_metric()
+    doc["datasets"][0]["metrics"][0]["expression"] = {"sql": "SUM(net_amount)"}
+    doc["datasets"][0]["fields"].append(
+        {"name": "net_amount", "expression": {"sql": "amount - discount"}}
+    )
+    assert _get(_load(tmp_path, doc), "orders.order_count").source_model == ""
 
 
 def test_a_dataset_scoped_metric_takes_our_vendor_overlay(tmp_path: Path) -> None:
@@ -213,3 +217,251 @@ def test_a_dataset_scoped_metric_takes_our_vendor_overlay(tmp_path: Path) -> Non
     }
     source = _load(tmp_path, _with_dataset_metric(custom_extensions=[overlay]))
     assert _get(source, "orders.order_count").tier == ["gold"]
+
+
+# --- no part of a model is dropped without a message -----------------------
+
+
+@pytest.mark.parametrize("datasets", [[], None], ids=["empty", "null"])
+def test_a_flat_document_with_no_datasets_is_rejected(
+    tmp_path: Path, datasets: Any
+) -> None:
+    """The schema requires at least one dataset; none is an empty source."""
+    with pytest.raises(ValueError, match="datasets"):
+        _load(tmp_path, _flat(datasets=datasets))
+
+
+def test_a_legacy_model_with_no_datasets_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="datasets"):
+        _load(tmp_path, {"semantic_model": [{"name": "m"}]})
+
+
+def test_a_nameless_dataset_is_rejected(tmp_path: Path) -> None:
+    doc = _flat()
+    del doc["datasets"][0]["name"]
+    with pytest.raises(ValueError, match="name"):
+        _load(tmp_path, doc)
+
+
+def test_a_nameless_field_is_rejected(tmp_path: Path) -> None:
+    doc = _flat()
+    del doc["datasets"][0]["fields"][0]["name"]
+    with pytest.raises(ValueError, match="name"):
+        _load(tmp_path, doc)
+
+
+@pytest.mark.parametrize("scope", ["model", "dataset"])
+def test_a_nameless_metric_is_rejected(tmp_path: Path, scope: str) -> None:
+    nameless = {"expression": {"sql": "COUNT(*)"}}
+    doc = _flat(metrics=[nameless]) if scope == "model" else _flat()
+    if scope == "dataset":
+        doc["datasets"][0]["metrics"] = [nameless]
+    with pytest.raises(ValueError, match="name"):
+        _load(tmp_path, doc)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [None, {}, {"dialects": []}, [{"dialect": "ANSI_SQL", "expression": "x"}]],
+    ids=["missing", "empty", "no-dialects", "bare-list"],
+)
+def test_a_metric_with_no_expression_is_rejected(
+    tmp_path: Path, expression: Any
+) -> None:
+    metric: dict[str, Any] = {"name": "m"}
+    if expression is not None:
+        metric["expression"] = expression
+    with pytest.raises(ValueError, match="m"):
+        _load(tmp_path, _flat(metrics=[metric]))
+
+
+# --- fields register the physical column they read -------------------------
+
+
+def _columns(source: OssieSource, table: str) -> list[str]:
+    schema = source.get_table_schema(*table.split("."))
+    assert schema is not None, f"{table} did not load"
+    return [c.name for c in schema.columns]
+
+
+def test_a_renamed_field_registers_the_column_it_reads() -> None:
+    """NVIDIA's `customer_name` field is the physical column `name`."""
+    assert _columns(OssieSource(NVIDIA), "public.customers") == ["customer_id", "name"]
+
+
+def test_a_computed_field_is_not_registered_as_a_column() -> None:
+    """`net_total` is `subtotal - discount`; no table has that column."""
+    assert "net_total" not in _columns(OssieSource(NVIDIA), "public.orders")
+
+
+def test_a_field_with_no_expression_keeps_its_name_as_the_column(
+    tmp_path: Path,
+) -> None:
+    doc = _flat()
+    del doc["datasets"][0]["fields"][1]["expression"]
+    assert _columns(_load(tmp_path, doc), "public.orders") == ["order_id", "amount"]
+
+
+def test_a_renamed_fields_description_lands_on_its_column(tmp_path: Path) -> None:
+    doc = _flat()
+    doc["datasets"][0]["fields"][1] = {
+        "name": "order_amount",
+        "description": "Gross amount",
+        "expression": {"sql": "amount"},
+    }
+    schema = _load(tmp_path, doc).get_table_schema("public", "orders")
+    assert schema is not None
+    assert {c.name: c.description for c in schema.columns}["amount"] == "Gross amount"
+
+
+# --- dialect names match whatever their case --------------------------------
+
+
+def test_the_callers_dialect_matches_an_entry_in_another_case(
+    tmp_path: Path,
+) -> None:
+    expression = {
+        "dialects": [
+            {"dialect": "ANSI_SQL", "expression": "SUM(orders.amount)"},
+            {"dialect": "Ossie_SQL_2026", "expression": "SUM(orders.amount) + 0"},
+        ]
+    }
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump(_flat(metrics=[_metric(expression)])))
+    source = OssieSource(path, dialect="OSSIE_SQL_2026")
+    assert _get(source, "m").sql_expression == "SUM(orders.amount) + 0"
+
+
+def test_sql_overrides_an_ossie_sql_entry_in_any_case(tmp_path: Path) -> None:
+    expression = {
+        "sql": "SUM(orders.amount)",
+        "dialects": [{"dialect": "Ossie_SQL_2026", "expression": "stale"}],
+    }
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump(_flat(metrics=[_metric(expression)])))
+    source = OssieSource(path, dialect="Ossie_SQL_2026")
+    assert _get(source, "m").sql_expression == "SUM(orders.amount)"
+
+
+# --- extensions below the model are carried, not dropped --------------------
+
+
+def test_a_foreign_extension_on_a_field_is_carried() -> None:
+    entities = OssieSource(NVIDIA).get_extras()["ossie_entity_extensions"]["sales"]
+    block = entities["fields"]["orders.net_total"]["NVIDIA_AUTO_ONTOLOGY"]
+    assert block["entity"] == "sql_attribute"
+
+
+def test_a_foreign_extension_on_a_metric_is_carried() -> None:
+    entities = OssieSource(NVIDIA).get_extras()["ossie_entity_extensions"]["sales"]
+    block = entities["metrics"]["revenue_per_customer"]["NVIDIA_AUTO_ONTOLOGY"]
+    assert block["sql"].startswith("SELECT SUM(orders.subtotal)")
+
+
+def test_no_entity_extensions_section_when_there_are_none(tmp_path: Path) -> None:
+    assert "ossie_entity_extensions" not in _load(tmp_path, _flat()).get_extras()
+
+
+def test_our_vendor_block_on_an_entity_is_named_as_unread(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ours = {"vendor_name": "AGENTIC_DATA_CONTRACTS", "data": {"tier": ["gold"]}}
+    metric = {**_metric({"sql": "COUNT(*)"}), "custom_extensions": [ours]}
+    with caplog.at_level(logging.WARNING):
+        _load(tmp_path, _flat(metrics=[metric]))
+    assert "model-level" in caplog.text
+
+
+def test_a_repeated_vendor_block_is_named(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    blocks = [
+        {"vendor_name": "SNOWFLAKE", "data": {"warehouse": "A"}},
+        {"vendor_name": "SNOWFLAKE", "data": {"warehouse": "B"}},
+    ]
+    with caplog.at_level(logging.WARNING):
+        _load(tmp_path, _flat(custom_extensions=blocks))
+    assert "SNOWFLAKE" in caplog.text
+
+
+# --- overlay keys and metric names that resolve to nothing ------------------
+
+
+def _overlay(metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"vendor_name": "AGENTIC_DATA_CONTRACTS", "data": {"metrics": metrics}}]
+
+
+def test_an_overlay_key_matching_no_metric_is_named(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    doc = _flat(
+        metrics=[_metric({"sql": "COUNT(*)"})],
+        custom_extensions=_overlay({"typo_metric": {"tier": ["gold"]}}),
+    )
+    with caplog.at_level(logging.WARNING):
+        _load(tmp_path, doc)
+    assert "typo_metric" in caplog.text
+
+
+def test_a_bare_overlay_key_for_a_dataset_scoped_metric_suggests_its_name(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Moving a metric onto its dataset renames it; the overlay key must follow."""
+    doc = _with_dataset_metric(
+        custom_extensions=_overlay({"order_count": {"tier": ["gold"]}})
+    )
+    with caplog.at_level(logging.WARNING):
+        _load(tmp_path, doc)
+    assert "orders.order_count" in caplog.text
+
+
+def test_a_duplicate_metric_name_is_named(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    metrics = [_metric({"sql": "COUNT(*)"}), _metric({"sql": "SUM(orders.amount)"})]
+    with caplog.at_level(logging.WARNING):
+        _load(tmp_path, _flat(metrics=metrics))
+    assert "duplicate" in caplog.text.lower()
+
+
+def _joined(customer_key_expression: str) -> dict[str, Any]:
+    doc = _flat()
+    doc["datasets"][0]["fields"].append(
+        {"name": "customer_id", "expression": {"sql": "customer_id"}}
+    )
+    doc["datasets"].append(
+        {
+            "name": "customers",
+            "source": "analytics.public.customers",
+            "primary_key": ["customer_id"],
+            "fields": [
+                {"name": "customer_id", "expression": {"sql": customer_key_expression}}
+            ],
+        }
+    )
+    doc["relationships"] = [
+        {
+            "name": "orders_to_customers",
+            "from": "orders",
+            "to": "customers",
+            "from_columns": ["customer_id"],
+            "to_columns": ["customer_id"],
+        }
+    ]
+    return doc
+
+
+def test_a_relationship_on_a_renamed_field_joins_the_physical_column(
+    tmp_path: Path,
+) -> None:
+    [rel] = _load(tmp_path, _joined("cust_key")).get_relationships()
+    assert rel.to == "public.customers.cust_key"
+
+
+def test_a_relationship_on_a_computed_field_is_skipped_by_name(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        source = _load(tmp_path, _joined("id + 0"))
+    assert source.get_relationships() == []
+    assert "orders_to_customers" in caplog.text

@@ -47,14 +47,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
 import sqlglot
 import yaml
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import SqlglotError
 
 from agentic_data_contracts.adapters.base import Column, TableSchema
 from agentic_data_contracts.semantic.base import (
@@ -114,10 +113,9 @@ _NON_SQL_DIALECTS = frozenset(
     )
 )
 
-#: An unquoted, optionally qualified column reference: ``amount`` or
-#: ``source.amount``. Read without sqlglot, which parses some bare words
-#: (``user``, ``current_date``) as functions rather than columns.
-_BARE_COLUMN = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_$]*\.)?([A-Za-z_][A-Za-z0-9_$]*)")
+#: Dialects tried, in order, when a field expression does not parse as plain
+#: SQL: BigQuery reads a backtick-quoted identifier, T-SQL a bracketed one.
+_QUOTING_DIALECTS = ("bigquery", "tsql")
 
 #: Cardinality by ``(from_columns are a key, to_columns are a key)``. Ossie
 #: never states the join type, so it is read off which endpoints are unique.
@@ -220,6 +218,14 @@ def _extension_blocks(entries: Any, *, where: str) -> dict[str, Any]:
     return blocks
 
 
+def _with_computed(description: str, computed: list[str]) -> str:
+    """A table description followed by the computed fields that are no column."""
+    if not computed:
+        return description
+    note = "Computed Ossie fields, not columns of this table: " + "; ".join(computed)
+    return f"{description}\n\n{note}" if description else note
+
+
 def _require_datasets(model: dict[str, Any], path: str | Path) -> None:
     """A model with no dataset is an empty source; the schema requires one."""
     if not entry_list(model.get("datasets"), where="datasets"):
@@ -235,16 +241,23 @@ def _physical_column(expression: str) -> str | None:
     A field's ``name`` is what the model calls it and its expression is what
     the table holds, so ``customer_name: name`` is the column ``name``. A
     computed field (``subtotal - discount``) is no column at all.
+
+    sqlglot reads keywords and niladic functions (``current_date``, ``TRUE``,
+    ``NULL``) as what they are, not as columns, in every dialect tried. The
+    first dialect that reads the expression as a column names it: plain SQL,
+    then those whose identifier quoting it may use (plain SQL reads
+    ``[amount]`` as an array). Any sqlglot error, a tokenizer one included,
+    means that dialect names no column.
     """
     text = expression.strip()
-    match = _BARE_COLUMN.fullmatch(text)
-    if match:
-        return match.group(1)
-    try:
-        node = sqlglot.parse_one(text)
-    except ParseError:
-        return None
-    return node.name if isinstance(node, exp.Column) else None
+    for dialect in (None, *_QUOTING_DIALECTS):
+        try:
+            node = sqlglot.parse_one(text, read=dialect)
+        except SqlglotError:
+            continue
+        if isinstance(node, exp.Column):
+            return node.name
+    return None
 
 
 def _models(raw: Any, path: str | Path) -> list[dict[str, Any]]:
@@ -331,6 +344,7 @@ class OssieSource:
         self._vendor = vendor
 
         self._metrics: list[MetricDefinition] = []
+        self._metric_names: set[str] = set()
         self._tables: dict[str, TableSchema] = {}
         self._relationships: list[Relationship] = []
         self._metric_impacts: list[MetricImpact] = []
@@ -380,7 +394,9 @@ class OssieSource:
             self._record_ai_context(model_name, "datasets", name, dataset)
             self._record_entity_extensions(model_name, "datasets", name, dataset)
             keys_by_dataset[name] = self._unique_key_sets(dataset)
-            columns, field_columns = self._read_fields(model_name, name, dataset)
+            columns, field_columns, computed = self._read_fields(
+                model_name, name, dataset
+            )
             columns_by_dataset[name] = field_columns
             metrics.extend(
                 self._named_metrics(
@@ -421,8 +437,11 @@ class OssieSource:
             self._tables[key] = TableSchema(
                 columns=columns,
                 # Beside the `fields` already read. An Ossie dataset's own
-                # description is the table-level gloss #89 had nowhere to put.
-                description=as_text(dataset.get("description")),
+                # description is the table-level gloss #89 had nowhere to put,
+                # followed by the computed fields a metric may name.
+                description=_with_computed(
+                    as_text(dataset.get("description")), computed
+                ),
             )
 
         self._load_relationships(
@@ -456,18 +475,25 @@ class OssieSource:
 
     def _read_fields(
         self, model_name: str, dataset_name: str, dataset: dict[str, Any]
-    ) -> tuple[list[Column], dict[str, str | None]]:
-        """A dataset's physical columns, and each field's column or None.
+    ) -> tuple[list[Column], dict[str, str | None], list[str]]:
+        """A dataset's physical columns, each field's column, its computed fields.
 
         A field names what the model calls a value and its expression names
         what the table holds, so the column is read off the expression. A
-        computed field is no column; it is logged at debug, since the agent
-        sees the table as the warehouse has it. A field written without an
-        expression, which the spec does not allow, keeps its name as the
-        column, as it did before fields were read this way.
+        computed field is no column. A field written without an expression,
+        which the spec does not allow, keeps its name as the column, as it did
+        before fields were read this way.
+
+        Metric expressions still name fields, not columns, and are not
+        translated here. So the bridge goes where the agent reads the table: a
+        column named apart from its field says the field's name in its
+        description, and each computed field is returned as
+        ``name = expression`` for the table's description.
         """
         columns: dict[str, Column] = {}
+        aliases: dict[str, list[str]] = {}
         field_columns: dict[str, str | None] = {}
+        computed: list[str] = []
         for f in entry_list(
             dataset.get("fields"), where=f"Ossie dataset {dataset_name!r} fields"
         ):
@@ -478,24 +504,21 @@ class OssieSource:
             self._record_ai_context(model_name, "fields", qualified, f)
             self._record_entity_extensions(model_name, "fields", qualified, f)
             expression = self._choose_expression(f)
-            # A BI formula is no evidence of a column, and its field's name is
-            # what the BI tool calls it; it registers none, like a computed one.
-            column = (
-                _physical_column(expression)
-                if expression
-                else None
-                if self._bi_formulas(f)
-                else field_name
-            )
+            formulas = self._bi_formulas(f)
+            if expression:
+                column = _physical_column(expression)
+            elif formulas:
+                # A BI formula is no evidence of a column, and the field's
+                # name is what the BI tool calls it.
+                column = None
+            else:
+                column = field_name
             field_columns[field_name] = column
             if column is None:
-                logger.debug(
-                    "OssieSource: field %r is computed (%r), not a column of"
-                    " its table; it is not registered as one.",
-                    qualified,
-                    expression,
-                )
+                computed.append(f"{field_name} = {expression or '; '.join(formulas)}")
                 continue
+            if field_name != column:
+                aliases.setdefault(column, []).append(field_name)
             columns.setdefault(
                 column,
                 Column(
@@ -504,7 +527,11 @@ class OssieSource:
                     description=as_text(f.get("description")),
                 ),
             )
-        return list(columns.values()), field_columns
+        for column, names in aliases.items():
+            col = columns[column]
+            note = f"(Ossie field: {', '.join(names)})"
+            col.description = f"{col.description} {note}".strip()
+        return list(columns.values()), field_columns, computed
 
     @staticmethod
     def _named_metrics(
@@ -515,9 +542,8 @@ class OssieSource:
             for m in entry_list(entries, where=where)
         ]
 
-    @staticmethod
     def _warn_unmatched_overlay(
-        overlay_metrics: dict[str, Any], names: list[str]
+        self, overlay_metrics: dict[str, Any], names: list[str]
     ) -> None:
         """Name a vendor-block key that reaches no metric.
 
@@ -534,7 +560,7 @@ class OssieSource:
             logger.warning(
                 "OssieSource: the %s block names metric %r, which this model"
                 " does not declare; its settings apply to nothing.%s",
-                OSSIE_VENDOR,
+                self._vendor,
                 key,
                 hint,
             )
@@ -678,12 +704,13 @@ class OssieSource:
                     f"Ossie metric {name!r} has no expression: expected"
                     " `expression.sql` or a non-empty `expression.dialects`."
                 )
-            if self.get_metric(name) is not None:
+            if name in self._metric_names:
                 logger.warning(
                     "OssieSource: duplicate metric name %r; lookups return the"
                     " first one declared.",
                     name,
                 )
+            self._metric_names.add(name)
             extra = overlay.get(name, {})
             self._metrics.append(
                 MetricDefinition(
@@ -764,7 +791,13 @@ class OssieSource:
         if not isinstance(expression, dict):
             return ""
         raw_dialects = expression.get("dialects")
-        dialects = [d for d in (raw_dialects or []) if isinstance(d, dict)]
+        # An entry with an empty expression is no expression: kept, it would
+        # be chosen ahead of a real one in a later dialect or in `sql`.
+        dialects = [
+            d
+            for d in (raw_dialects or [])
+            if isinstance(d, dict) and as_text(d.get("expression"))
+        ]
         by_dialect = {
             as_text(d.get("dialect")).casefold(): as_text(d.get("expression"))
             for d in dialects
@@ -811,7 +844,7 @@ class OssieSource:
         )
         payload = blocks.pop(self._vendor, {})
         if blocks:
-            self._foreign_extensions[model_name] = blocks
+            self._foreign_extensions.setdefault(model_name, {}).update(blocks)
         if isinstance(payload, dict):
             return payload
         logger.warning(
@@ -890,7 +923,7 @@ class OssieSource:
     def get_extras(self) -> dict[str, Any]:
         """Ossie content this library carries but does not interpret.
 
-        Two sections, each keyed by semantic-model name first:
+        Three sections, each keyed by model name first:
 
         ``ossie_ai_context``
             Every ``ai_context`` in the file, grouped by model then by entity

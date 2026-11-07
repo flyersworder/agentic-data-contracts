@@ -311,7 +311,8 @@ def test_a_renamed_fields_description_lands_on_its_column(tmp_path: Path) -> Non
     }
     schema = _load(tmp_path, doc).get_table_schema("public", "orders")
     assert schema is not None
-    assert {c.name: c.description for c in schema.columns}["amount"] == "Gross amount"
+    description = {c.name: c.description for c in schema.columns}["amount"]
+    assert description == "Gross amount (Ossie field: order_amount)"
 
 
 # --- dialect names match whatever their case --------------------------------
@@ -526,3 +527,94 @@ def test_a_field_with_only_a_bi_formula_registers_no_column(tmp_path: Path) -> N
         {"name": "Profit", "expression": _dialects(("SIGMA", "Profit"))}
     )
     assert "Profit" not in _columns(_load(tmp_path, doc), "public.orders")
+
+
+# --- final review: field expressions, extension merging, empty entries ------
+
+
+def _with_field(expression: str, name: str = "f") -> dict[str, Any]:
+    doc = _flat()
+    doc["datasets"][0]["fields"].append(
+        {"name": name, "expression": {"sql": expression}}
+    )
+    return doc
+
+
+def test_an_unbalanced_quote_in_a_field_does_not_stop_the_load(tmp_path: Path) -> None:
+    """sqlglot raises TokenError, not ParseError, on an unterminated string."""
+    source = _load(tmp_path, _with_field("'unterminated"))
+    assert "f" not in _columns(source, "public.orders")
+
+
+@pytest.mark.parametrize("quoted", ["`amount_usd`", "[amount_usd]", '"amount_usd"'])
+def test_a_quoted_identifier_is_its_column_in_any_quoting(
+    tmp_path: Path, quoted: str
+) -> None:
+    source = _load(tmp_path, _with_field(quoted))
+    assert "amount_usd" in _columns(source, "public.orders")
+
+
+@pytest.mark.parametrize("value", ["current_date", "TRUE", "NULL", "current_user"])
+def test_a_keyword_or_niladic_function_is_not_a_column(
+    tmp_path: Path, value: str
+) -> None:
+    source = _load(tmp_path, _with_field(value))
+    assert value not in _columns(source, "public.orders")
+
+
+def test_same_named_legacy_models_keep_each_others_vendor_blocks(
+    tmp_path: Path,
+) -> None:
+    first = _flat()
+    second = _flat()
+    first.pop("version")
+    second.pop("version")
+    first["custom_extensions"] = [{"vendor_name": "SNOWFLAKE", "data": {"w": "A"}}]
+    second["custom_extensions"] = [{"vendor_name": "DBT", "data": {"p": "B"}}]
+    second["datasets"][0]["source"] = "analytics.public.orders_b"
+    source = _load(tmp_path, {"semantic_model": [first, second]})
+    blocks = source.get_extras()["ossie_custom_extensions"]["sales"]
+    assert set(blocks) == {"SNOWFLAKE", "DBT"}
+
+
+def test_an_empty_preferred_entry_does_not_hide_a_real_expression(
+    tmp_path: Path,
+) -> None:
+    expression = {
+        "sql": "SUM(orders.amount)",
+        "dialects": [{"dialect": "ANSI_SQL", "expression": ""}],
+    }
+    source = _load(tmp_path, _flat(metrics=[_metric(expression)]))
+    assert _get(source, "m").sql_expression == "SUM(orders.amount)"
+
+
+def test_the_unmatched_overlay_warning_names_the_callers_vendor(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    doc = _flat(
+        metrics=[_metric({"sql": "COUNT(*)"})],
+        custom_extensions=[
+            {"vendor_name": "ACME_GOV", "data": {"metrics": {"typo": {}}}}
+        ],
+    )
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with caplog.at_level(logging.WARNING):
+        OssieSource(path, vendor="ACME_GOV")
+    assert "ACME_GOV" in caplog.text
+    assert "AGENTIC_DATA_CONTRACTS" not in caplog.text
+
+
+def test_a_renamed_columns_description_names_its_field() -> None:
+    """Metrics still say `customer_name`; the agent needs the bridge to `name`."""
+    schema = OssieSource(NVIDIA).get_table_schema("public", "customers")
+    assert schema is not None
+    by_name = {c.name: c.description for c in schema.columns}
+    assert "customer_name" in by_name["name"]
+
+
+def test_a_tables_description_lists_its_computed_fields() -> None:
+    schema = OssieSource(NVIDIA).get_table_schema("public", "orders")
+    assert schema is not None
+    assert "net_total" in schema.description
+    assert "subtotal - discount" in schema.description

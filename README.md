@@ -876,15 +876,20 @@ semantic:
     path: "./semantic/model.yml"
 ```
 
-Ossie standardises what a metric *is*; this library enforces what an agent may *do* with it. So the spec is a strict subset of the vocabulary here — an Ossie `Metric` carries only `name`, `expression`, `description`, `datatype`, and `ai_context`.
+Ossie standardises what a metric *is*; this library enforces what an agent may *do* with it. So the spec is a strict subset of the vocabulary here — an Ossie `Metric` carries only `name`, `expression`, `description`, `datatype`, `ai_context`, and `custom_extensions`.
+
+A document is one model, with its `name`, `datasets`, `relationships` and `metrics` at the root, as the current spec defines it. A file in the earlier shape, with models in a `semantic_model` list, is still read and logs a warning saying it is legacy. Nothing in a model is dropped silently: a file with neither shape or a model with no datasets is refused at load, as is a dataset, field or metric with no name or a metric with no expression, rather than loading as less than it declares.
 
 | Ossie | Read as |
 | --- | --- |
-| `datasets[].source` + `fields[]` | Table schemas. A three-part `database.schema.table` is keyed on its trailing `schema.table`; a query-backed dataset registers no table |
-| `metrics[].expression.dialects[]` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then `Ossie_SQL_2026`, then the first declared entry |
-| `relationships[]` | `Relationship`, with cardinality *derived from both sides* — see below |
+| `datasets[].source` + `fields[]` | Table schemas of *physical* columns. A field's column is the one its expression reads, in any identifier quoting: a field `customer_name` over `name` registers `name`, and a computed field (`subtotal - discount`) registers none. Because metric expressions still name fields, `describe_table` carries the bridge: the column's description ends `(Ossie field: customer_name)`, and the table's lists its computed fields as `net_total = subtotal - discount`. A `drill_by` in our vendor block names the physical column. A three-part `database.schema.table` is keyed on its trailing `schema.table`; a query-backed dataset registers no table |
+| `metrics[].expression` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then Ossie SQL (`expression.sql`, which overrides a `dialects` entry for `OSSIE_SQL_2026`), then the first declared entry that is SQL. Dialect names are matched ignoring case. A formula language from Ossie's dialect registry (`TABLEAU`, `DAX`, `MDX`, `MAQL`, `SIGMA`, `THOUGHTSPOT`, `HOLISTICS_AQL`, `SPARQL`) is never the fallback, though you get it if you ask for it with `dialect=`. A metric written only in those keeps an empty `sql_expression`, and its `untranslated` reason, which `lookup_metric` shows the agent, quotes the formula |
+| `datasets[].metrics[]` | A metric named `dataset.metric`, as the spec references it |
+| `relationships[]` | `Relationship` between the physical columns its fields read, with cardinality *derived from both sides* — see below |
 | `ai_context` (anywhere) | Carried into `get_extras()["ossie_ai_context"]`, keyed by model then entity kind, never interpreted |
-| `custom_extensions[]` | Ours read as real vocabulary; every other vendor's carried into `get_extras()["ossie_custom_extensions"]`, keyed by model then vendor |
+| `custom_extensions[]` | Ours, at the model level, read as real vocabulary. Every other vendor's carried: model-level blocks into `get_extras()["ossie_custom_extensions"]` (by model, then vendor), and blocks on a dataset, field, metric or relationship into `get_extras()["ossie_entity_extensions"]` (by model, entity kind, entity name, then vendor) |
+
+Metric expressions, of either scope, are passed through unchanged. They name the model's datasets and fields, which may be renamed or computed, not physical columns, so Ossie gives a metric no `source_model`: set one in our vendor block when the expression does read one table as written.
 
 **Cardinality.** Ossie never writes the join type down; it is implied by which endpoints are keys. The spec documents `to` as the one side, but nothing validates that — and trusting it is not free, because `RelationshipChecker` fires its fan-out warning only on `one_to_many`. So both sides are checked:
 
@@ -899,41 +904,41 @@ Keys are optional in Ossie, and their absence is not evidence of fan-out — whe
 
 Composite-key relationships are **skipped with a warning** rather than split into one edge per column pair — our `Relationship` has single-column endpoints, and splitting would assert two joins that are each individually wrong. Declare those in a `YamlSource` overlay.
 
-**Governance fields.** Ownership, review dates, tiers, decompositions, and the metric-impact graph have no home in the Ossie spec, and every `$def` in its JSON Schema sets `additionalProperties: false` — so they cannot be added as extra keys. They ride in the spec's own escape hatch, `custom_extensions`, under this project's vendor name:
+**Governance fields.** Ownership, review dates, tiers, decompositions, and the metric-impact graph have no home in the Ossie spec, and every entity in its JSON Schema (model, dataset, field, metric, relationship) sets `additionalProperties: false` — so they cannot be added as extra keys. They ride in the spec's own escape hatch, `custom_extensions`, under this project's vendor name, in the model-level block. Metrics are keyed by name, a dataset-scoped one as `dataset.metric`:
 
 ```yaml
-    custom_extensions:
-      - vendor_name: AGENTIC_DATA_CONTRACTS
-        data: |
-          {
-            "metrics": {
-              "total_sales": {
-                "business_owner": "revenue-analytics",
-                "operational_owner": "data-platform",
-                "last_reviewed": "2026-05-01",
-                "tier": ["gold"],
-                "domains": ["sales"],
-                "decompositions": [
-                  {"operator": "sum", "operands": ["total_profit", "total_cost"]}
-                ],
-                "drill_by": [
-                  {"dimension": "region", "column": "public.customer.c_region"}
-                ]
-              }
-            },
-            "metric_impacts": [
-              {"from": "total_cost", "to": "total_profit",
-               "direction": "negative", "confidence": "verified",
-               "evidence": "Margin bridge reconciled 2026-Q1."}
+custom_extensions:
+  - vendor_name: AGENTIC_DATA_CONTRACTS
+    data: |
+      {
+        "metrics": {
+          "total_sales": {
+            "business_owner": "revenue-analytics",
+            "operational_owner": "data-platform",
+            "last_reviewed": "2026-05-01",
+            "tier": ["gold"],
+            "domains": ["sales"],
+            "decompositions": [
+              {"operator": "sum", "operands": ["total_profit", "total_cost"]}
+            ],
+            "drill_by": [
+              {"dimension": "region", "column": "public.customer.c_region"}
             ]
           }
+        },
+        "metric_impacts": [
+          {"from": "total_cost", "to": "total_profit",
+           "direction": "negative", "confidence": "verified",
+           "evidence": "Margin bridge reconciled 2026-Q1."}
+        ]
+      }
 ```
 
 Ossie stores extension payloads as a JSON *string*, so `data` is JSON nested inside YAML (a plain YAML mapping is accepted too). Restored decompositions and `drill_by` go through the same validators as `YamlSource`, failing loudly at load, and a bare `"tier": "gold"` is promoted to a list exactly as `YamlSource` does. Another vendor's malformed payload is carried verbatim and logged rather than raised on — a neighbour's typo must not stop your contract from being enforced.
 
 `expected_extras` does not apply to an Ossie source: its extras are synthesized by the parser under fixed keys, not authored as free top-level sections. Declaring it on a non-`yaml` source logs a warning rather than being silently dropped.
 
-> The spec is at `0.2.0.dev0` with no tagged releases yet, so expect churn. `dialect` is deliberately treated as an opaque string and never validated against the enum, since the accepted expression-language proposal adds `Ossie_SQL_2026` and makes it the default.
+> The spec is at `0.2.0.dev0` with no tagged releases yet, so expect churn. `dialect` is deliberately treated as an opaque string and never validated, as the spec itself accepts any non-empty string. Producers that export Ossie, such as NVIDIA Auto-Ontology's Import / Export, are read directly; `tests/fixtures/ossie_flat_nvidia_auto_ontology.yml` is that converter's real output. It is a record of what a producer emits, not a spec-valid example: its metric reads `orders.subtotal`, a column that no field declares, which the spec's name-resolution rules do not allow.
 
 ## Table Relationships
 

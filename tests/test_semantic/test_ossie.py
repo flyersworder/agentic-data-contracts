@@ -430,13 +430,14 @@ def test_each_model_keeps_its_own_ai_context() -> None:
 
 
 def _convention_model(extension: dict, *, name: str = "retail") -> dict:
-    """One Ossie semantic_model carrying our vendor block as a JSON string."""
+    """One Ossie model carrying our vendor block as a JSON string."""
     return {
         "name": name,
+        "datasets": [{"name": "events", "source": "analytics.events"}],
         "metrics": [
-            {"name": "activations"},
-            {"name": "volume"},
-            {"name": "rate"},
+            {"name": "activations", "expression": {"sql": "COUNT(*)"}},
+            {"name": "volume", "expression": {"sql": "COUNT(*)"}},
+            {"name": "rate", "expression": {"sql": "AVG(events.rate)"}},
         ],
         "custom_extensions": [
             {

@@ -95,6 +95,25 @@ _OSSIE_SQL = "OSSIE_SQL_2026"
 #: spelling and the spec's ``OSSIE_SQL_2026`` name one dialect.
 _DEFAULT_DIALECT_PREFERENCE = ("ANSI_SQL", _OSSIE_SQL)
 
+#: Dialects in Ossie's registry (extensions/dialects.md) that are formula or
+#: query languages rather than SQL. The fallback never picks one: handed over
+#: as SQL, a Tableau or DAX formula is a query the agent would run or "fix".
+#: An unregistered dialect is still a fallback, since a vendor's own name
+#: (``DENODO``, ``DUCKDB``) may well be SQL. Compared case-folded.
+_NON_SQL_DIALECTS = frozenset(
+    d.casefold()
+    for d in (
+        "TABLEAU",
+        "DAX",
+        "MDX",
+        "MAQL",
+        "SIGMA",
+        "THOUGHTSPOT",
+        "HOLISTICS_AQL",
+        "SPARQL",
+    )
+)
+
 #: An unquoted, optionally qualified column reference: ``amount`` or
 #: ``source.amount``. Read without sqlglot, which parses some bare words
 #: (``user``, ``current_date``) as functions rather than columns.
@@ -459,7 +478,15 @@ class OssieSource:
             self._record_ai_context(model_name, "fields", qualified, f)
             self._record_entity_extensions(model_name, "fields", qualified, f)
             expression = self._choose_expression(f)
-            column = _physical_column(expression) if expression else field_name
+            # A BI formula is no evidence of a column, and its field's name is
+            # what the BI tool calls it; it registers none, like a computed one.
+            column = (
+                _physical_column(expression)
+                if expression
+                else None
+                if self._bi_formulas(f)
+                else field_name
+            )
             field_columns[field_name] = column
             if column is None:
                 logger.debug(
@@ -636,7 +663,17 @@ class OssieSource:
             self._record_ai_context(model_name, "metrics", name, metric)
             self._record_entity_extensions(model_name, "metrics", name, metric)
             expression = self._choose_expression(metric)
-            if not expression:
+            # Written only in BI formula languages: valid Ossie with no SQL to
+            # run. Kept, with the formulas as the reason, as dbt and Cube
+            # report a metric they cannot express (#123).
+            formulas = [] if expression else self._bi_formulas(metric)
+            untranslated = (
+                "written only in non-SQL dialects, so there is no SQL"
+                f" expression to run; its definition: {'; '.join(formulas)}"
+                if formulas
+                else None
+            )
+            if not expression and not formulas:
                 raise ValueError(
                     f"Ossie metric {name!r} has no expression: expected"
                     " `expression.sql` or a non-empty `expression.dialects`."
@@ -653,6 +690,7 @@ class OssieSource:
                     name=name,
                     description=as_text(metric.get("description")),
                     sql_expression=expression,
+                    untranslated=untranslated,
                     source_model=as_text(extra.get("source_model")),
                     filters=as_list(extra.get("filters")),
                     domains=as_list(extra.get("domains")),
@@ -740,7 +778,25 @@ class OssieSource:
         for preferred in self._dialect_preference:
             if preferred in by_dialect:
                 return by_dialect[preferred]
-        return as_text(dialects[0].get("expression")) if dialects else ""
+        # The last resort is any declared entry *but* a BI formula: handed to
+        # the agent as SQL, `SUM([Profit])` reads as a query to run or repair.
+        for d in dialects:
+            if as_text(d.get("dialect")).casefold() not in _NON_SQL_DIALECTS:
+                return as_text(d.get("expression"))
+        return ""
+
+    @staticmethod
+    def _bi_formulas(entity: dict[str, Any]) -> list[str]:
+        """``DIALECT: formula`` for each non-SQL entry an entity declares."""
+        expression = entity.get("expression")
+        if not isinstance(expression, dict):
+            return []
+        return [
+            f"{as_text(d.get('dialect'))}: {as_text(d.get('expression'))}"
+            for d in expression.get("dialects") or []
+            if isinstance(d, dict)
+            and as_text(d.get("dialect")).casefold() in _NON_SQL_DIALECTS
+        ]
 
     # -- extensions -------------------------------------------------------
 

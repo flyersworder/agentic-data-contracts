@@ -883,7 +883,7 @@ A document is one model, with its `name`, `datasets`, `relationships` and `metri
 | Ossie | Read as |
 | --- | --- |
 | `datasets[].source` + `fields[]` | Table schemas of *physical* columns. A field's column is the one its expression reads: a field `customer_name` over `name` registers `name`, and a computed field (`subtotal - discount`) registers none. A three-part `database.schema.table` is keyed on its trailing `schema.table`; a query-backed dataset registers no table |
-| `metrics[].expression` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then Ossie SQL (`expression.sql`, which overrides a `dialects` entry for `OSSIE_SQL_2026`), then the first declared entry. Dialect names are matched ignoring case |
+| `metrics[].expression` | `sql_expression`, resolved deterministically — your `dialect=` first, then `ANSI_SQL`, then Ossie SQL (`expression.sql`, which overrides a `dialects` entry for `OSSIE_SQL_2026`), then the first declared entry that is SQL. Dialect names are matched ignoring case. A formula language from Ossie's dialect registry (`TABLEAU`, `DAX`, `MDX`, `MAQL`, `SIGMA`, `THOUGHTSPOT`, `HOLISTICS_AQL`, `SPARQL`) is never the fallback, though you get it if you ask for it with `dialect=`. A metric written only in those keeps an empty `sql_expression`, and its `untranslated` reason, which `lookup_metric` shows the agent, quotes the formula |
 | `datasets[].metrics[]` | A metric named `dataset.metric`, as the spec references it |
 | `relationships[]` | `Relationship` between the physical columns its fields read, with cardinality *derived from both sides* — see below |
 | `ai_context` (anywhere) | Carried into `get_extras()["ossie_ai_context"]`, keyed by model then entity kind, never interpreted |

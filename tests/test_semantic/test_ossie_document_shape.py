@@ -465,3 +465,64 @@ def test_a_relationship_on_a_computed_field_is_skipped_by_name(
         source = _load(tmp_path, _joined("id + 0"))
     assert source.get_relationships() == []
     assert "orders_to_customers" in caplog.text
+
+
+# --- a BI formula is never handed over as SQL -------------------------------
+
+
+def _dialects(*pairs: tuple[str, str]) -> dict[str, Any]:
+    return {"dialects": [{"dialect": d, "expression": e} for d, e in pairs]}
+
+
+def test_the_fallback_skips_a_bi_formula_for_a_sql_dialect(tmp_path: Path) -> None:
+    """`SUM([Profit])` is Tableau's calculation language, not SQL."""
+    expression = _dialects(
+        ("TABLEAU", "SUM([Profit])"), ("SNOWFLAKE", "SUM(orders.profit)")
+    )
+    source = _load(tmp_path, _flat(metrics=[_metric(expression)]))
+    assert _get(source, "m").sql_expression == "SUM(orders.profit)"
+
+
+def test_a_bi_dialect_is_recognised_whatever_its_case(tmp_path: Path) -> None:
+    expression = _dialects(("dax", "SUM(Orders[Profit])"), ("DUCKDB", "SUM(profit)"))
+    source = _load(tmp_path, _flat(metrics=[_metric(expression)]))
+    assert _get(source, "m").sql_expression == "SUM(profit)"
+
+
+def test_a_bi_dialect_the_caller_asks_for_is_still_returned(tmp_path: Path) -> None:
+    expression = _dialects(
+        ("ANSI_SQL", "SUM(orders.profit)"), ("TABLEAU", "SUM([Profit])")
+    )
+    path = tmp_path / "model.yml"
+    path.write_text(yaml.safe_dump(_flat(metrics=[_metric(expression)])))
+    source = OssieSource(path, dialect="TABLEAU")
+    assert _get(source, "m").sql_expression == "SUM([Profit])"
+
+
+def test_an_unregistered_dialect_is_still_a_fallback(tmp_path: Path) -> None:
+    """`DENODO` may well be SQL; only dialects known not to be are skipped."""
+    expression = _dialects(("DENODO", "SUM(orders.profit)"))
+    source = _load(tmp_path, _flat(metrics=[_metric(expression)]))
+    assert _get(source, "m").sql_expression == "SUM(orders.profit)"
+
+
+def test_a_metric_with_only_bi_formulas_is_kept_as_untranslated(
+    tmp_path: Path,
+) -> None:
+    """Valid Ossie with no SQL, as dbt and Cube report theirs (#123): the
+    agent learns the metric exists and its formula, labelled as not SQL."""
+    metrics = [_metric(_dialects(("TABLEAU", "SUM([Profit])")), name="profit_ratio")]
+    metric = _get(_load(tmp_path, _flat(metrics=metrics)), "profit_ratio")
+    assert metric.sql_expression == ""
+    assert metric.untranslated is not None
+    assert "TABLEAU" in metric.untranslated
+    assert "SUM([Profit])" in metric.untranslated
+
+
+def test_a_field_with_only_a_bi_formula_registers_no_column(tmp_path: Path) -> None:
+    """Its name is what Tableau calls it, not evidence of a column."""
+    doc = _flat()
+    doc["datasets"][0]["fields"].append(
+        {"name": "Profit", "expression": _dialects(("SIGMA", "Profit"))}
+    )
+    assert "Profit" not in _columns(_load(tmp_path, doc), "public.orders")

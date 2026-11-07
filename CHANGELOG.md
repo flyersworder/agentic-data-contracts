@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **A BI formula is never handed to the agent as SQL.** When no preferred dialect is present, an Ossie metric fell back to its first declared expression, whatever its language, so a Tableau export's `SUM([Profit])` reached `lookup_metric` as the metric's SQL. The fallback now skips the formula languages in Ossie's dialect registry (`TABLEAU`, `DAX`, `MDX`, `MAQL`, `SIGMA`, `THOUGHTSPOT`, `HOLISTICS_AQL`, `SPARQL`); asking for one with `dialect=` still returns it, and an unregistered dialect is still a fallback. A metric written only in those is kept with an empty `sql_expression` and an `untranslated` reason quoting each formula, as dbt and Cube report a metric they cannot express. A field written only in one registers no column.
 - **Dataset-scoped Ossie metrics** (`datasets[].metrics`, apache/ossie#591), which were not read. Each is named `dataset.metric`, the form the spec references it by. Our vendor block's `metrics` reaches it by that name, and a key in the bare form is named in a warning that suggests the scoped one. Its expression is passed through unchanged, as a model-scoped one's is.
 
 ### Changed

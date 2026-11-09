@@ -985,6 +985,31 @@ relationships:
 
 The agent sees these in its system prompt and uses them to write correct JOINs instead of guessing from column names.
 
+### History tables
+
+A history table (a slowly changing dimension) keeps one row per version of a key, each with a validity interval. Declared `many_to_one`, it looks safe, but a join on the key alone matches every version and multiplies the facts. An account that moved region once has two history rows, so each of its orders is counted twice, and nothing errors or comes back NULL. The fan-out check does not fire either, because the declared cardinality is `many_to_one`.
+
+Pick the version rule the business reports by, and declare it as the join's `required_filter`. The agent sees that filter as a condition it must apply, so it should be the rule itself:
+
+```yaml
+relationships:
+  # Region as it was when the order was placed (validity is half-open:
+  # a version's valid_to is the next version's valid_from).
+  - from: sales.orders.account_id
+    to: sales.account_history.account_id
+    type: many_to_one
+    required_filter: "order_date >= valid_from AND (valid_to IS NULL OR order_date < valid_to)"
+    description: "One row per account version; join the version valid on the order date."
+```
+
+To report by the account's region today instead, declare `required_filter: "valid_to IS NULL"`. The two rules attribute history differently, and with an inner join each drops different facts: the current rule drops orders of accounts that no longer have a current version, and the as-of rule drops orders that fall outside every interval.
+
+With either rule, the join on `account_id` alone draws a warning, and the rule passes in `WHERE` or in the join's `ON`. The as-of rule also flags a join that picks only the current version or omits the `valid_from` bound. The check matches column names, though, not tables or logic:
+
+- another table's column of the same name satisfies it, so with several history tables a `p.valid_to IS NULL` meant for one also covers the others;
+- a filter that keeps several versions, such as `valid_to IS NOT NULL`, satisfies the current rule;
+- in a `LEFT JOIN`, the as-of rule's `order_date` sits on the preserved side, where the `ON` clause removes no rows, so a correct as-of left join is still reported as missing `order_date`.
+
 ### Relationship Validation
 
 When a `SemanticSource` is passed to the `Validator`, declared relationships are actively validated against the agent's SQL:

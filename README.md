@@ -985,6 +985,26 @@ relationships:
 
 The agent sees these in its system prompt and uses them to write correct JOINs instead of guessing from column names.
 
+### History tables
+
+A history table (a slowly changing dimension) keeps one row per version of a key, each with a validity interval. Declared `many_to_one`, it looks safe, but a join on the key alone matches every version and multiplies the facts. An account that moved region once has two history rows, so each of its orders is counted twice, and nothing errors or comes back NULL. The fan-out check does not fire either, because the declared cardinality is `many_to_one`.
+
+Declare the validity column as the join's `required_filter`:
+
+```yaml
+relationships:
+  - from: sales.orders.account_id
+    to: sales.account_history.account_id
+    type: many_to_one
+    required_filter: "valid_to IS NULL"
+    description: >
+      One row per account version. Report regions as of the order date:
+      o.order_date >= h.valid_from AND (h.valid_to IS NULL OR o.order_date <= h.valid_to).
+      Filter to valid_to IS NULL only when the question asks for the current region.
+```
+
+The join on `account_id` alone now draws a warning, and both ways of choosing a version pass: the current one (`WHERE h.valid_to IS NULL`) and the one valid at the fact's date (the interval condition, in `WHERE` or in the join's `ON`). The checker sees only that `valid_to` is constrained, not which version was chosen. Current and as-of give the same total split differently, so say in `description` which one the business means.
+
 ### Relationship Validation
 
 When a `SemanticSource` is passed to the `Validator`, declared relationships are actively validated against the agent's SQL:

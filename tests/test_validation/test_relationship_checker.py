@@ -823,3 +823,70 @@ class TestJoinShapes:
             f" ON l.source_id = i.item_id AND l.{self._FILTER}"
         )
         assert self._checker().check_joins(ast) == []
+
+
+class TestHistoryTable:
+    """A history (slowly changing) table holds several rows per key, one per
+    validity interval, so `many_to_one` is true only once a version is chosen.
+
+    Pins the README recipe: the declaration carries `required_filter` on the
+    validity column, which flags the join that picks no version and accepts
+    both ways of picking one (current, or as of the fact's date).
+    """
+
+    _NAIVE = (
+        "SELECT h.region, SUM(o.amount) FROM sales.orders o"
+        " JOIN sales.account_history h ON o.account_id = h.account_id"
+        " GROUP BY h.region"
+    )
+
+    @staticmethod
+    def _checker(required_filter: str | None) -> RelationshipChecker:
+        return RelationshipChecker(
+            [
+                Relationship(
+                    from_="sales.orders.account_id",
+                    to="sales.account_history.account_id",
+                    type="many_to_one",
+                    required_filter=required_filter,
+                )
+            ]
+        )
+
+    def test_without_required_filter_the_naive_join_is_silent(self) -> None:
+        """Why the recipe exists: cardinality alone cannot see the versions."""
+        assert self._checker(None).check_joins(_parse(self._NAIVE)) == []
+
+    def test_naive_join_warns(self) -> None:
+        warnings = self._checker("valid_to IS NULL").check_joins(_parse(self._NAIVE))
+        assert len(warnings) == 1
+        assert "does not filter on: valid_to" in warnings[0]
+
+    def test_current_version_join_accepted(self) -> None:
+        ast = _parse(
+            "SELECT h.region, SUM(o.amount) FROM sales.orders o"
+            " JOIN sales.account_history h ON o.account_id = h.account_id"
+            " WHERE h.valid_to IS NULL GROUP BY h.region"
+        )
+        assert self._checker("valid_to IS NULL").check_joins(ast) == []
+
+    def test_as_of_join_accepted(self) -> None:
+        ast = _parse(
+            "SELECT h.region, SUM(o.amount) FROM sales.orders o"
+            " JOIN sales.account_history h ON o.account_id = h.account_id"
+            " AND o.order_date >= h.valid_from"
+            " AND (h.valid_to IS NULL OR o.order_date <= h.valid_to)"
+            " GROUP BY h.region"
+        )
+        assert self._checker("valid_to IS NULL").check_joins(ast) == []
+
+    def test_as_of_left_join_accepted(self) -> None:
+        """The history side is null-extended, so its ON clause carries the filter."""
+        ast = _parse(
+            "SELECT h.region, SUM(o.amount) FROM sales.orders o"
+            " LEFT JOIN sales.account_history h ON o.account_id = h.account_id"
+            " AND o.order_date >= h.valid_from"
+            " AND (h.valid_to IS NULL OR o.order_date <= h.valid_to)"
+            " GROUP BY h.region"
+        )
+        assert self._checker("valid_to IS NULL").check_joins(ast) == []

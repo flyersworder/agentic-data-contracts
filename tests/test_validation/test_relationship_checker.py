@@ -829,15 +829,19 @@ class TestHistoryTable:
     """A history (slowly changing) table holds several rows per key, one per
     validity interval, so `many_to_one` is true only once a version is chosen.
 
-    Pins the README recipe: the declaration carries `required_filter` on the
-    validity column, which flags the join that picks no version and accepts
-    both ways of picking one (current, or as of the fact's date).
+    Pins the README recipe: `required_filter` is the version rule the business
+    chose (current, or as of the fact's date), and the limitations it states.
     """
 
-    _NAIVE = (
+    _CURRENT = "valid_to IS NULL"
+    _AS_OF = "order_date >= valid_from AND (valid_to IS NULL OR order_date < valid_to)"
+    _JOIN = (
         "SELECT h.region, SUM(o.amount) FROM sales.orders o"
-        " JOIN sales.account_history h ON o.account_id = h.account_id"
-        " GROUP BY h.region"
+        " {kind} sales.account_history h ON o.account_id = h.account_id"
+    )
+    _INTERVAL = (
+        "o.order_date >= h.valid_from"
+        " AND (h.valid_to IS NULL OR o.order_date < h.valid_to)"
     )
 
     @staticmethod
@@ -853,40 +857,71 @@ class TestHistoryTable:
             ]
         )
 
-    def test_without_required_filter_the_naive_join_is_silent(self) -> None:
-        """Why the recipe exists: cardinality alone cannot see the versions."""
-        assert self._checker(None).check_joins(_parse(self._NAIVE)) == []
+    def _check(
+        self, required_filter: str | None, tail: str = "", kind: str = "JOIN"
+    ) -> list[str]:
+        sql = self._JOIN.format(kind=kind) + tail + " GROUP BY h.region"
+        return self._checker(required_filter).check_joins(_parse(sql))
 
-    def test_naive_join_warns(self) -> None:
-        warnings = self._checker("valid_to IS NULL").check_joins(_parse(self._NAIVE))
+    def test_without_required_filter_the_key_only_join_is_silent(self) -> None:
+        """Why the recipe exists: cardinality alone cannot see the versions."""
+        assert self._check(None) == []
+
+    # ── current version ────────────────────────────────────────────────────
+
+    def test_current_key_only_join_warns(self) -> None:
+        warnings = self._check(self._CURRENT)
         assert len(warnings) == 1
         assert "does not filter on: valid_to" in warnings[0]
 
-    def test_current_version_join_accepted(self) -> None:
-        ast = _parse(
-            "SELECT h.region, SUM(o.amount) FROM sales.orders o"
-            " JOIN sales.account_history h ON o.account_id = h.account_id"
-            " WHERE h.valid_to IS NULL GROUP BY h.region"
-        )
-        assert self._checker("valid_to IS NULL").check_joins(ast) == []
+    def test_current_in_where_accepted(self) -> None:
+        assert self._check(self._CURRENT, " WHERE h.valid_to IS NULL") == []
 
-    def test_as_of_join_accepted(self) -> None:
-        ast = _parse(
-            "SELECT h.region, SUM(o.amount) FROM sales.orders o"
-            " JOIN sales.account_history h ON o.account_id = h.account_id"
-            " AND o.order_date >= h.valid_from"
-            " AND (h.valid_to IS NULL OR o.order_date <= h.valid_to)"
-            " GROUP BY h.region"
-        )
-        assert self._checker("valid_to IS NULL").check_joins(ast) == []
+    def test_current_in_left_join_on_accepted(self) -> None:
+        tail = " AND h.valid_to IS NULL"
+        assert self._check(self._CURRENT, tail, kind="LEFT JOIN") == []
 
-    def test_as_of_left_join_accepted(self) -> None:
-        """The history side is null-extended, so its ON clause carries the filter."""
-        ast = _parse(
-            "SELECT h.region, SUM(o.amount) FROM sales.orders o"
-            " LEFT JOIN sales.account_history h ON o.account_id = h.account_id"
-            " AND o.order_date >= h.valid_from"
-            " AND (h.valid_to IS NULL OR o.order_date <= h.valid_to)"
-            " GROUP BY h.region"
+    # ── as of the fact's date ──────────────────────────────────────────────
+
+    def test_as_of_key_only_join_warns(self) -> None:
+        warnings = self._check(self._AS_OF)
+        assert len(warnings) == 1
+        assert "does not filter on: order_date, valid_from, valid_to" in warnings[0]
+
+    def test_as_of_rejects_current_only(self) -> None:
+        warnings = self._check(self._AS_OF, " WHERE h.valid_to IS NULL")
+        assert len(warnings) == 1
+        assert "does not filter on: order_date, valid_from" in warnings[0]
+
+    def test_as_of_rejects_interval_without_lower_bound(self) -> None:
+        tail = " AND (h.valid_to IS NULL OR o.order_date < h.valid_to)"
+        warnings = self._check(self._AS_OF, tail)
+        assert len(warnings) == 1
+        assert "does not filter on: valid_from" in warnings[0]
+
+    def test_as_of_in_on_accepted(self) -> None:
+        assert self._check(self._AS_OF, " AND " + self._INTERVAL) == []
+
+    def test_as_of_in_where_accepted(self) -> None:
+        assert self._check(self._AS_OF, " WHERE " + self._INTERVAL) == []
+
+    # ── limitations the README states ──────────────────────────────────────
+
+    def test_limitation_another_tables_valid_to_satisfies_it(self) -> None:
+        """Columns are matched by name, not by the table they belong to."""
+        tail = (
+            " JOIN sales.product_history p ON o.product_id = p.product_id"
+            " WHERE p.valid_to IS NULL"
         )
-        assert self._checker("valid_to IS NULL").check_joins(ast) == []
+        assert self._check(self._CURRENT, tail) == []
+
+    def test_limitation_a_multi_version_filter_satisfies_it(self) -> None:
+        """Presence of the column is checked, not that one version survives."""
+        assert self._check(self._CURRENT, " WHERE h.valid_to IS NOT NULL") == []
+
+    def test_limitation_as_of_left_join_warns(self) -> None:
+        """`order_date` sits on the preserved side, where ON removes no rows."""
+        tail = " AND " + self._INTERVAL
+        warnings = self._check(self._AS_OF, tail, kind="LEFT JOIN")
+        assert len(warnings) == 1
+        assert "does not filter on: order_date" in warnings[0]

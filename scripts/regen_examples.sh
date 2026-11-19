@@ -13,6 +13,10 @@
 #     setup noise, not a demonstrated behaviour — if the DB failed to build,
 #     every section below it would differ anyway.
 #   - `age_days` is measured against today's date.
+#   - `elapsed_seconds` / `seconds_remaining` in a session report are wall-clock
+#     time since the session's first call. They round to 0.0 locally, but a
+#     slow runner crosses 0.05s; `retries_remaining` and the token and cost
+#     budgets beside them stay exact.
 # Add a scrub only for values that move on their own; anything else moving is
 # a real diff.
 set -euo pipefail
@@ -22,7 +26,9 @@ for d in revenue_agent growth_agent ops_agent; do
   # Redirected, not piped: a pipeline would mask the interpreter's exit status.
   uv run python "examples/$d/agent.py" > /tmp/example_raw.txt
   sed -E -e '/^Sample database created at /d' \
-         -e 's/age_days=[0-9]+/age_days=N/' /tmp/example_raw.txt \
+         -e 's/age_days=[0-9]+/age_days=N/' \
+         -e 's/"(elapsed_seconds|seconds_remaining)": [0-9.]+/"\1": T/g' \
+         /tmp/example_raw.txt \
     > "examples/$d/expected_output.txt"
   echo "regenerated examples/$d/expected_output.txt"
 done

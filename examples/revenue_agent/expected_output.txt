@@ -21,7 +21,7 @@ Column-level discovery is still available via describe_table:
   cost: $n/a, rows: 1
 
 === Query Results ===
-{"columns": ["region", "revenue"], "rows": [["Asia Pacific", "800.00"], ["Europe", "7200.00"], ["North America", "2700.00"]], "row_count": 3, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 3, "tokens_remaining": 50000, "cost_remaining_usd": 5.0, "seconds_remaining": 300.0}}}
+{"columns": ["region", "revenue"], "rows": [["Asia Pacific", "800.00"], ["Europe", "7200.00"], ["North America", "2700.00"]], "row_count": 3, "session": {"remaining": {"elapsed_seconds": T, "retries_remaining": 3, "tokens_remaining": 50000, "cost_remaining_usd": 5.0, "seconds_remaining": T}}}
 
 === Lookup Relationships (orders) ===
 {"table": "analytics.orders", "relationships": [{"from": "analytics.orders.customer_id", "to": "analytics.customers.id", "type": "many_to_one", "description": "Join orders to customers for region-level breakdowns. Every order has exactly one customer.\n", "required_filter": "status != 'cancelled'"}]}

@@ -110,7 +110,9 @@ jobs:
           for d in revenue_agent growth_agent ops_agent; do
             uv run python "examples/$d/agent.py" > out.txt
             sed -E -e '/^Sample database created at /d' \
-                   -e 's/age_days=[0-9]+/age_days=N/' out.txt > got.txt
+                   -e 's/age_days=[0-9]+/age_days=N/' \
+                   -e 's/"(elapsed_seconds|seconds_remaining)": [0-9.]+/"\1": T/g' \
+                   out.txt > got.txt
             diff -u "examples/$d/expected_output.txt" got.txt
           done
       - name: schema-drift preflight prints its documented report

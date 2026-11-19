@@ -20,16 +20,16 @@ Query: What's our MTTR by severity for incidents this week?
 LOG:
 - Blocked columns in SELECT: user_email
 
-{"columns": ["id", "severity", "user_email"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}}}
+{"columns": ["id", "severity", "user_email"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": T, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": T}}}
 
 === Second log-level audit (deploy metadata) ===
 LOG:
 - Blocked columns in SELECT: commit_sha
 
-{"columns": ["id", "service_id", "commit_sha", "success"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}}}
+{"columns": ["id", "service_id", "commit_sha", "success"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": T, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": T}}}
 
 === MTTR by severity (last 7 days) ===
-{"columns": ["severity", "mttr_min", "n"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}}}
+{"columns": ["severity", "mttr_min", "n"], "rows": [], "row_count": 0, "session": {"remaining": {"elapsed_seconds": T, "retries_remaining": 2, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": T}}}
 
 === Stale-review findings (threshold=90 days) ===
   [domain] reliability — age_days=N
@@ -48,7 +48,7 @@ As sre_lead@co.com on sre.deploys:
 As intern@co.com on sre.deploys (blocklisted):
   BLOCKED — Violations:
 - Tables restricted to other principals (caller: 'intern@co.com'): sre.deploys
-Remaining: {"elapsed_seconds": 0.0, "retries_remaining": 1, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}
+Remaining: {"elapsed_seconds": T, "retries_remaining": 1, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": T}
 
 As intern@co.com on sre.incidents (no principal gate — per-table scope):
   allowed — 3 rows returned
@@ -58,12 +58,12 @@ As intern@co.com on sre.incidents (no principal gate — per-table scope):
 As sre_lead@co.com on customer_id (not exempted from rule):
   BLOCKED — Violations:
 - Blocked columns in SELECT: customer_id
-Remaining: {"elapsed_seconds": 0.0, "retries_remaining": 1, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}
+Remaining: {"elapsed_seconds": T, "retries_remaining": 1, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": T}
 
 As intern@co.com on customer_id (also not exempted):
   BLOCKED — Violations:
 - Blocked columns in SELECT: customer_id
-Remaining: {"elapsed_seconds": 0.0, "retries_remaining": 0, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": 30.0}
+Remaining: {"elapsed_seconds": T, "retries_remaining": 0, "tokens_remaining": 20000, "cost_remaining_usd": 0.5, "seconds_remaining": T}
 
 As compliance@co.com on customer_id (exempted via blocked_principals):
   allowed — 3 rows returned

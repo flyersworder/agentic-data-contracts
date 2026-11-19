@@ -6,6 +6,7 @@ references in both. CubeSource used to pass `sql` through alone, handing
 agents `amount` for a revenue metric. Assertions execute the expression.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
@@ -20,7 +21,7 @@ def source(fixtures_dir: Path) -> CubeSource:
 
 
 @pytest.fixture(scope="module")
-def db() -> duckdb.DuckDBPyConnection:
+def db() -> Iterator[duckdb.DuckDBPyConnection]:
     con = duckdb.connect()
     con.execute(
         """
@@ -34,7 +35,8 @@ def db() -> duckdb.DuckDBPyConnection:
             (5, NULL, NULL, NULL, 'completed');
         """
     )
-    return con
+    yield con
+    con.close()
 
 
 @pytest.mark.parametrize(

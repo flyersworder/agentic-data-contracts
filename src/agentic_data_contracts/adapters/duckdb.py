@@ -69,6 +69,28 @@ class DuckDBAdapter:
         # keeps a subclass override (SQL rewriting, auditing) on the path.
         self._lock = threading.RLock()
 
+    def close(self) -> None:
+        """Close the connection, after any query running on it finishes.
+
+        An open DuckDB connection holds native worker threads (about 50 from
+        DuckDB 2.0) and, for a file database, the file's lock. A dropped
+        adapter releases them only when the garbage collector frees it, so a
+        process that builds many adapters should close each one. Taking
+        ``_lock`` keeps the connection from closing under a query another
+        thread is running, so from async code call it as
+        ``await asyncio.to_thread(adapter.close)``: the tools run queries in
+        worker threads, and waiting on the event loop would stall it. Closing
+        twice is a no-op.
+        """
+        with self._lock:
+            self.connection.close()
+
+    def __enter__(self) -> DuckDBAdapter:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
     @property
     def dialect(self) -> str:
         return "duckdb"

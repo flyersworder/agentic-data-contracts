@@ -24,7 +24,7 @@ LOG:
 {"columns": ["email", "acquisition_source"], "rows": [["alice@ex.com", "paid_search"], ["bob@ex.com", "organic"], ["charlie@ex.com", "referral"], ["diana@ex.com", "paid_search"], ["eve@ex.com", "social"], ["frank@ex.com", "organic"], ["grace@ex.com", "paid_search"], ["henry@ex.com", "referral"], ["iris@ex.com", "social"], ["jane@ex.com", "paid_search"]], "r
 
 === Experiment lift query (onboarding-042) ===
-{"columns": ["variant", "users", "activations"], "rows": [["control", 1, 1], ["new_flow", 3, 3]], "row_count": 2, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 3, "tokens_remaining": 30000, "cost_remaining_usd": 2.0, "seconds_remaining": 120.0}}}
+{"columns": ["variant", "users", "activations"], "rows": [["control", 1, 1], ["new_flow", 3, 3]], "row_count": 2, "session": {"remaining": {"elapsed_seconds": T, "retries_remaining": 3, "tokens_remaining": 30000, "cost_remaining_usd": 2.0, "seconds_remaining": 120-T}}}
 
 === Stale-review findings ===
   [domain] acquisition — age_days=N, context={}

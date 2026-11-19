@@ -14,6 +14,7 @@ its text: the claim is what it computes.
 """
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
@@ -28,7 +29,7 @@ def source(fixtures_dir: Path) -> DbtSource:
 
 
 @pytest.fixture(scope="module")
-def db() -> duckdb.DuckDBPyConnection:
+def db() -> Iterator[duckdb.DuckDBPyConnection]:
     con = duckdb.connect()
     con.execute(
         """
@@ -46,7 +47,8 @@ def db() -> duckdb.DuckDBPyConnection:
             (1, 10.0, 0.5, 'completed'), (2, 20.0, 1.0, 'refunded');
         """
     )
-    return con
+    yield con
+    con.close()
 
 
 def _value(source: DbtSource, db: duckdb.DuckDBPyConnection, name: str) -> object:

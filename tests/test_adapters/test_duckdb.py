@@ -406,3 +406,52 @@ def test_invalid_memory_limit_fails_at_construction(
     # The half-built adapter is unreachable, so it must not leak the
     # connection (and, for a file database, its lock).
     assert [c.closed for c in opened] == [True]
+
+
+# ─── close / context manager ─────────────────────────────────────────────────
+
+
+def test_close_releases_the_connection() -> None:
+    db = DuckDBAdapter(":memory:")
+    db.close()
+    with pytest.raises(duckdb.ConnectionException):
+        db.execute("SELECT 1")
+
+
+def test_close_is_idempotent() -> None:
+    db = DuckDBAdapter(":memory:")
+    db.close()
+    db.close()
+
+
+def test_close_releases_a_file_database(tmp_path) -> None:
+    """A second in-process connection with a different config raises while
+    the first is open, so reopening read-only proves the file was released."""
+    path = str(tmp_path / "x.duckdb")
+    db = DuckDBAdapter(path)
+    db.close()
+    duckdb.connect(path, read_only=True).close()
+
+
+def test_context_manager_closes_on_exit() -> None:
+    with DuckDBAdapter(":memory:") as db:
+        assert db.execute("SELECT 1").rows == [(1,)]
+    with pytest.raises(duckdb.ConnectionException):
+        db.execute("SELECT 1")
+
+
+def test_close_waits_for_an_in_flight_query() -> None:
+    """close() takes the adapter lock, so it cannot pull the connection out
+    from under a query another thread is running on it."""
+    db = DuckDBAdapter(":memory:")
+    db._lock.acquire()  # stands in for a query running on another thread
+    closer = threading.Thread(target=db.close)
+    closer.start()
+    closer.join(timeout=0.2)
+    assert closer.is_alive()
+    assert db.execute("SELECT 1").rows == [(1,)]  # reentrant: still open
+    db._lock.release()
+    closer.join(timeout=5)
+    assert not closer.is_alive()
+    with pytest.raises(duckdb.ConnectionException):
+        db.execute("SELECT 1")

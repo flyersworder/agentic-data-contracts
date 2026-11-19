@@ -7,28 +7,18 @@
 # that quietly stopped printing anything, which is the failure a marker-grep
 # gate cannot see.
 #
-# The scrub removes the two things that differ without anyone changing code:
-#   - `Sample database created at <abs path>` prints only when the generated
-#     .duckdb is absent (a fresh CI checkout) and carries a machine path. It is
-#     setup noise, not a demonstrated behaviour — if the DB failed to build,
-#     every section below it would differ anyway.
-#   - `age_days` is measured against today's date.
-#   - `elapsed_seconds` / `seconds_remaining` in a session report are wall-clock
-#     time since the session's first call. They round to 0.0 locally, but a
-#     slow runner crosses 0.05s; `retries_remaining` and the token and cost
-#     budgets beside them stay exact.
-# Add a scrub only for values that move on their own; anything else moving is
-# a real diff.
+# Each example's stdout is passed through scripts/scrub_example_output.py,
+# which the CI job also uses, so the golden file and the diff apply the same
+# rules. Its docstring lists what is scrubbed and why.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+raw=$(mktemp)
+trap 'rm -f "$raw"' EXIT
 for d in revenue_agent growth_agent ops_agent; do
   # Redirected, not piped: a pipeline would mask the interpreter's exit status.
-  uv run python "examples/$d/agent.py" > /tmp/example_raw.txt
-  sed -E -e '/^Sample database created at /d' \
-         -e 's/age_days=[0-9]+/age_days=N/' \
-         -e 's/"(elapsed_seconds|seconds_remaining)": [0-9.]+/"\1": T/g' \
-         /tmp/example_raw.txt \
+  uv run python "examples/$d/agent.py" > "$raw"
+  uv run python scripts/scrub_example_output.py < "$raw" \
     > "examples/$d/expected_output.txt"
   echo "regenerated examples/$d/expected_output.txt"
 done

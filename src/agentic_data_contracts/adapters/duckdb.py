@@ -77,7 +77,10 @@ class DuckDBAdapter:
         adapter releases them only when the garbage collector frees it, so a
         process that builds many adapters should close each one. Taking
         ``_lock`` keeps the connection from closing under a query another
-        thread is running. Closing twice is a no-op.
+        thread is running, so from async code call it as
+        ``await asyncio.to_thread(adapter.close)``: the tools run queries in
+        worker threads, and waiting on the event loop would stall it. Closing
+        twice is a no-op.
         """
         with self._lock:
             self.connection.close()

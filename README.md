@@ -1778,7 +1778,9 @@ An open `DuckDBAdapter` also holds native threads (about 50 per connection from
 DuckDB 2.0) and, for a file database, the file's lock, until it is closed. A
 process that builds many adapters should close each one: `adapter.close()`,
 or `with DuckDBAdapter(path) as adapter:`. `close()` takes the adapter's lock,
-so it waits for a query another thread is running.
+so it waits for a query another thread is running; from async code, call it
+as `await asyncio.to_thread(adapter.close)` so that wait does not block the
+event loop.
 
 `token_budget` is the one limit this library cannot measure on its own — the
 tokens are spent by the *model* between tool calls. It is fed from the host

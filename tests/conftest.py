@@ -17,7 +17,10 @@ def _close_duckdb_connections(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
     """Close every DuckDB connection a test opened, at its teardown.
 
     It sees only connections opened after it starts, so a module- or
-    session-scoped fixture (set up first) must close its own connection.
+    session-scoped fixture (set up first) must close its own connection. It
+    closes everything opened during the test, so a connection meant to outlive
+    the test (cached at module level, or a higher-scoped fixture first
+    requested mid-test through ``request.getfixturevalue``) is closed too.
 
     A DuckDB connection holds native worker threads until it is closed or
     freed (about 50 per connection from DuckDB 2.0). Adapters built by

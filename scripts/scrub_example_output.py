@@ -14,8 +14,11 @@ else moving is a real diff.
 - ``seconds_remaining`` is the configured ``max_duration_seconds`` minus that
   time. It is rewritten as ``<budget>-T``, the budget recovered as the sum of
   the two values in the same report (each rounded to 0.1s, so the sum is
-  within 0.1s of it, however slow the runner): the configured budget stays in
-  the diff, and nothing else about timing does.
+  within 0.1s of it, however slow the runner), to the whole second: the
+  configured budget stays in the diff, and nothing else about timing does.
+  Whole seconds is the precision that error allows, so a budget that differs
+  from another by less than a second (30 vs 30.5) is not told apart; every
+  example declares a whole number.
 
 The keys are matched in either quote style, since an example may print the
 report as JSON or as a Python dict.
@@ -42,7 +45,7 @@ def _budget(m: re.Match[str]) -> str:
 
 
 def scrub(text: str) -> str:
-    text = re.sub(r"(?m)^Sample database created at .*\n", "", text)
+    text = re.sub(r"(?m)^Sample database created at .*(?:\n|\Z)", "", text)
     text = re.sub(r"age_days=[0-9]+", "age_days=N", text)
     text = _REPORT.sub(_budget, text)
     # A report without both keys has no budget to recover: mask what is left.

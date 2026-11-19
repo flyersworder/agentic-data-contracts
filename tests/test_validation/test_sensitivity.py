@@ -1080,7 +1080,7 @@ class _ReturnsNone:
     """A normalizer that breaks its own contract by returning a non-str."""
 
     def normalize_sql(self, sql: str) -> str:
-        return None  # ty: ignore[invalid-return-type]
+        return None  # ty: ignore[invalid-explicit-return]
 
 
 class TestNormalizedCheckSensitivity:

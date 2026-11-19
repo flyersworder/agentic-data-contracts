@@ -6,7 +6,8 @@ Production agents built on the governed tools spend more turns and more
 uncached input tokens than the same agent given plain SQL access, for the
 same accuracy. On LiveSQLBench (gpt-6-luna, k=3, primary set) the `contract`
 arm averages 6.2 turns and 13k uncached input tokens a run, against 4.1 turns
-and 3k for `manual_compiled`, at 35.8% vs 36.8% accuracy. Per run it makes
+and 3k for `manual_compiled`, at 35.9% vs 36.8% accuracy (FINDINGS, 325 of
+906; the luna-r{1,2,3} rows give 35.8% on 909). Per run it makes
 `lookup_domain` 2.06, `lookup_metric` 1.91, `inspect_query` 1.48,
 `list_metrics` 0.64 and `run_query` 1.42 calls.
 
@@ -18,9 +19,15 @@ setup.
 ## What the evidence says to keep
 
 FINDINGS ("Where the tools help: retrieval at the point of use, not
-validation") shows the governed tools' accuracy gain on DABStep came from
-putting the governing rule in front of the agent just before it wrote the
-query. `inspect_query` played no part (no rejection in any winning run). The
+validation") shows the governed tools' 5-point lead on DABStep's
+non-rule-matching tasks (the "other 202") sits in three families that
+average fees, and came from putting the governing rule in front of the
+agent just before it wrote the query. The evidence is luna-only, task-level
+and exploratory: it does not survive clustering over question shapes
+(+5.1, shape interval [−1.8, +11.1]), and on Qwen the tools trail the text
+arm on the same tasks (−6.9). It is the best mechanism FINDINGS has, not a
+settled effect, which is why this design protects it and measures it rather
+than relying on it. `inspect_query` played no part (no rejection in any winning run). The
 text arm, which had every definition in its prompt, lost those tasks. The
 rule arrived through `lookup_metric` in most winning runs, but in 16 of 50
 through `lookup_domain(fees)` or the governed `describe_table`: the fees
@@ -107,8 +114,9 @@ grow.
   descriptions rewritten to the guidance. Keeps retrieval at the point of
   use; moves only names into the prompt.
 - **B. Metric SQL in the prompt, drop the lookup instruction.** Cheapest per
-  token, but it is the text arm's design, which lost 5 points on DABStep
-  exactly where retrieval at the point of use mattered.
+  token, but it is the text arm's design, which trailed the tools by 5
+  points (luna, task-level) on DABStep's fee-averaging families, exactly
+  where retrieval at the point of use mattered.
 - **C. `lookup_domain` returns full definitions.** Saves one hop but returns
   every member metric's SQL as fresh, mostly unused tokens.
 
@@ -130,10 +138,13 @@ list (a metric listed under three domains counts three times).
   `metrics_in_domain`). Metrics in no domain the contract catalogs (none,
   or only uncataloged ones) are listed in one extra group, not named
   `<available_metrics>`. If entries exceed the index threshold, the names
-  are dropped and domains render as today.
+  are dropped: the `<domain>` elements render as today (with
+  `metric_count`), followed by the new "names dropped" hint below.
 - **Without domains** (`_render_metrics`): if entries exceed the index
-  threshold, today's count line; else if metrics exceed the detail
-  threshold, names only; else today's listing with descriptions.
+  threshold, a count line, exactly `<count>{m} metrics available; names
+  omitted above {t} index entries.</count>` (`{t}` the resolved index
+  threshold); else if metrics exceed the detail threshold, names only; else
+  today's listing with descriptions.
 - Descriptions are never added where they are not today: a metric's
   description is a paragraph (DABStep averages about 700 characters, and
   `fee_rule_matches_transaction` carries the wildcard rule).
@@ -176,7 +187,11 @@ domain hints only; the relationship hint is unchanged. Exact text:
 **Logging.** An INFO log, reworded (no "agents must call list_metrics"),
 whenever the index omits something: descriptions (no-domain names-only) or
 names (either branch, above the index threshold). It says which, and which
-argument restores it.
+argument restores it. A caller who already passes a source to a no-domain
+contract with 21-200 metrics gets names added with no log; the CHANGELOG
+says so. The index threshold is resolved at render time, like the detail
+threshold, so setting `renderer.metric_detail_threshold = None` after
+construction still implies "never drop names".
 
 **Cost.** Names are cached where the provider caches; where it does not
 (Qwen runs show `cached_tokens` 0 throughout), the index is paid every
@@ -209,8 +224,9 @@ same rubric.
 - `describe_table`, `preview_table`: today one-liners; add what is returned,
   when to use them, and what they do not return. Return-shape clauses only
   with an adapter (without one they return an error); "governed
-  descriptions" only with a semantic source. Preview's row cap is stated as
-  it is: at most 100 rows, and at most `max_result_rows` when that is set.
+  descriptions" only when the semantic source carries table entries
+  (decided at build time). Preview's row cap is stated as it is: at most
+  100 rows, and at most `max_result_rows` when that is set.
 - `lookup_metric`: carries the point-of-use routing (only when metrics
   exist): use it before writing SQL that computes a metric, because the
   definition (filters, units, wildcard rules) is governed and the query must
@@ -221,16 +237,22 @@ same rubric.
 - `lookup_domain`: returns the domain's business description, tables and
   member metrics. Says what the description holds: rules that apply across
   the domain's metrics (how missing values or wildcards are read, for
-  example), which the query must follow. No "before querying" instruction.
+  example), and keeps one plain point-of-use clause with that reason: fetch
+  it before writing SQL that computes one of the domain's metrics, because
+  the query must follow those rules. This replaces today's "before
+  querying", which read as every query; it is the domain lookup's only
+  timing cue for a host whose prompt says nothing about it.
 - `run_query`: runs the same validation as `inspect_query` before
-  executing and does not run a blocked query (result checks and the timeout
-  apply after). Keeps the metric constraint as one plain sentence with its
+  executing and does not run a blocked query. The query timeout (during
+  execution) and result checks (after) are mentioned only when the contract
+  declares them. Keeps the metric constraint as one plain sentence with its
   reason (`_PROTOCOL_METRIC_ORDERING` rewritten, no MUST/never). This is the
   deliberate exception to "routing in its own description": descriptions
   travel with the tools on every path, the prompt is opt-in. Keep the
   precedence clause (`_PROTOCOL_PRECEDENCE`), plainly worded.
 - `inspect_query`: checks a query without running it, for an expensive
-  query or a cost estimate; inspecting first is optional, since `run_query`
+  query or (with an adapter, which supplies it) a cost estimate; inspecting
+  first is optional, since `run_query`
   applies the same checks. Keeps the metric constraint (as today, same
   gating). When the contract sets `max_retries`, add that a blocked or
   failed `run_query` spends a retry and `inspect_query` does not. Keep the
@@ -248,70 +270,109 @@ metric; run queries with `run_query`, which validates them; use
 inspect before every query costs a turn per query for no added checking,
 but with `max_retries` set it keeps blocked drafts from spending retries.
 
-The quickstart passes the source to `to_system_prompt()` where it has one.
+The quickstart passes `dc.load_semantic_source()` to `to_system_prompt()`.
 
 ## Measurement
 
 Run where the private LiveSQLBench data (`LSB_DATA`) lives; it is not on the
-main Mac. All steps run in the same window, each into fresh output files
-(the resume key is task, arm and model, and `adc_version` is the only field
-that separates a re-run from the published 0.59.0 rows, which are not the
-baseline).
+main Mac. The published `contract` rows are `adc_version` 0.59.0 and are not
+the baseline.
 
 Arm ladder, each step adding one change:
 
-0. `contract` on v0.64.0 (a separate environment): today's library. The
-   baseline.
+0. `contract` on v0.64.0: today's library. The baseline.
 1. `contract` on the new library: the rewritten descriptions. Its procedure
    still says to inspect every query, which now conflicts with
    `inspect_query`'s text; production prompts written that way meet the
    same conflict, so this step measures it.
 2. `contract_lean_lib`: plus the semantic source passed to
-   `to_system_prompt`. This adds the index, but also `<table_relationships>`
-   and `metric_count`, and replaces the tool-naming domain hint: it is
+   `to_system_prompt`. This adds the index and `metric_count`, replaces the
+   tool-naming domain hint, and on DABStep (one described join; all 22
+   LiveSQLBench contracts have none) adds `<table_relationships>`: it is
    "source passed", not "names added".
-3. `contract_lean`: plus a new `LEAN_PROCEDURE` constant **replacing**
-   `CONTRACT_PROCEDURE`, matching the README sentence: look up the domain
-   and the metric before computing it, run with `run_query`, inspect only
-   to check without running. The domain lookup stays unconditional.
+3. `contract_lean`: plus `LEAN_PROCEDURE` **replacing**
+   `CONTRACT_PROCEDURE`. Its exact text, pre-registered:
+
+   > Before writing SQL that computes a metric, look up its domain with
+   > lookup_domain and the metric with lookup_metric, and follow both. Run
+   > queries with run_query, which validates them; use inspect_query only to
+   > check a query without running it.
 
 Benchmarks: LiveSQLBench primary set (cost) and DABStep (accuracy, where
 retrieval at the point of use mattered), gpt-6-luna and qwen3.8-27b, k=3.
 
-Harness changes (`experiments/dabstep-contract-eval/dce/`):
+**Running the steps.**
 
-- `governed_arm` gains keyword parameters for the procedure and the
-  semantic source, defaulting to today's behaviour (DataAgentBench calls it
-  positionally).
-- `LEAN_PROCEDURE` beside `CONTRACT_PROCEDURE`.
+- Step 0 runs from a git worktree at tag `v0.64.0` (fetch it first; it is on
+  the remote only), with its own harness environment: the harness installs
+  the library as an editable path (`../..`), so the worktree's harness
+  loads the worktree's library and `commit_sha` names it correctly. Only
+  the `contract` arm runs there, and that arm exists at v0.64.0.
+- The library version is bumped to the release version before steps 1-3
+  run, so `adc_version` (read from installed metadata) separates step 0
+  from step 1 rows, which share arm, model and resume key.
+- Each step writes its own new file (`results/livesqlbench/lean-s{0..3}-
+  {model}-r{1,2,3}.jsonl`, and the DABStep equivalent); the runner's
+  dirty-tree check exempts only the current `--out`, so each finished file
+  is committed before the next sweep starts. Step 0's files are copied in
+  from the worktree.
+
+**Harness changes** (`experiments/dabstep-contract-eval/`):
+
+- `dce/tools.py`: `governed_arm` gains keyword parameters for the procedure
+  and the semantic source, defaulting to today's behaviour (DataAgentBench
+  and `prep/scale/checks.py` call it positionally); `LEAN_PROCEDURE` beside
+  `CONTRACT_PROCEDURE`.
 - LiveSQLBench: the two arms in `extra_arms` / `governed_arms`, and
   `_roots` entries pointing at `contracts` set directly (not through
   `EXTRA_CONTRACTS`, which the `extra_contracts=` argument replaces);
   otherwise `check_arms` and `_build_arm` raise `KeyError`.
 - DABStep: `EXTRA_ARMS`, `GOVERNED_ARMS`, a `build_arm` branch and an
-  `arm_digest` branch for each.
-- `arm_digest` for the new arms covers the procedure text and whether the
-  source is passed; existing arms' digests are unchanged.
-- An analysis script (extending the one behind FINDINGS' "Lookup log", or
-  new) that reads traces for the lookup shares below.
+  `arm_digest` branch for each. The new arms load the same frozen contract
+  as `contract`; their digest is that contract's `digest()` plus the
+  procedure text and the source flag. Existing arms' digests are unchanged.
+- Harness tests that pin the arm lists: `tests/test_arms.py:59-71`,
+  `tests/test_livesqlbench.py:72,85`.
+- A ladder analysis script, modelled on `analysis/clustered.py`'s
+  `drift()`: pairs each step with step 0 by task and repeat, gives
+  task-level intervals plus shape clusters (DABStep) and database clusters
+  (LiveSQLBench), and turn and token deltas.
+- The DABStep lookup shares reuse `analysis/facts_placed.py`'s
+  `lookup_log` (first query naming the `fees` table).
 
-Report per run: turns, uncached and total input tokens (Qwen has no
-caching, so judge it on total), tool-call mix, cost, accuracy. From traces:
-the share of runs where `lookup_domain` preceded the first query naming that
-domain's tables, and separately where `lookup_metric` did (as the Lookup
-log does), plus DABStep's wildcard-in-first-fee-query counts by fee family.
+**Report** per step, model and benchmark: turns, uncached and total input
+tokens, tool-call mix, cost, accuracy. On DABStep, from traces: the
+`lookup_log` shares (`lookup_domain("fees")` and, separately,
+`lookup_metric` before the first fee query) and the wildcard-in-first-fee-
+query counts by fee family. On LiveSQLBench, whose domains list no tables,
+the `lookup_domain` and `lookup_metric` call rates only.
 
-Success, written into the predictions before the runs:
+**Success**, written into the predictions before the runs. One primary
+contrast per model and benchmark, step 3 against step 0 (four contrasts);
+steps 1 and 2 are diagnostic, to place a drop, not pass/fail.
 
-- Turns and input tokens down at step 3 against step 0.
-- Accuracy non-inferior at each step against step 0, for both models: the
-  lower bound of the paired 95% interval above −3 points, task-level on the
-  LiveSQLBench primary set, clustered over question shapes on DABStep's 199
-  rule-matching tasks (the stricter of FINDINGS' two views).
-- The domain-lookup share does not fall by more than 10 points at step 3.
+- Accuracy non-inferior: the lower bound of the task-level paired 95%
+  interval above −5 points (FINDINGS' A/A floor puts identical re-runs at
+  up to 2.8 points of drift, and shape-clustered bounds of identical arms
+  reach −7.8, so a −3 margin would fail on noise). On DABStep the subset is
+  the other 202 tasks, where the retrieval effect sits; the three
+  fee-averaging families are reported on their own. Shape- and
+  database-clustered intervals are reported as sensitivity, not as the
+  test.
+- Cost: mean turns and mean total input tokens per run lower at step 3
+  than step 0, reported with paired intervals. Predicted exception, stated
+  in advance: Qwen on LiveSQLBench may not fall in input tokens, since it
+  caches nothing and the largest contract's index adds about 4k characters
+  per turn.
+- DABStep `lookup_domain("fees")` share before the first fee query does not
+  fall by more than 10 points at step 3.
 
-If accuracy drops, the ladder places it: step 1 (description rewrite),
-step 2 (source passed) or step 3 (procedure).
+If accuracy drops, the diagnostic steps place it: step 1 (description
+rewrite), step 2 (source passed) or step 3 (procedure).
+
+Not measured, accepted: a host prompt that says nothing about lookups (no
+procedure at all). There, only the tool descriptions (`lookup_domain`'s
+and `lookup_metric`'s point-of-use clauses) time the lookups.
 
 ## Constraints
 
@@ -321,8 +382,15 @@ step 2 (source passed) or step 3 (procedure).
 - Examples' golden output is diffed in CI; regenerate with
   `scripts/regen_examples.sh` and review the diff. No example prints the
   index today: `examples/revenue_agent/agent.py` renders with the source
-  (around line 341) but prints only the extras. It prints the rendered
-  domain/metric index section, so the golden output covers §1.
+  (around line 341) but prints only `<column_hints>`…`</join_paths>`. The
+  builder adds a print of the rendered domain/metric index section there
+  and regenerates its `expected_output.txt`, so the golden output covers
+  §1. The examples' SDK paths, which render without a source, are left as
+  they are; the README is where the recommended setup is shown.
+- No-source prompts stay byte-for-byte: a test renders a few no-source
+  contracts (with and without domains, above and below the thresholds)
+  and compares them with golden strings captured from v0.64.0 before any
+  change.
 - User-visible prompt and description changes: CHANGELOG `### Changed`,
   minor version.
 - Tests, docs and scripts that match on description or hint text are
@@ -339,15 +407,22 @@ step 2 (source passed) or step 3 (procedure).
   - `tests/test_core/test_prompt_renderers.py`: 585-593 and 796-807 ("5
     metrics available" now renders names; 807 needs a legacy-subclass
     analogue for `METRIC_INDEX_THRESHOLD`), 640-652 (log text), 341-343
-    (`<available_metrics>` absence);
-  - README: How It Works flow (86-95), Query protocol (495-511, quotes the
-    MUST sentence), domain workflow (618-628), threshold table and its
-    notes (~1557-1575), quickstart (285, 335);
+    (`<available_metrics>` absence), 291-300 and 308-325 (30 metrics, no
+    domains: "30" and "should not list individual metrics" no longer hold;
+    rewrite to the names-only expectation);
+  - README: How It Works flow (86-95), The 9 Tools table (482-490), Query
+    protocol (495-511, quotes the MUST sentence), domain workflow
+    (618-628), threshold table and its notes (~1557-1575), quickstart (285,
+    335);
   - `docs/architecture.md`: Query Protocol (631-670), Natural Agent
-    Workflow (763-766).
+    Workflow (763-766);
+  - source comments that describe the old texts: the comment block in
+    `tools/factory.py` (~295-330) and the `_render_metrics` docstring.
 - Docs that describe the published runs (`dce/tools.py` docstring ~88-98,
   `experiments/dabstep-contract-eval/README.md:381-388`) are annotated "as
-  of adc ≤ 0.64", not rewritten: they describe what those runs saw.
+  of adc ≤ 0.64", not rewritten: they describe what those runs saw. The
+  paper (`docs/paper/sections/03-system.tex:88-90`) is left as is for the
+  same reason.
 
 ## Left to the builder
 

@@ -81,7 +81,8 @@ def test_a_declared_answer_wins_and_anchors_on_the_last_query():
     )
     source, actual, _, anchor = _select_answer(attempt)
     assert (source, actual) == ("declared", 9.0)
-    assert anchor.sequence == 1  # ty: ignore[unresolved-attribute]
+    assert anchor is not None
+    assert anchor.sequence == 1
 
 
 def test_reruns_of_the_same_value_stay_unambiguous():

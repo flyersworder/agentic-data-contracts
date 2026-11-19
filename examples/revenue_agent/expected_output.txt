@@ -18,7 +18,7 @@ Column-level discovery is still available via describe_table:
 
 === Inspect Query (valid revenue-by-region SQL) ===
   valid: True, violations: []
-  cost: $n/a, rows: 0
+  cost: $n/a, rows: 1
 
 === Query Results ===
 {"columns": ["region", "revenue"], "rows": [["Asia Pacific", "800.00"], ["Europe", "7200.00"], ["North America", "2700.00"]], "row_count": 3, "session": {"remaining": {"elapsed_seconds": 0.0, "retries_remaining": 3, "tokens_remaining": 50000, "cost_remaining_usd": 5.0, "seconds_remaining": 300.0}}}

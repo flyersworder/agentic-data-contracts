@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.64.0] - 2026-11-19
+
+### Compatibility
+
+- **DuckDB 2.0 is tested and supported.** The `duckdb` extra was already unbounded above, so a fresh install picked 2.0 up; the lock now moves to it (1.5.6 -> 2.0.0), and the suite also passes at the declared floor. One behaviour change reaches tool output: `inspect_query`'s `estimated_rows` is DuckDB's own cardinality estimate for the plan's root, and 2.0 no longer estimates below 1, so a query 1.5 estimated at 0 rows now reports 1. The revenue example's golden output changes accordingly.
+- **A DuckDB 2.0 connection holds about 50 native threads until it is closed**, up from about 10 in 1.5. A `DuckDBAdapter` that is dropped without `adapter.connection.close()` keeps them until Python's cyclic garbage collector frees it. A process that builds many adapters should close each one when done.
+
+### Internal
+
+- **Dependency refresh.** The root lock takes 51 updates, including major versions of `duckdb` (2.0.0), `anthropic` 1.13.0 -> 2.11.0, `logfire-api` 5.1.1 -> 6.0.0 and `websockets` 16.1.1 -> 17.4, plus `sqlglot` 30.22.0 -> 30.33.0 (Layer 1 static analysis), `pydantic-ai-slim` 2.55.0 -> 2.71.0, `langchain-core` 1.6.9 -> 1.8.3 and `claude-agent-sdk` 0.2.165 -> 0.2.185. `opentelemetry-api` is at 1.45.2 for GHSA-mf5v-w3w3-f6cg. No declared floor moves. `experiments/mermaid-joinpath-eval` is upgraded separately (`openai` 3.19.2 -> 3.55.1, `sqlglot` 30.19.0 -> 30.33.0; its 37 tests pass). `experiments/dabstep-contract-eval` takes only the self version, as its lock stays pinned for the paper's evaluation panel.
+- **Pre-commit hooks bumped** to ruff 0.17.6 and ty 0.0.107. ty 0.0.103 renamed rules used in three `ty: ignore` comments; one became an `assert` that narrows the type instead.
+- **The test suite closes every DuckDB connection a test opens**, through an autouse fixture in `tests/conftest.py`. Fixtures never closed their adapters, so under DuckDB 2.0 the leaked threads reached macOS's per-process cap of 4,096 partway through the suite and later tests failed with "can't start new thread".
+
 ## [0.63.0] - 2026-11-07
 
 ### Fixed

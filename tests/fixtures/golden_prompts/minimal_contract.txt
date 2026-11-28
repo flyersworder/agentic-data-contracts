@@ -1,0 +1,9 @@
+<data_contract name="basic-query">
+<allowed_tables>
+Only query these tables:
+- public.users
+</allowed_tables>
+<constraints>
+Forbidden operations: DELETE, DROP
+</constraints>
+</data_contract>

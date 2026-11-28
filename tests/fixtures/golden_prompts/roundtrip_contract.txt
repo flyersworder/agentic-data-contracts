@@ -1,0 +1,20 @@
+<data_contract name="revenue-analysis-roundtrip">
+<allowed_tables>
+Only query these tables:
+- analytics.orders
+- analytics.customers
+- analytics.subscriptions
+</allowed_tables>
+<semantic_source>
+  <type>yaml</type>
+  <path>relationships_checker.yml</path>
+  <hint>Consult this source for metric definitions before computing metrics.</hint>
+</semantic_source>
+<constraints>
+Forbidden operations: DELETE, DROP, TRUNCATE, UPDATE, INSERT
+
+Rules (violations block execution):
+- [tenant_isolation] All queries must include a WHERE tenant_id = filter
+- [no_select_star] Queries must specify explicit columns, no SELECT *
+</constraints>
+</data_contract>

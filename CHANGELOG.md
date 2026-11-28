@@ -28,6 +28,12 @@ Shortens an agent's path to a metric definition (#139). Governed agents spent mo
 
 - **README: "Recommended production setup".** Pass the semantic source to `to_system_prompt()`, and a system-prompt sentence that asks for the domain and metric lookups before a metric query without requiring an inspect before every query, with the `max_retries` trade-off. The Claude Agent SDK quickstart now passes `dc.load_semantic_source()`. The revenue example prints the metric index, and its golden output covers it.
 - The evaluation harness's notes on the library's tool descriptions are marked "as of adc ≤ 0.64": they describe what the published runs saw.
+- The per-feature design spec is folded into `docs/architecture.md` ("Metric Index in the Prompt"): rationale, rejected alternatives, thresholds, and the before/after check.
+
+### Internal
+
+- **Dependency refresh.** The root lock takes 23 updates, among them `pydantic-ai-slim` 2.71.0 -> 2.77.0, `sqlglot` 30.33.0 -> 30.35.0 (Layer 1 static analysis), `duckdb` 2.0.0 -> 2.0.1, `anthropic` 2.11.0 -> 2.14.0, `claude-agent-sdk` 0.2.185 -> 0.2.189, `langchain-core` 1.8.3 -> 1.8.5 and `httpx` 0.28.1 -> 0.29.0. No declared floor moves; the lowest-floor suite passes on 3.12 and 3.13, and `uv-secure` reports no advisories. DuckDB 2.0.1 estimates the revenue example's region query at 3 rows (its actual count) instead of 1, so that example's golden `inspect_query` line changes. `experiments/mermaid-joinpath-eval` is upgraded separately (`openai` 3.55.1 -> 3.60.0, `sqlglot` 30.33.0 -> 30.35.0; its 37 tests pass). `experiments/dabstep-contract-eval` takes only the self version, as its lock stays pinned for the paper's evaluation panel.
+- **Pre-commit hooks bumped** (ty; ruff was current). The pinned revs live in `.pre-commit-config.yaml`.
 
 ## [0.64.0] - 2026-11-19
 

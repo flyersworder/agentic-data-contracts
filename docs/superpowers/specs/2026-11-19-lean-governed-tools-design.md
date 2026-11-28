@@ -83,8 +83,8 @@ grow.
 2. Tool descriptions are precise contracts in plain register, and stop
    implying that every query should be inspected.
 3. The README shows the recommended production setup.
-4. Measured: fewer turns and input tokens per run, accuracy non-inferior,
-   including on DABStep where the accuracy effect lives.
+4. Checked on a live agent: fewer turns and inspect/list hops per question,
+   with the domain and metric lookups intact (Acceptance).
 
 ## Non-goals
 
@@ -93,13 +93,15 @@ grow.
 - A batch `lookup_metric` (dropped: parallel calls cover it, and it would
   need the conformance check and recorder to learn per-name results).
 - `to_system_prompt()` loading the semantic source itself (decided: callers
-  opt in; existing prompts and the pre-registered arms stay as they are).
+  opt in; existing prompts and the benchmark arms stay as they are).
 - A semantic-source opt-in for `bridge.compile_to_contract` (it calls
   `to_system_prompt()` with no source; a follow-up if a bridge user asks).
 - Changing what any check enforces, or the `DatabaseAdapter` /
   `SemanticSource` protocols.
-- Editing `CONTRACT_PROCEDURE`, the pre-registered arms, their digests, or
-  frozen contract directories.
+- Editing `CONTRACT_PROCEDURE`, the existing arms, their digests, or frozen
+  contract directories.
+- Benchmark runs as a release gate (Acceptance; the ladder is an optional
+  paper follow-up).
 
 ## Anti-goals
 
@@ -272,107 +274,51 @@ but with `max_retries` set it keeps blocked drafts from spending retries.
 
 The quickstart passes `dc.load_semantic_source()` to `to_system_prompt()`.
 
-## Measurement
+## Acceptance
 
-Run where the private LiveSQLBench data (`LSB_DATA`) lives; it is not on the
-main Mac. The published `contract` rows are `adc_version` 0.59.0 and are not
-the baseline.
+This is a library change for production use, not a paper result, so the
+bar is that the change does what it says and does not break the one thing
+that matters. The overhead it targets is already measured (Intent), and the
+change is easy to revert: the index is opt-in and no-source prompts are
+byte-for-byte unchanged.
 
-Arm ladder, each step adding one change:
+1. **Tests** (Constraints): no-source golden strings, index rendering and
+   thresholds, the rewritten descriptions.
+2. **Before/after trace check.** About ten realistic questions that each
+   compute a governed metric, on a real agent (the production analytics
+   agent, or `examples/revenue_agent` with a live model), run on v0.64.0 and
+   on this branch. Both runs pass the semantic source and use the README's
+   recommended prompt sentence. Read the traces:
+   - **Go/no-go:** before every metric query the agent still calls
+     `lookup_domain` and `lookup_metric` (the anti-goal). A miss on more
+     than one question means the descriptions need work before release.
+   - **Direction:** turns and `inspect_query` / `list_metrics` calls per
+     question fall. No significance test; it only has to point the right
+     way.
 
-0. `contract` on v0.64.0: today's library. The baseline.
-1. `contract` on the new library: the rewritten descriptions. Its procedure
-   still says to inspect every query, which now conflicts with
-   `inspect_query`'s text; production prompts written that way meet the
-   same conflict, so this step measures it.
-2. `contract_lean_lib`: plus the semantic source passed to
-   `to_system_prompt`. This adds the index and `metric_count`, replaces the
-   tool-naming domain hint, and on DABStep (one described join; all 22
-   LiveSQLBench contracts have none) adds `<table_relationships>`: it is
-   "source passed", not "names added".
-3. `contract_lean`: plus `LEAN_PROCEDURE` **replacing**
-   `CONTRACT_PROCEDURE`. Its exact text, pre-registered:
+Record the counts in the PR description.
 
-   > Before writing SQL that computes a metric, look up its domain with
-   > lookup_domain and the metric with lookup_metric, and follow both. Run
-   > queries with run_query, which validates them; use inspect_query only to
-   > check a query without running it.
+A production host whose own prompt says to inspect every query keeps that
+cost; rewording it there is the host's lever, which the README section names.
 
-Benchmarks: LiveSQLBench primary set (cost) and DABStep (accuracy, where
-retrieval at the point of use mattered), gpt-6-luna and qwen3.8-27b, k=3.
+### Optional paper follow-up
 
-**Running the steps.**
+If the change is later wanted as a measured result, the ladder below is the
+design, and it is not a release gate: step 0 `contract` on v0.64.0; step 1
+`contract` on the new library (descriptions); step 2 `contract_lean_lib`
+(plus the semantic source); step 3 `contract_lean` (plus `LEAN_PROCEDURE`
+replacing `CONTRACT_PROCEDURE`):
 
-- Step 0 runs from a git worktree at tag `v0.64.0` (fetch it first; it is on
-  the remote only), with its own harness environment: the harness installs
-  the library as an editable path (`../..`), so the worktree's harness
-  loads the worktree's library and `commit_sha` names it correctly. Only
-  the `contract` arm runs there, and that arm exists at v0.64.0.
-- The library version is bumped to the release version before steps 1-3
-  run, so `adc_version` (read from installed metadata) separates step 0
-  from step 1 rows, which share arm, model and resume key.
-- Each step writes its own new file (`results/livesqlbench/lean-s{0..3}-
-  {model}-r{1,2,3}.jsonl`, and the DABStep equivalent); the runner's
-  dirty-tree check exempts only the current `--out`, so each finished file
-  is committed before the next sweep starts. Step 0's files are copied in
-  from the worktree.
+> Before writing SQL that computes a metric, look up its domain with
+> lookup_domain and the metric with lookup_metric, and follow both. Run
+> queries with run_query, which validates them; use inspect_query only to
+> check a query without running it.
 
-**Harness changes** (`experiments/dabstep-contract-eval/`):
-
-- `dce/tools.py`: `governed_arm` gains keyword parameters for the procedure
-  and the semantic source, defaulting to today's behaviour (DataAgentBench
-  and `prep/scale/checks.py` call it positionally); `LEAN_PROCEDURE` beside
-  `CONTRACT_PROCEDURE`.
-- LiveSQLBench: the two arms in `extra_arms` / `governed_arms`, and
-  `_roots` entries pointing at `contracts` set directly (not through
-  `EXTRA_CONTRACTS`, which the `extra_contracts=` argument replaces);
-  otherwise `check_arms` and `_build_arm` raise `KeyError`.
-- DABStep: `EXTRA_ARMS`, `GOVERNED_ARMS`, a `build_arm` branch and an
-  `arm_digest` branch for each. The new arms load the same frozen contract
-  as `contract`; their digest is that contract's `digest()` plus the
-  procedure text and the source flag. Existing arms' digests are unchanged.
-- Harness tests that pin the arm lists: `tests/test_arms.py:59-71`,
-  `tests/test_livesqlbench.py:72,85`.
-- A ladder analysis script, modelled on `analysis/clustered.py`'s
-  `drift()`: pairs each step with step 0 by task and repeat, gives
-  task-level intervals plus shape clusters (DABStep) and database clusters
-  (LiveSQLBench), and turn and token deltas.
-- The DABStep lookup shares reuse `analysis/facts_placed.py`'s
-  `lookup_log` (first query naming the `fees` table).
-
-**Report** per step, model and benchmark: turns, uncached and total input
-tokens, tool-call mix, cost, accuracy. On DABStep, from traces: the
-`lookup_log` shares (`lookup_domain("fees")` and, separately,
-`lookup_metric` before the first fee query) and the wildcard-in-first-fee-
-query counts by fee family. On LiveSQLBench, whose domains list no tables,
-the `lookup_domain` and `lookup_metric` call rates only.
-
-**Success**, written into the predictions before the runs. One primary
-contrast per model and benchmark, step 3 against step 0 (four contrasts);
-steps 1 and 2 are diagnostic, to place a drop, not pass/fail.
-
-- Accuracy non-inferior: the lower bound of the task-level paired 95%
-  interval above −5 points (FINDINGS' A/A floor puts identical re-runs at
-  up to 2.8 points of drift, and shape-clustered bounds of identical arms
-  reach −7.8, so a −3 margin would fail on noise). On DABStep the subset is
-  the other 202 tasks, where the retrieval effect sits; the three
-  fee-averaging families are reported on their own. Shape- and
-  database-clustered intervals are reported as sensitivity, not as the
-  test.
-- Cost: mean turns and mean total input tokens per run lower at step 3
-  than step 0, reported with paired intervals. Predicted exception, stated
-  in advance: Qwen on LiveSQLBench may not fall in input tokens, since it
-  caches nothing and the largest contract's index adds about 4k characters
-  per turn.
-- DABStep `lookup_domain("fees")` share before the first fee query does not
-  fall by more than 10 points at step 3.
-
-If accuracy drops, the diagnostic steps place it: step 1 (description
-rewrite), step 2 (source passed) or step 3 (procedure).
-
-Not measured, accepted: a host prompt that says nothing about lookups (no
-procedure at all). There, only the tool descriptions (`lookup_domain`'s
-and `lookup_metric`'s point-of-use clauses) time the lookups.
+on LiveSQLBench (cost) and DABStep (accuracy), gpt-6-luna and qwen3.8-27b,
+k=3, step 3 against step 0, accuracy non-inferior at a -5 point margin and
+the `lookup_domain("fees")` share before the first fee query within 10
+points. Building it needs new arms in `experiments/dabstep-contract-eval/`
+(their digests, the arm-list tests) and a ladder analysis script.
 
 ## Constraints
 

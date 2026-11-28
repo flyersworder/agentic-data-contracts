@@ -87,6 +87,11 @@ class XmlPromptRenderer:
     # constructor argument takes precedence over the class attribute.
     METRIC_DETAIL_THRESHOLD = 20
     RELATIONSHIP_DETAIL_THRESHOLD = 30
+    # Above this many metric index entries (a metric listed under three domains
+    # counts three times) the names are dropped from the prompt. Names cost a
+    # few tokens each; descriptions, which the detail threshold governs, cost a
+    # paragraph.
+    METRIC_INDEX_THRESHOLD = 200
 
     def __init__(
         self,
@@ -94,8 +99,14 @@ class XmlPromptRenderer:
         extra_sections: Sequence[str] | Mapping[str, ExtraSectionRenderer | None] = (),
         metric_detail_threshold: int | None | _Unset = _UNSET,
         relationship_detail_threshold: int | None | _Unset = _UNSET,
+        metric_index_threshold: int | None | _Unset = _UNSET,
     ) -> None:
-        """``None`` for either threshold means "never degrade".
+        """``None`` for any threshold means "never degrade".
+
+        ``metric_index_threshold`` left unset follows the detail threshold's
+        opt-out: ``metric_detail_threshold=None`` also means "never drop metric
+        names". It is resolved at render time, so the attribute can be changed
+        after construction like the other two.
 
         These were class constants until v0.40.0, which made the only opt-out
         subclassing — so the consumer who knows their own prompt budget could not
@@ -130,6 +141,26 @@ class XmlPromptRenderer:
             if relationship_detail_threshold is _UNSET
             else relationship_detail_threshold
         )
+        self.metric_index_threshold: int | None | _Unset = metric_index_threshold
+
+    def _resolve_metric_thresholds(self) -> tuple[int | None, int | None]:
+        """``(detail, index)`` thresholds, read at render time.
+
+        Read through ``getattr`` with the class constants as fallback: before
+        v0.40.0 there was no ``__init__`` here, so a subclass could legally
+        define one of its own and never call ``super().__init__()``. Such an
+        instance has none of these attributes, and the class constants were
+        kept precisely so those subclasses keep working.
+        """
+        detail: int | None = getattr(
+            self, "metric_detail_threshold", self.METRIC_DETAIL_THRESHOLD
+        )
+        index = getattr(self, "metric_index_threshold", _UNSET)
+        if index is _UNSET:
+            # "Never degrade" on the detail threshold has meant "show every
+            # metric" since v0.40.0; dropping names under it would break that.
+            index = None if detail is None else self.METRIC_INDEX_THRESHOLD
+        return detail, index
 
     def render(
         self,
@@ -214,36 +245,94 @@ class XmlPromptRenderer:
         # core decoupled from semantic at module scope.
         from agentic_data_contracts.semantic.base import domain_metric_counts
 
-        domain_counts = domain_metric_counts(
-            semantic_source.get_metrics() if semantic_source is not None else []
-        )
+        metrics = semantic_source.get_metrics() if semantic_source is not None else []
+        domain_counts = domain_metric_counts(metrics)
         lines = ["<available_domains>"]
+        if not metrics:
+            # No source, or a source with no metrics: today's index, whose hint
+            # names the lookup tools. Pinned byte-for-byte by the golden tests.
+            for domain in domains:
+                attrs = f'name="{domain.name}" summary="{domain.summary}"'
+                lines.append(f"  <domain {attrs} />")
+            lines.append(
+                '  <hint>Use lookup_domain("...") for business context,'
+                ' then lookup_metric("...") for SQL definitions.</hint>'
+            )
+            lines.append("</available_domains>")
+            return lines
+
+        cataloged = {d.name for d in domains}
+        members = {
+            d.name: [m.name for m in metrics if d.name in m.domains] for d in domains
+        }
+        others = [m.name for m in metrics if not cataloged.intersection(m.domains)]
+        entries = sum(len(names) for names in members.values()) + len(others)
+        _, index_threshold = self._resolve_metric_thresholds()
+        drop_names = index_threshold is not None and entries > index_threshold
+        if drop_names:
+            self._log_names_dropped(entries, index_threshold)
+
         for domain in domains:
             attrs = f'name="{domain.name}" summary="{domain.summary}"'
             if domain_counts[domain.name]:
                 attrs += f' metric_count="{domain_counts[domain.name]}"'
-            lines.append(f"  <domain {attrs} />")
-        lines.append(
-            '  <hint>Use lookup_domain("...") for business context,'
-            ' then lookup_metric("...") for SQL definitions.</hint>'
-        )
+            names = members[domain.name]
+            if drop_names or not names:
+                lines.append(f"  <domain {attrs} />")
+                continue
+            lines.append(f"  <domain {attrs}>")
+            lines.extend(f'    <metric name="{name}" />' for name in names)
+            lines.append("  </domain>")
+        if others and not drop_names:
+            lines.append("  <other_metrics>")
+            lines.extend(f'    <metric name="{name}" />' for name in others)
+            lines.append("  </other_metrics>")
+
+        # The hints name no tool: a host may wire a subset, and a disabled tool
+        # would leave a dangling reference. Routing lives in each tool's own
+        # description. Both keep the "before computing" constraint.
+        if drop_names:
+            lines.append(
+                f"  <hint>{len(metrics)} metrics have governed SQL definitions;"
+                " their names are omitted here. Each domain's description holds"
+                " rules that apply to its metrics. Look up the domain and the"
+                " metric before computing it.</hint>"
+            )
+        else:
+            lines.append(
+                "  <hint>Each domain's description holds rules that apply to its"
+                " metrics, and each listed metric has a governed SQL definition."
+                " Look up the domain and the metric before computing it.</hint>"
+            )
         lines.append("</available_domains>")
         return lines
+
+    def _log_names_dropped(self, entries: int, threshold: int) -> None:
+        logger.info(
+            "XmlPromptRenderer: %d metric index entries exceed"
+            " metric_index_threshold=%d — metric names omitted from the prompt."
+            " Pass metric_index_threshold=None to list them.",
+            entries,
+            threshold,
+        )
 
     def _render_metrics(
         self,
         contract: DataContract,
         semantic_source: SemanticSource | None,
     ) -> list[str]:
-        """Render the metric index and its lookup-before-computing hint.
+        """Render the no-domain metric index and its lookup-before-computing hint.
 
-        The same imperative is duplicated onto the ``run_query`` /
-        ``inspect_query`` tool descriptions by ``_PROTOCOL_METRIC_ORDERING`` in
-        ``tools.factory``. That is deliberate, not drift: this prompt is opt-in
-        (no ecosystem wrapper injects it), while descriptions travel with the
-        tools on every path. The two are worded differently on purpose — this
-        one aids *discovery*, the description enforces at *call time* — so keep
-        them consistent in intent, not in text.
+        Three levels, by size: names with descriptions; names only, above the
+        detail threshold; a count line, above the index threshold. Every level
+        keeps the "before computing" constraint.
+
+        The same constraint is on the ``run_query`` / ``inspect_query`` tool
+        descriptions (``_PROTOCOL_METRIC_ORDERING`` in ``tools.factory``). That
+        is deliberate, not drift: this prompt is opt-in, while descriptions
+        travel with the tools on every path. The hint names no tool, since a
+        host may not wire ``lookup_metric``; keep the two consistent in intent,
+        not in text.
         """
         if semantic_source is None:
             return []
@@ -253,46 +342,38 @@ class XmlPromptRenderer:
             return []
 
         lines: list[str] = ["<available_metrics>"]
-        # Read through the class attribute: before v0.40.0 there was no
-        # ``__init__`` here, so a subclass could legally define one of its own
-        # and never call ``super().__init__()``. Such an instance has no
-        # ``metric_detail_threshold`` attribute at all, and the class constants
-        # were kept precisely so those subclasses keep working.
-        threshold = getattr(
-            self, "metric_detail_threshold", self.METRIC_DETAIL_THRESHOLD
+        detail_threshold, index_threshold = self._resolve_metric_thresholds()
+        listed_hint = (
+            "  <hint>Each listed metric has a governed SQL definition; look it up"
+            " before computing the metric.</hint>"
         )
-        compact = threshold is not None and len(metrics) > threshold
 
-        if compact:
+        if index_threshold is not None and len(metrics) > index_threshold:
+            self._log_names_dropped(len(metrics), index_threshold)
+            lines.append(
+                f"  <count>{len(metrics)} metrics available; names omitted above"
+                f" {index_threshold} index entries.</count>"
+            )
+            lines.append(
+                f"  <hint>{len(metrics)} metrics have governed SQL definitions;"
+                " their names are omitted here. Look a metric up before"
+                " computing it.</hint>"
+            )
+        elif detail_threshold is not None and len(metrics) > detail_threshold:
             logger.info(
                 "XmlPromptRenderer: %d metrics exceeds"
-                " metric_detail_threshold=%d — per-metric names and descriptions"
-                " omitted from the prompt; agents must call list_metrics to"
-                " browse. Pass metric_detail_threshold=None to render them"
-                " inline.",
+                " metric_detail_threshold=%d — descriptions omitted from the"
+                " prompt; names are still listed. Pass"
+                " metric_detail_threshold=None to render descriptions inline.",
                 len(metrics),
-                threshold,
+                detail_threshold,
             )
-            lines.append(
-                f"  <count>{len(metrics)} metrics available;"
-                f" per-metric descriptions omitted above threshold"
-                f" {threshold}.</count>"
-            )
-            # Carries the same "before computing" imperative as the detailed
-            # branch below. Dropping it here would leave the guidance weakest
-            # precisely where there are the most metrics to get wrong.
-            lines.append(
-                "  <hint>Use list_metrics() to browse,"
-                ' lookup_metric("...") to get SQL definitions'
-                " before computing any KPI.</hint>"
-            )
+            lines.extend(f'  <metric name="{m.name}" />' for m in metrics)
+            lines.append(listed_hint)
         else:
             for m in metrics:
                 lines.append(f'  <metric name="{m.name}">{m.description}</metric>')
-            lines.append(
-                "  <hint>Use lookup_metric tool to get the SQL definition"
-                " before computing any KPI.</hint>"
-            )
+            lines.append(listed_hint)
 
         lines.append("</available_metrics>")
         return lines

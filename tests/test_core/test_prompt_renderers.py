@@ -320,9 +320,10 @@ def test_claude_renderer_metrics_large_set_no_domains() -> None:
     output = renderer.render(contract, semantic_source=source)
 
     assert "<available_metrics>" in output
-    assert "30" in output
-    # Should NOT list individual metrics
-    assert "metric_0 —" not in output
+    # Above the detail threshold: every name, no descriptions.
+    assert '<metric name="metric_0" />' in output
+    assert '<metric name="metric_29" />' in output
+    assert "Description for metric 0" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -583,13 +584,13 @@ def test_metric_threshold_none_never_degrades() -> None:
 
 
 def test_metric_threshold_below_default_degrades_earlier() -> None:
-    """5 metrics go compact at 3 but would stay detailed at the class default 20."""
+    """5 metrics go names-only at 3 but would stay detailed at the default 20."""
     contract = _make_minimal_contract()
     prompt = contract.to_system_prompt(
         FakeSemanticSource(5),
         renderer=XmlPromptRenderer(metric_detail_threshold=3),
     )
-    assert "5 metrics available" in prompt
+    assert '<metric name="metric_0" />' in prompt
     assert '<metric name="metric_0">' not in prompt
 
 
@@ -800,10 +801,13 @@ def test_legacy_subclass_falls_back_to_the_class_attribute_thresholds() -> None:
     class _LegacyLoose(_LegacySubclass):
         RELATIONSHIP_DETAIL_THRESHOLD = 3
         METRIC_DETAIL_THRESHOLD = 2
+        METRIC_INDEX_THRESHOLD = 4
 
     contract = _make_minimal_contract()
     renderer = _LegacyLoose("x")
     assert "join_count=" in renderer.render(contract, _rel_source(5))
+    names_only = renderer.render(contract, FakeSemanticSource(3))
+    assert '<metric name="metric_0" />' in names_only
     assert "5 metrics available" in renderer.render(contract, FakeSemanticSource(5))
 
 

@@ -51,7 +51,10 @@ def test_system_prompt_with_source_and_domains(fixtures_dir: Path) -> None:
     assert "available_domains" in prompt
     assert "revenue" in prompt
     assert "engagement" in prompt
-    assert "lookup_domain" in prompt
+    # The source's metrics are listed by name under each domain they declare.
+    assert '<metric name="total_revenue" />' in prompt
+    assert prompt.count('<metric name="active_customers" />') == 2
+    assert "Look up the domain and the metric before computing it." in prompt
 
 
 def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
@@ -80,7 +83,8 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
     prompt = dc.to_system_prompt(semantic_source=source)
     assert 'name="revenue"' in prompt
     assert 'name="engagement"' in prompt
-    assert "lookup_domain" in prompt
+    assert '<metric name="total_revenue" />' in prompt
+    assert "Look up the domain and the metric before computing it." in prompt
 
 
 def test_system_prompt_backwards_compatible(fixtures_dir: Path) -> None:

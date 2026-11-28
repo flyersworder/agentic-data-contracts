@@ -78,7 +78,7 @@ def test_governed_arm_is_base_procedure_then_contract(tmp_path):
     setup = governed_arm("BASE", db, contract)
     try:
         assert setup.system_prompt == (
-            f"BASE\n\n{CONTRACT_PROCEDURE}\n\n{contract.to_system_prompt()}"
+            f"BASE\n\n{CONTRACT_PROCEDURE}\n\n{contract.to_system_prompt(semantic_source=None)}"
         )
         assert "inspect_query" in CONTRACT_PROCEDURE
         assert setup.session is not None and setup.adapter is not None

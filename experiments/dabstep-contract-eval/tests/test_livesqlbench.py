@@ -413,7 +413,7 @@ def test_the_contract_arm_is_context_procedure_contract_over_governed_tools(
         contract = load_contract_at(contracts / "shop" / "contract.yml")
         assert setup.system_prompt == (
             f"{schema_only.system_prompt}\n\n{CONTRACT_PROCEDURE}\n\n"
-            f"{contract.to_system_prompt()}"
+            f"{contract.to_system_prompt(semantic_source=None)}"
         )
         assert "## Knowledge base" not in setup.system_prompt
         names = [t.name for t in setup.tools]

@@ -382,7 +382,8 @@ one token budget, one working copy of the warehouse, and one task order.
 **The arms are not a clean context-only contrast**, and any writeup has to say
 so: arm C additionally receives 3,042 characters of *procedural* tool
 descriptions from the library (`inspect_query` tells the model it "MUST call
-lookup_metric first"), an arm-C-only workflow sentence, and a `SELECT *`
+lookup_metric first"; as of adc ≤ 0.64, which the published runs used — the
+library rewrote these descriptions after that, #139), an arm-C-only workflow sentence, and a `SELECT *`
 prohibition. The system-prompt size ratio between arms B and C is 9.77x, but
 **4.41x** once tool schemas are counted — and tool schemas are always-on
 context, so 4.41x is the honest number. See the spec's "What this comparison

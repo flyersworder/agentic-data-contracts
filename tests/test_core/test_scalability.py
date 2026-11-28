@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 from agentic_data_contracts.adapters.base import DatabaseAdapter
 from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.prompt import XmlPromptRenderer
 from agentic_data_contracts.core.schema import (
     AllowedTable,
     DataContractSchema,
@@ -99,20 +100,35 @@ class TestCompactMetricPrompt:
         assert "<available_domains>" in prompt
         assert 'name="domain_a"' in prompt
         assert 'summary="Domain A"' in prompt
-        assert "lookup_domain" in prompt
+        assert "Look up the domain and the metric before computing it." in prompt
 
-    def test_large_set_with_domains_shows_domain_index(self) -> None:
+    def test_large_set_with_domains_lists_names_under_domains(self) -> None:
         source = FakeSemanticSource(30)
         dc = _make_contract_with_domains()
         prompt = dc.to_system_prompt(semantic_source=source)
         assert "<available_domains>" in prompt
-        assert 'name="domain_a"' in prompt
         assert 'metric_count="15"' in prompt
-        assert "lookup_domain" in prompt
-        # Should NOT list individual metrics
-        assert 'name="metric_0"' not in prompt
+        # Names only, under their domain: the detail threshold governs
+        # descriptions in the no-domain branch, never domain membership.
+        assert '<metric name="metric_0" />' in prompt
+        assert "Description for metric 0" not in prompt
+        assert "before computing it" in prompt
 
-    def test_large_set_no_domains_shows_count(self) -> None:
+    def test_index_threshold_with_domains_drops_names(self) -> None:
+        source = FakeSemanticSource(30)
+        dc = _make_contract_with_domains()
+        prompt = dc.to_system_prompt(
+            semantic_source=source,
+            renderer=XmlPromptRenderer(metric_index_threshold=20),
+        )
+        assert 'metric_count="15"' in prompt
+        assert 'name="metric_0"' not in prompt
+        # Dropping the names keeps the lookup-before-computing constraint:
+        # the guidance must not be weakest where there are most metrics.
+        assert "30 metrics have governed SQL definitions" in prompt
+        assert "before computing it" in prompt
+
+    def test_large_set_no_domains_lists_names_only(self) -> None:
         source = FakeSemanticSource(30)
         schema = DataContractSchema(
             name="test",
@@ -124,13 +140,21 @@ class TestCompactMetricPrompt:
         )
         dc = DataContract(schema)
         prompt = dc.to_system_prompt(semantic_source=source)
-        assert "30 metrics available" in prompt
-        assert "metric_0 \u2014" not in prompt
-        # The compact branch must carry the same lookup-before-computing
-        # imperative as the detailed branch. Dropping it here would leave the
+        assert '<metric name="metric_0" />' in prompt
+        assert "Description for metric 0" not in prompt
+        # Every degraded level must carry the same lookup-before-computing
+        # constraint as the detailed one. Dropping it would leave the
         # guidance weakest precisely where there are the most metrics to get
         # wrong.
-        assert "before computing any KPI" in prompt
+        assert "before computing the metric" in prompt
+
+        prompt = dc.to_system_prompt(
+            semantic_source=source,
+            renderer=XmlPromptRenderer(metric_index_threshold=20),
+        )
+        assert "30 metrics available" in prompt
+        assert 'name="metric_0"' not in prompt
+        assert "before computing it" in prompt
 
     def test_threshold_boundary(self) -> None:
         # Exactly at threshold — should still list individually
@@ -147,11 +171,13 @@ class TestCompactMetricPrompt:
         prompt = dc.to_system_prompt(semantic_source=source)
         assert 'name="metric_0"' in prompt
 
-        # One above threshold — compact mode
+        assert "Description for metric 0" in prompt
+
+        # One above threshold — names only
         source = FakeSemanticSource(21)
         prompt = dc.to_system_prompt(semantic_source=source)
-        assert 'name="metric_0"' not in prompt
-        assert "21 metrics available" in prompt
+        assert '<metric name="metric_0" />' in prompt
+        assert "Description for metric 0" not in prompt
 
 
 class TestWildcardCaching:

@@ -15,7 +15,7 @@ from agentic_data_contracts.semantic.yaml_source import YamlSource
 def test_system_prompt_without_source_with_domains(fixtures_dir: Path) -> None:
     """Contract with domains but no semantic source renders domain index."""
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
-    prompt = dc.to_system_prompt()
+    prompt = dc.to_system_prompt(semantic_source=None)
     assert "<available_domains>" in prompt
     assert "revenue" in prompt
 
@@ -36,7 +36,7 @@ def test_system_prompt_without_source_no_domains() -> None:
         ),
     )
     dc = DataContract(schema)
-    prompt = dc.to_system_prompt()
+    prompt = dc.to_system_prompt(semantic_source=None)
     assert "<semantic_source>" in prompt
     assert "dbt" in prompt
     assert "Consult" in prompt
@@ -51,7 +51,10 @@ def test_system_prompt_with_source_and_domains(fixtures_dir: Path) -> None:
     assert "available_domains" in prompt
     assert "revenue" in prompt
     assert "engagement" in prompt
-    assert "lookup_domain" in prompt
+    # The source's metrics are listed by name under each domain they declare.
+    assert '<metric name="total_revenue" />' in prompt
+    assert prompt.count('<metric name="active_customers" />') == 2
+    assert "Look up the domain and the metric before computing it." in prompt
 
 
 def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
@@ -80,12 +83,14 @@ def test_system_prompt_with_domains(fixtures_dir: Path) -> None:
     prompt = dc.to_system_prompt(semantic_source=source)
     assert 'name="revenue"' in prompt
     assert 'name="engagement"' in prompt
-    assert "lookup_domain" in prompt
+    assert '<metric name="total_revenue" />' in prompt
+    assert "Look up the domain and the metric before computing it." in prompt
 
 
 def test_system_prompt_backwards_compatible(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
-    # Calling without args should work exactly as before
-    prompt_no_source = dc.to_system_prompt()
+    # semantic_source=None renders exactly as calling without args did before
+    # v0.65.0 (the default now loads the configured source).
+    prompt_no_source = dc.to_system_prompt(semantic_source=None)
     assert "data_contract" in prompt_no_source
     assert "analytics.orders" in prompt_no_source

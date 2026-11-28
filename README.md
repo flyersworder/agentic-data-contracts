@@ -90,9 +90,12 @@ The agent follows a domain-driven workflow — understanding business context be
 2. lookup_domain("revenue")     → "Revenue is recognized at fulfillment, not booking"
 3. lookup_metric("total_revenue") → SUM(amount) FILTER (WHERE status = 'completed')
 4. Agent writes SQL using the metric definition
-5. inspect_query(sql)           → {"valid": true, "estimated_cost_usd": 0.0, ...}
-6. run_query(sql)               → results returned
+5. run_query(sql)               → validated against the contract, then executed
 ```
+
+`inspect_query(sql)` runs the same checks without executing, for when the agent
+wants a cost estimate or to check an expensive query first. It is optional:
+`run_query` never runs a query the contract blocks.
 
 Governance rules are enforced automatically at query time:
 
@@ -277,12 +280,17 @@ from claude_agent_sdk import (
     query,
 )
 
+# Load the semantic source once; the tools and the prompt both use it.
+source = dc.load_semantic_source()
+
 # One-liner: wraps all 9 tools and bundles into an SDK MCP server
-server = create_sdk_mcp_server(dc, adapter=adapter)
+server = create_sdk_mcp_server(dc, adapter=adapter, semantic_source=source)
 
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
-    system_prompt=f"You are a revenue analytics assistant.\n\n{dc.to_system_prompt()}",
+    system_prompt=(
+        "You are a revenue analytics assistant.\n\n" + dc.to_system_prompt(source)
+    ),
     mcp_servers={"dc": server},
     **dc.to_sdk_config(),  # token_budget → task_budget, max_retries → max_turns
 )
@@ -308,7 +316,8 @@ The one rule that makes this safe: **suppress the plugin's bundled `.mcp.json` w
 ```python
 import dataclasses
 
-server = create_sdk_mcp_server(dc, adapter=adapter)
+source = dc.load_semantic_source()
+server = create_sdk_mcp_server(dc, adapter=adapter, semantic_source=source)
 
 opts_kwargs = {
     "model": "claude-sonnet-4-6",
@@ -332,7 +341,7 @@ if {"plugins", "skills", "strict_mcp_config"} <= fields:
     opts_kwargs["system_prompt"] = {  # skills need the claude_code harness
         "type": "preset",
         "preset": "claude_code",
-        "append": dc.to_system_prompt(),  # your governance, appended
+        "append": dc.to_system_prompt(source),  # your governance, appended
     }
 
 options = ClaudeAgentOptions(**opts_kwargs)
@@ -475,29 +484,69 @@ asyncio.run(demo())
 
 </details>
 
+### 4. Recommended production setup
+
+Two things keep an agent's path to a definition short:
+
+- **Let the prompt name the metrics.** `to_system_prompt()` loads the
+  contract's semantic source by default, as `create_tools()` does, and lists
+  every metric by name under its domain, so the agent can go straight to
+  `lookup_domain` / `lookup_metric` without browsing with `list_metrics` first.
+  If you already hold a loaded source, pass it so it is not read twice; pass
+  `semantic_source=None` to render without one (the pre-0.65 prompt).
+
+  ```python
+  source = dc.load_semantic_source()
+  tools = create_tools(dc, adapter=adapter, semantic_source=source)
+  prompt = dc.to_system_prompt(source)
+  ```
+
+- **Say when to look things up, and do not require an inspect before every
+  query.** A sentence like this in your system prompt works well:
+
+  > Before writing SQL that computes a metric, look up its domain with
+  > lookup_domain and the metric with lookup_metric, and follow both. Run
+  > queries with run_query, which validates them; use inspect_query only to
+  > check a query without running it.
+
+  Requiring `inspect_query` before every `run_query` costs a turn per query and
+  adds no checking, since `run_query` runs the same checks. The one trade-off:
+  with `resources.max_retries` set, a blocked `run_query` spends a retry and an
+  inspect does not, so an agent that drafts many blocked queries keeps more of
+  its budget by inspecting first.
+
+The domain and metric lookups are the step worth keeping: the domain's
+description holds the rules that apply across its metrics (how missing values
+or wildcards are read, for example), and the agent is more accurate when it
+reads them just before writing the query.
+
 ## The 9 Tools
 
 | Tool | Description |
 |------|-------------|
-| `describe_table` | Get full column details for an allowed table |
-| `preview_table` | Preview sample rows from an allowed table; returns `{schema, table, columns, rows}` |
+| `describe_table` | Column names, types, nullability and descriptions for an allowed table (semantic-source descriptions first, warehouse comments behind them) |
+| `preview_table` | Sample rows from an allowed table (default 5, at most 100 or `max_result_rows`); returns `{schema, table, columns, rows}` |
 | `list_metrics` | List metric definitions, optionally filtered by domain, tier, or indicator_kind; flags `stale` metrics |
 | `lookup_metric` | Get a metric definition (SQL, tier, indicator_kind, impacts, impacted_by, decompositions, drill_by, owners, freshness); fuzzy search fallback when no exact match |
 | `lookup_domain` | Get full domain context (description, metrics, tables, owners, freshness); fuzzy search fallback |
 | `lookup_relationships` | Look up join paths for a table; finds multi-hop paths when given a target table |
 | `trace_metric_impacts` | Walk the metric graph upstream (drivers) or downstream (affected) from a metric — across both causal impact edges and arithmetic decomposition edges (a metric's operands are drivers of it), filtered by `kinds` |
-| `inspect_query` | Validate a SQL query and estimate its cost via EXPLAIN without executing |
-| `run_query` | Validate and execute a SQL query, returning results as `{columns, rows, row_count, [truncated,] session}` |
+| `inspect_query` | Check a SQL query against the contract, and estimate its cost via EXPLAIN, without executing; optional, since `run_query` runs the same checks |
+| `run_query` | Validate a SQL query and, if it passes, execute it, returning results as `{columns, rows, row_count, [truncated,] session}` |
 
 ### Query protocol
 
 `run_query` and `inspect_query` state the workflow rules in their own tool
 descriptions, not only in the rendered system prompt:
 
-> When computing a metric, you MUST call lookup_metric first and use its governed
-> definition — never invent or adapt a metric formula.
+> When the query computes a metric, look it up with lookup_metric first and use
+> its governed definition as written: a formula written from scratch can pass
+> every check and still be wrong.
 
-plus, on `run_query`, *"Prefer this tool over any other SQL or data-access path."*
+plus, on `run_query`, *"Use this tool rather than any other SQL or data-access
+path, so the contract's checks apply."* `lookup_metric` and `lookup_domain`
+carry the same cue in their own descriptions: fetch the definition, and the
+domain's rules, before writing SQL that computes a metric.
 
 This is deliberate redundancy. The rendered contract prompt is opt-in — if you wire
 `create_langchain_tools(...)` or `create_pydantic_ai_toolset(...)` into an agent with
@@ -510,7 +559,14 @@ nothing tells the model which path is the governed one.
 Each sentence appears only when the capability it names exists — ordering when the
 semantic source actually has metrics, precedence when an adapter is configured (a
 validation-only setup can't execute, so claiming precedence there would point the
-agent at a tool that returns an error).
+agent at a tool that returns an error). The same rule governs every other clause:
+`run_query` mentions the query timeout and result checks only when an adapter is
+configured and the contract declares them, and `inspect_query` mentions retries
+only when `max_retries` is set.
+
+The descriptions are written in plain register — no `MUST` or `NEVER` — and give
+the reason for each constraint. Current models follow instructions literally, and
+shouted imperatives make them over-apply a rule.
 
 ### Result encoding
 
@@ -617,7 +673,7 @@ metrics:
 
 ### How the agent uses domains
 
-The system prompt gives the agent a compact domain index. When a user asks a domain-specific question, the agent explores progressively:
+The system prompt gives the agent a compact domain index: each domain's name and summary, and its member metrics by name (from the contract's semantic source, which `to_system_prompt()` loads by default). When a user asks a domain-specific question, the agent explores progressively:
 
 ```
 lookup_domain("acquisition")        → business context + metric descriptions
@@ -1549,15 +1605,20 @@ print(dc.to_system_prompt(renderer=MarkdownRenderer()))
 
 ### Detail thresholds
 
-`XmlPromptRenderer` degrades its own output above two counts, to keep a large
+`XmlPromptRenderer` degrades its own output above three counts, to keep a large
 contract from dominating the prompt:
 
 | Above | The prompt loses | The agent recovers it with |
 |---|---|---|
-| `metric_detail_threshold` (default 20) | per-metric names and descriptions, replaced by a count | `list_metrics()` / `lookup_metric("...")` |
+| `metric_detail_threshold` (default 20) | per-metric descriptions in a contract without domains; names stay | `lookup_metric("...")` |
+| `metric_index_threshold` (default 200 index entries) | metric names, replaced by a count (domains keep `metric_count`) | `list_metrics()` / `lookup_domain("...")` |
 | `relationship_detail_threshold` (default 30) | per-relationship `<from>` / `<to>` join keys, replaced by per-table `join_count` | `lookup_relationships(table="...")` |
 
-Both are constructor parameters, and `None` disables degradation entirely:
+An index entry is one listing of a metric: a metric in three domains counts
+three times. A contract with domains never shows metric descriptions in the
+prompt, only names. All three are constructor parameters, and `None` disables
+that degradation; leaving `metric_index_threshold` unset follows
+`metric_detail_threshold=None`, so "never degrade" keeps every metric name too:
 
 ```python
 # Render every join key inline, however many there are.
@@ -1571,8 +1632,9 @@ keys are roughly 3x the whole `<table_relationships>` fragment. So when either
 threshold trips, the renderer logs at `INFO` naming the count, the threshold,
 and the parameter that turns it off, and the rendered block says what it
 dropped rather than looking complete. Omitting an argument reads the
-`METRIC_DETAIL_THRESHOLD` / `RELATIONSHIP_DETAIL_THRESHOLD` class attributes, so
-a subclass that overrides them still works.
+`METRIC_DETAIL_THRESHOLD` / `METRIC_INDEX_THRESHOLD` /
+`RELATIONSHIP_DETAIL_THRESHOLD` class attributes, so a subclass that overrides
+them still works.
 
 ### Consumer-authored sections (extras)
 

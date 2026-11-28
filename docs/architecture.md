@@ -626,16 +626,106 @@ agent-facing tool argument — the two carry identical information, so the model
 no basis on which to choose, and a schema field would cost input tokens on every
 request. The value is validated eagerly at `create_tools()` time.
 
+### Metric Index in the Prompt (v0.65.0, #139)
+
+Governed agents used to spend more turns than the same agent given plain SQL,
+for the same accuracy. On LiveSQLBench (gpt-6-luna, k=3) the `contract` arm
+averaged 6.2 turns and 13k uncached input tokens a run against 4.1 and 3k for
+plain SQL, at 35.9% vs 36.8% accuracy. The extra turns were the *path* to a
+definition: `list_metrics` to learn names, and an `inspect_query` before every
+`run_query`. They were not the lookups themselves. DABStep's evidence
+(FINDINGS, "Where the tools help: retrieval at the point of use, not
+validation") puts the tools' accuracy lead in the domain and metric lookups
+made just before a metric query: the domain description carries the
+null-means-all fee rule, and an arm with every definition pasted into its
+prompt lost those tasks. That evidence is exploratory (luna-only, task-level),
+which is why the design protects the lookups rather than relying on them.
+
+So the change shortens the path and keeps the lookups:
+
+- **Names in the prompt, definitions behind the lookups.** Given a semantic
+  source, `XmlPromptRenderer` lists each domain's member metrics by name, and
+  metrics outside every cataloged domain in one `<other_metrics>` group.
+  Descriptions are never added (a metric description is often a paragraph), and
+  neither is SQL. Without a source the rendering is byte-for-byte v0.64.0,
+  which golden tests pin.
+- **The source is loaded by default.** `to_system_prompt()` loads the
+  contract's configured source when the caller passes none, the same default
+  as `create_tools()`: otherwise the tools know the metrics while the prompt
+  never names them. `semantic_source=None` is the explicit opt-out, and a
+  declared source that cannot be loaded raises `SemanticSourceUnavailableError`,
+  failing closed as `create_tools()` does. Rendering therefore reads the source
+  file unless the caller passes one, so a host should load it once and pass it
+  to both. `bridge.compile_to_contract` takes the same keyword. The evaluation
+  harness pins `semantic_source=None`, so the benchmark arms keep the prompts
+  the published runs saw.
+- **Hints name no tool.** A host may wire a subset of the tools, and a disabled
+  tool would leave a dangling reference. Each hint keeps the "look it up before
+  computing" constraint. Routing lives in each tool's own description (next
+  section).
+- **Thresholds.** `metric_detail_threshold` (20) now drops descriptions, never
+  names. Names drop only above `metric_index_threshold` (default 200 index
+  entries; a metric in three domains counts three times), since names cost a
+  few tokens each. When left unset, the index threshold follows
+  `metric_detail_threshold=None` (never degrade), then the class's
+  `METRIC_INDEX_THRESHOLD`. It is resolved at render time through `getattr`,
+  so pre-v0.40.0 subclasses that never call `super().__init__()` still work.
+  The largest real contracts measured listed 20-86 entries.
+
+**Rejected alternatives.** Putting metric SQL in the prompt and dropping the
+lookup instruction is the cheapest per token, but it is the pasted-text design
+that trailed the tools by about 5 points on DABStep's fee families.
+`lookup_domain` returning every member's full definition saves one hop, but
+returns mostly unused SQL. A batch `lookup_metric` was dropped: parallel tool
+calls already fetch several metrics in one turn, and the recorder would need
+per-name results.
+
+**How it was checked.** It was a library change, not a paper result, so the
+release gate was tests plus a live before/after trace check. Ten metric
+questions on `examples/revenue_agent` ran on v0.64.0 and v0.65.0 under the
+same recommended prompt, with two OpenRouter models (glm-5.3-flash,
+deepseek-v4-flash):
+
+- Turns fell from 5.0 to 4.0 (glm) and from 5.2 to 4.2 (deepseek); input
+  tokens fell 10% and 15%.
+- `inspect_query` and `list_metrics` calls fell to zero.
+- `lookup_domain` and the expected metric's `lookup_metric` came before the
+  first query in 20 of 20 runs (18 of 20 on v0.64.0).
+- All 40 answers were correct.
+
+A measured version for the paper would run a ladder on LiveSQLBench and
+DABStep, each step adding one change: the descriptions, then the source
+passed, then the lean procedure. Its contrasts would be accuracy
+non-inferiority at -5 points on DABStep's non-rule-matching tasks, and the
+`lookup_domain("fees")` share before the first fee query staying within 10
+points.
+
 ### Query Protocol in the Tool Descriptions
 
 `run_query` and `inspect_query` carry two protocol clauses in their descriptions
 (`_PROTOCOL_METRIC_ORDERING`, `_PROTOCOL_PRECEDENCE` in `tools/factory.py`): an
-**ordering** rule — when computing a metric, call `lookup_metric` first and use its
-governed definition, never invent or adapt a formula — and, on `run_query` only, a
-**precedence** claim that it is preferred over any other SQL or data-access path.
+**ordering** rule — when the query computes a metric, look it up with
+`lookup_metric` first and use its governed definition as written — and, on
+`run_query` only, a **precedence** claim that it is the path to use over any other
+SQL or data-access path, so the contract's checks apply. Both are in plain
+register with their reason: current models follow instructions literally, and
+`MUST` / `NEVER` over-trigger.
 
-The guidance duplicates hints `XmlPromptRenderer` already emits, and the
-duplication is deliberate. The rendered prompt is **opt-in**: none of the ecosystem
+The ordering clause is a deliberate exception to "a tool's routing lives in its
+own description": the constraint is about the query, so it sits on the query
+tools. The only other cross-reference is `inspect_query` naming `run_query`, the
+tool inspecting is optional to. Outside the ordering clause `run_query` names no
+other tool, so without metrics it stands alone when a host passes a subset of
+the tools.
+Otherwise each tool says when to use itself — `lookup_metric` and `lookup_domain`
+carry the point-of-use cue (before writing SQL that computes a metric), and
+`inspect_query` says inspecting first is optional because `run_query` applies the
+same checks.
+
+The guidance restates the "look it up before computing" constraint that
+`XmlPromptRenderer`'s metric hints carry, and the duplication is deliberate. (The
+hints themselves name no tool: a host may wire a subset of the tools, and a
+disabled tool would leave a dangling reference.) The rendered prompt is **opt-in**: none of the ecosystem
 wrappers inject it, so a host calling `create_langchain_tools` or
 `create_pydantic_ai_toolset` and supplying its own system prompt may never render
 the contract at all. Descriptions travel with the tools on every path. The two
@@ -643,8 +733,16 @@ surfaces do different jobs — the prompt hint aids *discovery* (the tool exists
 the description enforces at *call time* — and only one of them survives a
 host that writes its own prompt.
 
-One rule governs both clauses: **a clause appears only when the capability it names
-exists.**
+One rule governs every description clause: **a clause appears only when the
+capability it names exists.** Besides the two below: return shapes of
+`describe_table` / `preview_table` and `inspect_query`'s cost estimate need an
+adapter, `run_query`'s timeout and result-check sentences need an adapter and the
+contract to declare them, and `inspect_query`'s retry sentence needs
+`max_retries`. Each states only what the code does: the timeout says the query is
+stopped only for a `TimeoutAdapter` (otherwise the tool stops waiting and the
+database may still be running it), result checks are described by their
+enforcement (block, warn or log), and `lookup_relationships` says when to use it
+only when the source declares relationships.
 
 - **Ordering is gated on metrics.** `metric_ordering` resolves to `""` when
   `metric_names_set` is empty, so a schema-only contract never points the agent at
@@ -664,13 +762,13 @@ shape the text:
   the class no checker catches. (The design was informed by
   [Erupt Cube × LLM](https://docs.erupt.xyz/en/topics/cube-llm), which enforces an
   equivalent protocol in its tool descriptions but triggers on any query.)
-- **Precedence on `run_query` only,** never `inspect_query`, which executes nothing
-  and already argues its own precedence ("before spending retry budget on
-  run_query").
+- **Precedence on `run_query` only,** never `inspect_query`, which executes
+  nothing.
 
 Descriptions are re-sent on every model request, so each clause is one sentence.
 `tests/test_tools/test_tool_protocol.py` pins the placement, including a scope
-guard that the other seven descriptions carry neither clause.
+guard that the other seven descriptions carry neither clause;
+`tests/test_tools/test_tool_descriptions.py` pins the gating and the register.
 
 ### Error Signalling (`is_error` → MCP `isError`)
 
@@ -761,10 +859,16 @@ is client UX (skipping confirmations on safe tools), not enforcement.
 ### Natural Agent Workflow
 
 ```
-list_metrics → lookup_metric → lookup_relationships → describe_table
-    → write SQL → inspect_query
-    → (if valid) run_query
+prompt index (domains, metric names) → lookup_domain → lookup_metric
+    → lookup_relationships / describe_table (as needed)
+    → write SQL → run_query (validates, then executes)
 ```
+
+`list_metrics` is for browsing when the metric's name is not known, and
+`inspect_query` for checking a query without running it; neither is a required
+step. The metric names reach the prompt whenever the contract configures a
+semantic source, which `to_system_prompt()` loads by default, unless the caller
+passes `semantic_source=None`.
 
 ### Tool Factory
 

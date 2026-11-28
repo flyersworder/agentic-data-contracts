@@ -24,8 +24,10 @@ def test_from_yaml_string(fixtures_dir: Path) -> None:
 
 
 def test_to_system_prompt(fixtures_dir: Path) -> None:
+    # valid_contract.yml declares a dbt manifest the fixtures do not ship; this
+    # renders without a source (see test_prompt_autoload.py for the default).
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
-    prompt = dc.to_system_prompt()
+    prompt = dc.to_system_prompt(semantic_source=None)
     assert "analytics.orders" in prompt
     assert "analytics.customers" in prompt
     assert "DELETE" in prompt
@@ -37,7 +39,7 @@ def test_to_system_prompt(fixtures_dir: Path) -> None:
 def test_to_system_prompt_composable(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
     user_prompt = "You are an analytics assistant."
-    combined = f"{user_prompt}\n\n{dc.to_system_prompt()}"
+    combined = f"{user_prompt}\n\n{dc.to_system_prompt(semantic_source=None)}"
     assert combined.startswith("You are an analytics assistant.")
     assert "analytics.orders" in combined
 

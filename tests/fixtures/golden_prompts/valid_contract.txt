@@ -1,0 +1,31 @@
+<data_contract name="revenue-analysis">
+<allowed_tables>
+Only query these tables:
+- analytics.orders
+- analytics.customers
+- analytics.subscriptions
+</allowed_tables>
+<available_domains>
+  <domain name="revenue" summary="Revenue and financial metrics from completed orders" />
+  <domain name="engagement" summary="Customer activity and retention patterns" />
+  <hint>Use lookup_domain("...") for business context, then lookup_metric("...") for SQL definitions.</hint>
+</available_domains>
+<resource_limits>
+  <cost_limit_usd>5.00</cost_limit_usd>
+  <max_query_time_seconds>30.0</max_query_time_seconds>
+  <max_retries>3</max_retries>
+  <max_rows_scanned>1000000</max_rows_scanned>
+  <token_budget>50000</token_budget>
+  <max_duration_seconds>300.0</max_duration_seconds>
+</resource_limits>
+<constraints>
+Forbidden operations: DELETE, DROP, TRUNCATE, UPDATE, INSERT
+
+Rules (violations block execution):
+- [tenant_isolation] All queries must include a WHERE tenant_id = filter
+- [no_select_star] Queries must specify explicit columns, no SELECT *
+
+Rules (violations produce warnings):
+- [use_approved_metrics] Revenue calculations must use the semantic layer definition
+</constraints>
+</data_contract>

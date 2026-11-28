@@ -140,13 +140,15 @@ def main() -> None:
     print(f"Caller: {args.caller}\n")
 
     try:
-        asyncio.run(_run_with_sdk(dc, tools, prompt))
+        asyncio.run(_run_with_sdk(dc, semantic, tools, prompt))
     except (ImportError, AttributeError):
         print("claude-agent-sdk not available. Running demo mode.\n")
         asyncio.run(_run_demo(dc, semantic, tools, prompt, args.caller, adapter))
 
 
-async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
+async def _run_with_sdk(
+    dc: DataContract, semantic: YamlSource, tools: list, prompt: str
+) -> None:
     from claude_agent_sdk import (  # type: ignore[import]
         AssistantMessage,
         ClaudeAgentOptions,
@@ -196,7 +198,7 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
         opts_kwargs["system_prompt"] = {
             "type": "preset",
             "preset": "claude_code",
-            "append": f"{ops_policy}\n\n{dc.to_system_prompt()}",
+            "append": f"{ops_policy}\n\n{dc.to_system_prompt(semantic)}",
         }
         print(
             f"[plugin overlay] data-plugin skills enabled from {plugin_path} "
@@ -204,7 +206,9 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
         )
     else:
         # Governed-tools-only path (default). Plain-string prompt works on any SDK.
-        opts_kwargs["system_prompt"] = f"{ops_policy}\n\n{dc.to_system_prompt()}"
+        opts_kwargs["system_prompt"] = (
+            f"{ops_policy}\n\n{dc.to_system_prompt(semantic)}"
+        )
         if plugin_path is None:
             print(
                 "[plugin overlay] disabled — set DATA_PLUGIN_PATH to a local "

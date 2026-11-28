@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.65.0] - Unreleased
+
+Shortens an agent's path to a metric definition (#139). Governed agents spent more turns than the same agent given plain SQL access, for the same accuracy: they browsed with `list_metrics` to learn metric names and inspected every query before running it. The domain and metric lookups just before a metric query are the step that earns accuracy, so they stay; the hops around them go.
+
+### Added
+
+- **Metric names in the prompt index, from the contract's semantic source.** Each `<domain>` lists its member metrics by name (a metric in several domains is listed under each), and metrics outside every cataloged domain are listed in one `<other_metrics>` group. Descriptions are never added: a metric description is often a paragraph. The agent can go straight to `lookup_domain` / `lookup_metric` without a `list_metrics` call to learn names.
+- **`XmlPromptRenderer(metric_index_threshold=...)` and the class constant `METRIC_INDEX_THRESHOLD = 200`.** Above that many index entries (a metric in three domains counts three times) the names are dropped: domains render as before with `metric_count`, and a contract without domains renders a count line. `None` never drops names. `renderer.metric_index_threshold` reads as the resolved value and can be set after construction. Left unset, it follows `metric_detail_threshold`: `metric_detail_threshold=None` means "never drop names" too, resolved at render time, and a subclass's `METRIC_INDEX_THRESHOLD` (including one that never calls `super().__init__()`) is honoured.
+
+### Changed
+
+- **`to_system_prompt()` loads the contract's semantic source by default**, the same default as `create_tools()`, so the prompt names the metrics the tools already know. Before, it rendered without a source unless one was passed. **This changes the prompt of every caller whose contract configures a source**, on upgrade and with no code change: it gains the metric index and the new hints below. It also reads the source file on each call unless you pass a loaded source: load it once and pass it to both `create_tools()` and `to_system_prompt()`. A declared source that cannot be loaded now raises `SemanticSourceUnavailableError` from `to_system_prompt()` too, failing closed as `create_tools()` does; before, the prompt rendered without it.
+- **`semantic_source=None` renders the v0.64.0 prompt.** Pass it explicitly to opt out. That rendering, including the domain hint naming `lookup_domain` / `lookup_metric`, is pinned byte-for-byte by golden tests, and so is a source with no metrics. A contract with no `semantic.source` renders as before.
+- **`bridge.compile_to_contract(dc, *, semantic_source=...)`** takes the same keyword and default for the contract's instructions.
+- **With a source, the metric hints name no tool.** A host may wire a subset of the tools, and a disabled tool would leave a dangling reference. Each hint keeps the "look it up before computing" constraint; with domains it also says the domain's description holds rules that apply to its metrics. A prompt-snapshot test of a source-passed prompt will see the new hint text.
+- **`metric_detail_threshold` now drops descriptions, not names.** A contract without domains and with more metrics than the threshold (default 20) listed only a count; it now lists every name, without descriptions, up to the index threshold. A caller who already passes a source to such a contract with 21-200 metrics gets the names added; the INFO log it already saw on every render now says descriptions were omitted and names are still listed, instead of saying agents "must call list_metrics". Every degradation log says what was omitted and which argument restores it.
+- **Tool descriptions rewritten as contracts in plain register.** Each says what the tool returns, when to use it and what it does not return, and each clause appears only when the capability it names exists. Input schemas are unchanged.
+  - `inspect_query` says inspecting first is optional, since `run_query` applies the same checks; when `max_retries` is set it adds that a blocked or failed `run_query` spends a retry and `inspect_query` does not. Its "use this before spending retry budget" line, which read as "inspect every query", is gone.
+  - `run_query` says the checks run first and a blocked query is not run, and names no other tool outside the metric clause (which names `lookup_metric`). With an adapter, it mentions the query timeout and result checks only when the contract declares them: the timeout says the query is stopped only for an adapter that can cancel (`TimeoutAdapter`), and result checks are described by their enforcement (can block the result, add warnings, or are logged).
+  - `lookup_metric` and `lookup_domain` carry the point-of-use cue: use them before writing SQL that computes a metric, because the definition and the domain's rules are governed. `lookup_domain`'s "before querying", which read as every query, is gone.
+  - `describe_table` and `preview_table` state what they return, with an adapter; `preview_table` states its default and row cap (at most 100, or `max_result_rows` when lower). Without an adapter, both say what they are and nothing more, since they return an error.
+  - `list_metrics` is for browsing when the metric's name is not known (a cue it carries only when metrics exist); `lookup_relationships` says to use it when a query joins tables, when the source declares relationships.
+  - The metric constraint on `run_query` / `inspect_query` and the precedence clause on `run_query` drop `MUST` / `never` and give their reason. Callers asserting on exact description text need to update; `_PROTOCOL_METRIC_ORDERING` and `_PROTOCOL_PRECEDENCE` still hold the two clauses.
+
+### Documentation
+
+- **README: "Recommended production setup".** Load the semantic source once and pass it to both `create_tools()` and `to_system_prompt()`, and a system-prompt sentence that asks for the domain and metric lookups before a metric query without requiring an inspect before every query, with the `max_retries` trade-off. The README quickstarts and the three examples' SDK paths load the source once and pass it to both the tools and `to_system_prompt()`. The revenue example prints the metric index, and its golden output covers it.
+- The evaluation harness's notes on the library's tool descriptions are marked "as of adc ≤ 0.64": they describe what the published runs saw.
+- The per-feature design spec is folded into `docs/architecture.md` ("Metric Index in the Prompt"): rationale, rejected alternatives, thresholds, and the before/after check.
+
+### Internal
+
+- **Dependency refresh.** The root lock takes 23 updates, among them `pydantic-ai-slim` 2.71.0 -> 2.77.0, `sqlglot` 30.33.0 -> 30.35.0 (Layer 1 static analysis), `duckdb` 2.0.0 -> 2.0.1, `anthropic` 2.11.0 -> 2.14.0, `claude-agent-sdk` 0.2.185 -> 0.2.189, `langchain-core` 1.8.3 -> 1.8.5 and `httpx` 0.28.1 -> 0.29.0. No declared floor moves; the lowest-floor suite passes on 3.12 and 3.13, and `uv-secure` reports no advisories. DuckDB 2.0.1 estimates the revenue example's region query at 3 rows (its actual count) instead of 1, so that example's golden `inspect_query` line changes. `experiments/mermaid-joinpath-eval` is upgraded separately (`openai` 3.55.1 -> 3.60.0, `sqlglot` 30.33.0 -> 30.35.0; its 37 tests pass). `experiments/dabstep-contract-eval` takes only the self version: its lock pins the third-party versions of the paper's evaluation panel. It installs this library editable from the repo, so a rerun from v0.65.0 sees the new tool descriptions; its rows record `adc_version`, and runs on either side of 0.65 should not be pooled. Its governed arms pass `semantic_source=None`, so their prompts stay as the published runs saw them.
+- **Pre-commit hooks bumped** (ty; ruff was current). The pinned revs live in `.pre-commit-config.yaml`.
+
 ## [0.64.0] - 2026-11-19
 
 ### Compatibility

@@ -1,0 +1,16 @@
+<data_contract name="principals_test_contract">
+<allowed_tables>
+Only query these tables:
+- analytics.orders
+- hr.salaries
+- raw.audit_log
+- sealed.top_secret
+</allowed_tables>
+<constraints>
+Forbidden operations: DELETE, DROP, INSERT, UPDATE
+
+Rules (violations block execution):
+- [alice_only_column_block] Demonstrate per-rule allowlist gating a column block.
+- [non_intern_column_block] Demonstrate per-rule blocklist scoping a column block.
+</constraints>
+</data_contract>

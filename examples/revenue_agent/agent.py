@@ -116,13 +116,15 @@ def main() -> None:
     tools = create_tools(dc, adapter=adapter, semantic_source=semantic)
 
     try:
-        asyncio.run(_run_with_sdk(dc, tools, prompt))
+        asyncio.run(_run_with_sdk(dc, semantic, tools, prompt))
     except (ImportError, AttributeError):
         print("claude-agent-sdk not available or incompatible. Running demo mode.\n")
         asyncio.run(_run_demo(dc, semantic, tools, prompt))
 
 
-async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
+async def _run_with_sdk(
+    dc: DataContract, semantic: SemanticSource, tools: list, prompt: str
+) -> None:
     from claude_agent_sdk import (  # type: ignore[import]
         AssistantMessage,
         ClaudeAgentOptions,
@@ -185,7 +187,7 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
         opts_kwargs["system_prompt"] = {
             "type": "preset",
             "preset": "claude_code",
-            "append": f"{user_prompt}\n\n{dc.to_system_prompt()}",
+            "append": f"{user_prompt}\n\n{dc.to_system_prompt(semantic)}",
         }
         print(
             f"[plugin overlay] data-plugin skills enabled from {plugin_path} "
@@ -193,7 +195,9 @@ async def _run_with_sdk(dc: DataContract, tools: list, prompt: str) -> None:
         )
     else:
         # Governed-tools-only path (default). Plain-string prompt works on any SDK.
-        opts_kwargs["system_prompt"] = f"{user_prompt}\n\n{dc.to_system_prompt()}"
+        opts_kwargs["system_prompt"] = (
+            f"{user_prompt}\n\n{dc.to_system_prompt(semantic)}"
+        )
         if plugin_path is None:
             print(
                 "[plugin overlay] disabled — set DATA_PLUGIN_PATH to a local "
@@ -340,6 +344,17 @@ async def _run_demo(
     # bookkeeping never inflates the prompt.
     renderer = XmlPromptRenderer(extra_sections=["column_hints", "join_paths"])
     rendered = dc.to_system_prompt(semantic, renderer=renderer)
+
+    # ── Metric index ─────────────────────────────────────────────────────────
+    # Passing the semantic source puts every metric's *name* under its domain,
+    # so the agent can go straight to lookup_domain / lookup_metric instead of
+    # browsing with list_metrics first. Definitions stay behind the lookups:
+    # the domain's rules and the metric's SQL arrive just before the query.
+    start = rendered.index("<available_domains>")
+    end = rendered.index("</available_domains>") + len("</available_domains>")
+    print("\n=== Metric index in the system prompt ===")
+    print(rendered[start:end])
+
     start = rendered.index("<column_hints>")
     end = rendered.index("</join_paths>") + len("</join_paths>")
     print("\n=== Extras resident in the system prompt ===")

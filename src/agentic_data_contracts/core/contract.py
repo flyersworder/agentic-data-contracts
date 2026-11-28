@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 from pathlib import Path
@@ -30,6 +31,19 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class _Default(enum.Enum):
+    """Sentinel for "load the contract's own semantic source".
+
+    ``None`` already means "render without a source", so the default needs a
+    value of its own. A one-member enum narrows cleanly for type checkers.
+    """
+
+    TOKEN = enum.auto()
+
+
+_LOAD_FROM_CONFIG = _Default.TOKEN
 
 
 class SemanticSourceUnavailableError(RuntimeError):
@@ -318,7 +332,7 @@ class DataContract:
 
     def to_system_prompt(
         self,
-        semantic_source: SemanticSource | None = None,
+        semantic_source: SemanticSource | None | _Default = _LOAD_FROM_CONFIG,
         *,
         renderer: PromptRenderer | None = None,
         principal: str | None = None,
@@ -326,7 +340,15 @@ class DataContract:
         """Generate a formatted system prompt section for an AI agent.
 
         Args:
-            semantic_source: Optional semantic source for metric/relationship data.
+            semantic_source: The semantic source for metric/relationship data.
+                Left out, the contract's configured source is loaded, the same
+                default as ``create_tools()``, so the prompt can name the
+                metrics the tools already know; a declared source that cannot
+                be loaded raises ``SemanticSourceUnavailableError``, as it does
+                there. Pass ``None`` to render without a source (the v0.64.0
+                rendering), or a source to use instead of the configured one.
+                Callers that already hold a loaded source should pass it, so it
+                is not read twice.
             renderer: Optional custom prompt renderer. Defaults to XmlPromptRenderer.
             principal: Resolved caller identity. Renderers use this to filter
                 per-principal sections (e.g. `required_filter_values`) so the
@@ -336,4 +358,6 @@ class DataContract:
             from agentic_data_contracts.core.prompt import XmlPromptRenderer
 
             renderer = XmlPromptRenderer()
+        if semantic_source is _LOAD_FROM_CONFIG:
+            semantic_source = self.load_semantic_source()
         return renderer.render(self, semantic_source, principal=principal)

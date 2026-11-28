@@ -292,36 +292,44 @@ _ROW_FORMATS: tuple[RowFormat, ...] = ("compact", "records")
 
 _COMPACT_ROWS_NOTE = " Rows are arrays of values positionally aligned to `columns`."
 
-# Protocol clauses appended to the two query-tool descriptions. They restate
-# guidance XmlPromptRenderer._render_metrics already emits, and the
-# duplication is deliberate:
+# Protocol clauses appended to the two query-tool descriptions. The metric
+# clause restates the "look it up before computing" constraint that
+# XmlPromptRenderer's metric hints carry, and the duplication is deliberate:
 # the rendered prompt is opt-in (a host wiring create_langchain_tools or
 # create_pydantic_ai_tools into its own agent supplies its own system prompt and
 # may never render the contract), while descriptions travel with the tools on
-# every path. Governance that only holds when the host cooperates is not
-# governance. Kept to one sentence each -- descriptions are re-sent on every
-# model request, so this text is billed for the life of the session.
+# every path. Besides inspect_query naming run_query (the tool inspecting is
+# optional to), it is the only place a description names another tool: the
+# constraint is about the query, so it has to sit on the query tools. Kept to
+# one sentence each -- descriptions are re-sent on every model request, so this
+# text is billed for the life of the session.
 #
-# The trigger clause is deliberately narrow. "Before ANY query" would tax plain
-# exploratory SQL with a lookup turn that finds nothing; the failure actually
-# being guarded is a KPI computed from an invented formula, which no checker
-# catches because such SQL is authorized -- merely wrong.
+# Plain register, with the reason: current models follow instructions
+# literally, and MUST / NEVER over-trigger. The trigger is deliberately narrow.
+# "Before ANY query" would tax plain exploratory SQL with a lookup turn that
+# finds nothing; the failure actually being guarded is a KPI computed from an
+# invented formula, which no checker catches because such SQL is authorized --
+# merely wrong.
 _PROTOCOL_METRIC_ORDERING = (
-    " When computing a metric, you MUST call lookup_metric first and use its"
-    " governed definition — never invent or adapt a metric formula."
+    " When the query computes a metric, look it up with lookup_metric first and"
+    " use its governed definition as written: a formula written from scratch"
+    " can pass every check and still be wrong."
 )
 
 # Only run_query claims precedence: it is a claim about *execution* routing (do
 # not reach for a generic SQL tool or shell instead of the governed path).
-# inspect_query executes nothing, and already argues its own precedence.
+# inspect_query executes nothing.
 #
 # Gated on an adapter for the same reason the ordering clause is gated on
 # metrics: without one, run_query returns "No database adapter configured" and
 # the sentence becomes a false claim about the tool's capability -- steering the
-# agent away from a path that works and onto one that cannot execute. Both
-# clauses obey one rule: a clause appears only when the capability it names
-# exists.
-_PROTOCOL_PRECEDENCE = " Prefer this tool over any other SQL or data-access path."
+# agent away from a path that works and onto one that cannot execute. Every
+# description clause obeys one rule: it appears only when the capability it
+# names exists.
+_PROTOCOL_PRECEDENCE = (
+    " Use this tool rather than any other SQL or data-access path, so the"
+    " contract's checks apply."
+)
 
 # What `trace_metric_impacts` will serialize into an agent's context. The walk
 # itself is complete and uncapped: a graph primitive that silently truncates is
@@ -1954,13 +1962,196 @@ def create_tools(
             _record("error", detail=str(e))
             raise
 
+    # ── Descriptions ──────────────────────────────────────────────────────────
+    # Contracts, in plain register: what the tool does and returns, when to use
+    # it, what it does not return. Each clause is gated on the capability it
+    # names, like `metric_ordering` and `precedence` above.
+    has_domains = bool(contract.schema.semantic.domains)
+    result_check_rules = [
+        r for r in contract.schema.semantic.rules if r.result_check is not None
+    ]
+    # What a result check does depends on its enforcement: only block ones can
+    # block a result, warn ones add warnings, log ones are logged. Claiming
+    # more is the same class of false claim as precedence without an adapter.
+    result_check_enforcements = {r.enforcement for r in result_check_rules}
+    max_retries = resources.max_retries if resources else None
+    preview_cap = 100 if max_result_rows is None else min(100, max_result_rows)
+    preview_default = min(5, preview_cap)
+    # Only a source that declares relationships has join keys to return.
+    relationships_cue = (
+        " Use it when a query joins tables, to get the governed join keys and"
+        " any filter a join requires."
+        if _rel_index
+        else ""
+    )
+
+    describe_desc = (
+        "Describe one allowed table: its columns as they exist in the database."
+    )
+    if adapter is not None:
+        describe_desc += (
+            " Returns each column's name, type and nullability, the column's"
+            " description where one exists, and the table's description where one"
+            " exists."
+        )
+        # Gated on the source, not on `folded_tables`: that bulk index can be
+        # empty while `_semantic_table`'s exact lookup still finds the table.
+        if semantic_source is not None:
+            describe_desc += (
+                " Descriptions come from the governed semantic source first and"
+                " from warehouse comments behind it, and a note flags declared"
+                " columns the database no longer has."
+            )
+        # Without an adapter the tool returns an error, so it gets no usage cue.
+        describe_desc += (
+            " Use it to learn a table's shape before writing SQL against it."
+            " It returns no rows and no join keys."
+        )
+
+    preview_desc = "Show sample rows from one allowed table."
+    if adapter is not None:
+        preview_desc += (
+            f" Returns `limit` rows (default {preview_default}, at most"
+            f" {preview_cap} rows) with their column names."
+            " Use it to see what values look like (formats, codes, how empty"
+            " values are stored) before filtering on them. The rows are an"
+            " arbitrary sample, not a filtered or ordered result, so they answer"
+            " no question on their own."
+        )
+        preview_desc += rows_note
+
+    list_metrics_desc = (
+        "List governed metrics, optionally filtered by domain, tier"
+        " (north_star / department_kpi / team_kpi) or indicator_kind (leading /"
+        " lagging). Each entry has the metric's name, description and source"
+        " model, its tier and indicator_kind when set, and `stale` when its"
+        " review is overdue."
+    )
+    if metric_names_set:
+        list_metrics_desc += (
+            " Use it to browse when you do not know which metric you need, or"
+            " to find a domain's north-star or leading indicators."
+        )
+    list_metrics_desc += " It returns no SQL definitions."
+
+    lookup_metric_desc = (
+        "Return one metric's governed definition by name: its SQL expression"
+        " and filters, and, where declared, its grain, base query, domains,"
+        " tier, indicator_kind, decompositions, owners, review freshness and"
+        " metric-impact edges (impacts and impacted_by, each with direction,"
+        " confidence and evidence). A name with no exact match returns close"
+        " candidates when there are any."
+    )
+    if metric_names_set:
+        lookup_metric_desc += (
+            " Use it before writing SQL that computes a metric: the definition"
+            " (its filters, units, and how wildcards or missing values are"
+            " read) is governed, and the query has to follow it."
+        )
+    if _metric_impacts:
+        lookup_metric_desc += (
+            " Use the impact edges to reason about drivers and downstream effects."
+        )
+
+    lookup_domain_desc = (
+        "Return a business domain by name: its summary and full description,"
+        " its member metrics (name and description), the tables it covers"
+        " when listed, and its owners and review freshness where declared."
+    )
+    if has_domains:
+        lookup_domain_desc += (
+            " The description holds rules that apply across the domain's"
+            " metrics, such as how missing values or wildcards are read."
+        )
+        if metric_names_set:
+            lookup_domain_desc += (
+                " Fetch it before writing SQL that computes one of the domain's"
+                " metrics, because the query has to follow those rules."
+            )
+    lookup_domain_desc += " It returns no SQL definitions."
+
+    inspect_desc = (
+        "Check a SQL query against the contract without running it. Returns"
+        " structured JSON with: `valid` (bool), `violations` (block-enforcement"
+        " rule messages), `warnings` (warn-enforcement rule messages),"
+        " `log_messages` (log-enforcement rule messages), `schema_valid` and"
+        " `explain_errors` (from the EXPLAIN layer), and"
+        " `pending_result_checks` (result checks that would run after"
+        " execution)."
+    )
+    if adapter is not None:
+        inspect_desc += (
+            " Also includes `estimated_cost_usd` and `estimated_rows` from EXPLAIN."
+        )
+        inspect_desc += (
+            " Use it to check an expensive query, or to get a cost estimate,"
+            " before running it."
+        )
+    else:
+        inspect_desc += " Use it to check a query before running it."
+    inspect_desc += " Inspecting first is optional: run_query applies the same checks."
+    if max_retries is not None:
+        inspect_desc += (
+            " A blocked or failed run_query spends one of the session's retries;"
+            " inspect_query does not."
+        )
+    inspect_desc += metric_ordering
+
+    # Names no other tool outside the metric clause, which names lookup_metric
+    # by design (see _PROTOCOL_METRIC_ORDERING): without metrics, it stands
+    # alone when a host passes a subset. (inspect_query names run_query, the
+    # tool it is optional to.)
+    run_desc = (
+        "Validate a SQL query against the contract and, if it passes, execute it"
+        " and return the results. The checks run first, and a blocked query is"
+        " not run."
+    )
+    # The execution clauses need an adapter: without one run_query returns
+    # "No database adapter configured" and nothing runs, times out or is
+    # checked after the fact.
+    if adapter is not None and max_query_time is not None:
+        # Stated as declared: `:g` would print 1e+06 for a million seconds.
+        limit_text = (
+            str(int(max_query_time))
+            if float(max_query_time).is_integer()
+            else repr(float(max_query_time))
+        )
+        if timeout_adapter is not None:
+            run_desc += (
+                f" A query still running after {limit_text} seconds is stopped"
+                " and counts as blocked."
+            )
+        else:
+            # A plain adapter cannot cancel: the statement runs on in the
+            # database, and only the tool stops waiting (_warn_uncancellable).
+            run_desc += (
+                f" After {limit_text} seconds the tool stops waiting for a query"
+                " and counts it as blocked; the database may still be running"
+                " it."
+            )
+    if adapter is not None and result_check_rules:
+        if "block" in result_check_enforcements:
+            effect = " can block the result."
+        elif "warn" in result_check_enforcements:
+            effect = " add warnings."
+        else:
+            effect = " are logged with the result."
+        run_desc += (
+            " After execution, the contract's result checks run on the rows and"
+            + effect
+        )
+    run_desc += (
+        metric_ordering
+        + precedence
+        # Return-shape clause reads last, after the call-time guidance.
+        + rows_note
+    )
+
     # ── Assemble ToolDef list ─────────────────────────────────────────────────
     return [
         ToolDef(
             name="describe_table",
-            description=(
-                "Get full column details for a specific table from the database."
-            ),
+            description=describe_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1973,7 +2164,7 @@ def create_tools(
         ),
         ToolDef(
             name="preview_table",
-            description="Preview sample rows from an allowed table." + rows_note,
+            description=preview_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -1990,13 +2181,7 @@ def create_tools(
         ),
         ToolDef(
             name="list_metrics",
-            description=(
-                "List metric definitions from the semantic source,"
-                " optionally filtered by domain, tier, or indicator_kind."
-                " Entries include tier and indicator_kind when available —"
-                " use these to prioritize north-stars, department/team KPIs,"
-                " or leading vs lagging indicators."
-            ),
+            description=list_metrics_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2025,14 +2210,7 @@ def create_tools(
         ),
         ToolDef(
             name="lookup_metric",
-            description=(
-                "Get the full definition of a specific metric including SQL"
-                " expression, tier (north_star / department_kpi / team_kpi),"
-                " indicator_kind (leading / lagging), and any metric-impact"
-                " edges (impacts and impacted_by, each with direction,"
-                " confidence, and evidence citation). Use the impact fields"
-                " to reason about drivers and downstream effects."
-            ),
+            description=lookup_metric_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2047,11 +2225,7 @@ def create_tools(
         ),
         ToolDef(
             name="lookup_domain",
-            description=(
-                "Look up a business domain by name to get its full description,"
-                " associated metrics, and tables. Use this to understand"
-                " business context before querying."
-            ),
+            description=lookup_domain_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2066,18 +2240,7 @@ def create_tools(
         ),
         ToolDef(
             name="inspect_query",
-            description=(
-                "Inspect a SQL query without executing it. Returns structured JSON"
-                " with: `valid` (bool), `violations` (block-enforcement rule"
-                " messages), `warnings` (warn-enforcement rule messages),"
-                " `log_messages` (log-enforcement rule messages), `schema_valid`"
-                " and `explain_errors` (from the EXPLAIN layer), and"
-                " `pending_result_checks` (result checks that would run after"
-                " execution). When a database adapter is configured, also"
-                " includes `estimated_cost_usd` and `estimated_rows` from EXPLAIN."
-                " Use this to iterate on SQL before spending retry budget on run_query."
-                + metric_ordering
-            ),
+            description=inspect_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2089,13 +2252,7 @@ def create_tools(
         ),
         ToolDef(
             name="run_query",
-            description=(
-                "Validate and execute a SQL query, returning the results."
-                + metric_ordering
-                + precedence
-                # Return-shape clause reads last, after the call-time guidance.
-                + rows_note
-            ),
+            description=run_desc,
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2112,6 +2269,7 @@ def create_tools(
                 " table. Returns join columns, types, descriptions, and required"
                 " filters. When target_table is provided, finds the shortest"
                 " multi-hop join path between the two tables (up to 3 hops)."
+                + relationships_cue
             ),
             input_schema={
                 "type": "object",

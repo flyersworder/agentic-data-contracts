@@ -443,13 +443,13 @@ def test_custom_renderer_via_to_system_prompt(fixtures_dir: Path) -> None:
             return f"CUSTOM: {contract.name}"
 
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
-    prompt = dc.to_system_prompt(renderer=MyRenderer())
+    prompt = dc.to_system_prompt(semantic_source=None, renderer=MyRenderer())
     assert prompt == "CUSTOM: revenue-analysis"
 
 
 def test_to_system_prompt_defaults_to_claude_renderer(fixtures_dir: Path) -> None:
     dc = DataContract.from_yaml(fixtures_dir / "valid_contract.yml")
-    prompt = dc.to_system_prompt()
+    prompt = dc.to_system_prompt(semantic_source=None)
     assert '<data_contract name="revenue-analysis">' in prompt
     assert "<constraints>" in prompt
 

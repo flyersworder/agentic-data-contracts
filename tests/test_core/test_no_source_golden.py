@@ -1,10 +1,11 @@
 """No-source prompts stay byte-for-byte (#139 anti-goal).
 
 The golden files under ``tests/fixtures/golden_prompts/`` were captured from the
-v0.64.0 renderer before the metric index existed. A caller who passes no
-semantic source, or one with no metrics, must get exactly that rendering.
+v0.64.0 renderer before the metric index existed. Rendering without a source
+(``semantic_source=None``, what ``to_system_prompt`` did by default before
+v0.65.0), or with one that has no metrics, must give exactly that output.
 Regenerating these files to make a test pass defeats the test: a diff here is a
-behaviour change for every existing caller.
+behaviour change for every caller who opts out of the source.
 """
 
 from __future__ import annotations
@@ -88,4 +89,16 @@ def test_source_without_metrics_renders_as_no_source(name: str) -> None:
     fixture, kwargs = CASES[name]
     contract = DataContract.from_yaml(FIXTURES / fixture)
     rendered = XmlPromptRenderer(**kwargs).render(contract, _EmptySource())
+    assert rendered == _golden(name)
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_to_system_prompt_with_none_matches_v064(name: str) -> None:
+    # The public opt-out, not just the renderer: semantic_source=None must not
+    # load the contract's configured source.
+    fixture, kwargs = CASES[name]
+    contract = DataContract.from_yaml(FIXTURES / fixture)
+    rendered = contract.to_system_prompt(
+        semantic_source=None, renderer=XmlPromptRenderer(**kwargs)
+    )
     assert rendered == _golden(name)

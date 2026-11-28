@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from agent_contracts import (
     Capabilities,
@@ -13,11 +14,28 @@ from agent_contracts import (
     TerminationCondition,
 )
 
-from agentic_data_contracts.core.contract import DataContract
+from agentic_data_contracts.core.contract import (
+    _LOAD_FROM_CONFIG,
+    DataContract,
+    _Default,
+)
+
+if TYPE_CHECKING:
+    from agentic_data_contracts.semantic.base import SemanticSource
 
 
-def compile_to_contract(dc: DataContract) -> Contract:
-    """Compile a DataContract into an ai-agent-contracts Contract."""
+def compile_to_contract(
+    dc: DataContract,
+    *,
+    semantic_source: SemanticSource | None | _Default = _LOAD_FROM_CONFIG,
+) -> Contract:
+    """Compile a DataContract into an ai-agent-contracts Contract.
+
+    ``semantic_source`` is passed to ``DataContract.to_system_prompt`` for the
+    contract's instructions, with the same default: left out, the contract's
+    configured source is loaded (and an unloadable declared source raises
+    ``SemanticSourceUnavailableError``); ``None`` renders without one.
+    """
 
     res = dc.schema.resources
     resources = ResourceConstraints(
@@ -65,7 +83,7 @@ def compile_to_contract(dc: DataContract) -> Contract:
             )
         )
 
-    instructions = dc.to_system_prompt()
+    instructions = dc.to_system_prompt(semantic_source)
     capabilities = Capabilities(instructions=instructions)
 
     metadata: dict[str, object] = {

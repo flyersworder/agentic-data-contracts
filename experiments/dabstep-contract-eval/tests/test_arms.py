@@ -269,9 +269,11 @@ def test_the_fifth_arm_differs_from_the_contract_arm_only_in_its_contract(db):
     fifth = build_arm("contract_uninterpreted", db, DOCS)
     assert [t.name for t in fifth.tools] == [t.name for t in real.tools]
     assert fifth.session is not None
-    shared = real.system_prompt.replace(load_contract().to_system_prompt(), "")
+    shared = real.system_prompt.replace(
+        load_contract().to_system_prompt(semantic_source=None), ""
+    )
     fifth_shared = fifth.system_prompt.replace(
-        load_uninterpreted_contract().to_system_prompt(), ""
+        load_uninterpreted_contract().to_system_prompt(semantic_source=None), ""
     )
     assert shared == fifth_shared
     assert "INTERPRETATION" not in fifth.system_prompt

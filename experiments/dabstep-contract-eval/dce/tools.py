@@ -541,5 +541,9 @@ def governed_arm(
     tools, session, adapter = _governed_tools(
         db_path, contract=contract, init_sql=init_sql
     )
-    prompt = f"{base_prompt}\n\n{CONTRACT_PROCEDURE}\n\n{contract.to_system_prompt()}"
+    # `semantic_source=None` pins the rendering every published run saw: from
+    # adc 0.65 the default loads the contract's own source and adds a metric
+    # index, which would silently change these arms' prompts (#139).
+    rendered = contract.to_system_prompt(semantic_source=None)
+    prompt = f"{base_prompt}\n\n{CONTRACT_PROCEDURE}\n\n{rendered}"
     return ArmSetup(prompt, tools, session, adapter)

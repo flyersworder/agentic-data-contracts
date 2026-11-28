@@ -213,11 +213,11 @@ def test_contract_arms_are_governed_with_their_draws(bench, tmp_path):
         assert contract.session is not None and both.session is not None
         assert "run_query" in {t.name for t in contract.tools}
         assert contract.system_prompt == (
-            f"{system_prompt(True)}\n\n{CONTRACT_PROCEDURE}\n\n{a1.to_system_prompt()}"
+            f"{system_prompt(True)}\n\n{CONTRACT_PROCEDURE}\n\n{a1.to_system_prompt(semantic_source=None)}"
         )
         assert contract.user_prompt is None
         assert both.system_prompt == (
-            f"{system_prompt(True)}\n\n{CONTRACT_PROCEDURE}\n\n{b.to_system_prompt()}"
+            f"{system_prompt(True)}\n\n{CONTRACT_PROCEDURE}\n\n{b.to_system_prompt(semantic_source=None)}"
         )
         assert both.user_prompt == hinted.user_prompt != task.prompt
     finally:

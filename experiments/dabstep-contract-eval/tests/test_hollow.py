@@ -77,8 +77,12 @@ def test_same_domains_tables_and_rules():
 def test_the_tool_surface_and_the_hint_are_unchanged():
     """Arm D must call the same nine tools through the same prompt affordance;
     that is the whole point of the control."""
-    real = DataContract.from_yaml(REAL / "contract.yml").to_system_prompt()
-    hol = DataContract.from_yaml(HOLLOW / "contract.yml").to_system_prompt()
+    real = DataContract.from_yaml(REAL / "contract.yml").to_system_prompt(
+        semantic_source=None
+    )
+    hol = DataContract.from_yaml(HOLLOW / "contract.yml").to_system_prompt(
+        semantic_source=None
+    )
     for marker in ("lookup_domain", "lookup_metric", "no_select_star", "main.payments"):
         assert marker in real and marker in hol
 

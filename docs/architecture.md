@@ -643,13 +643,22 @@ which is why the design protects the lookups rather than relying on them.
 
 So the change shortens the path and keeps the lookups:
 
-- **Names in the prompt, definitions behind the lookups.** With a semantic
-  source passed, `XmlPromptRenderer` lists each domain's member metrics by name,
-  and metrics outside every cataloged domain in one `<other_metrics>` group.
+- **Names in the prompt, definitions behind the lookups.** Given a semantic
+  source, `XmlPromptRenderer` lists each domain's member metrics by name, and
+  metrics outside every cataloged domain in one `<other_metrics>` group.
   Descriptions are never added (a metric description is often a paragraph), and
   neither is SQL. Without a source the rendering is byte-for-byte v0.64.0,
-  which golden tests pin; callers opt in, and `to_system_prompt()` does not load
-  the source itself.
+  which golden tests pin.
+- **The source is loaded by default.** `to_system_prompt()` loads the
+  contract's configured source when the caller passes none, the same default
+  as `create_tools()`: otherwise the tools know the metrics while the prompt
+  never names them. `semantic_source=None` is the explicit opt-out, and a
+  declared source that cannot be loaded raises `SemanticSourceUnavailableError`,
+  failing closed as `create_tools()` does. Rendering therefore reads the source
+  file unless the caller passes one, so a host should load it once and pass it
+  to both. `bridge.compile_to_contract` takes the same keyword. The evaluation
+  harness pins `semantic_source=None`, so the benchmark arms keep the prompts
+  the published runs saw.
 - **Hints name no tool.** A host may wire a subset of the tools, and a disabled
   tool would leave a dangling reference. Each hint keeps the "look it up before
   computing" constraint. Routing lives in each tool's own description (next

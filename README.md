@@ -286,8 +286,7 @@ server = create_sdk_mcp_server(dc, adapter=adapter)
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
     system_prompt=(
-        "You are a revenue analytics assistant.\n\n"
-        + dc.to_system_prompt(dc.load_semantic_source())
+        "You are a revenue analytics assistant.\n\n" + dc.to_system_prompt()
     ),
     mcp_servers={"dc": server},
     **dc.to_sdk_config(),  # token_budget → task_budget, max_retries → max_turns
@@ -338,7 +337,7 @@ if {"plugins", "skills", "strict_mcp_config"} <= fields:
     opts_kwargs["system_prompt"] = {  # skills need the claude_code harness
         "type": "preset",
         "preset": "claude_code",
-        "append": dc.to_system_prompt(dc.load_semantic_source()),  # governance
+        "append": dc.to_system_prompt(),  # your governance, appended
     }
 
 options = ClaudeAgentOptions(**opts_kwargs)
@@ -485,13 +484,17 @@ asyncio.run(demo())
 
 Two things keep an agent's path to a definition short:
 
-- **Pass the semantic source to `to_system_prompt()`.** The prompt then lists
+- **Let the prompt name the metrics.** `to_system_prompt()` loads the
+  contract's semantic source by default, as `create_tools()` does, and lists
   every metric by name under its domain, so the agent can go straight to
   `lookup_domain` / `lookup_metric` without browsing with `list_metrics` first.
-  Without a source the prompt shows only the domains, as before.
+  If you already hold a loaded source, pass it so it is not read twice; pass
+  `semantic_source=None` to render without one (the pre-0.65 prompt).
 
   ```python
-  prompt = dc.to_system_prompt(dc.load_semantic_source())
+  source = dc.load_semantic_source()
+  tools = create_tools(dc, adapter=adapter, semantic_source=source)
+  prompt = dc.to_system_prompt(source)
   ```
 
 - **Say when to look things up, and do not require an inspect before every
@@ -666,7 +669,7 @@ metrics:
 
 ### How the agent uses domains
 
-The system prompt gives the agent a compact domain index: each domain's name and summary, and, when you pass the semantic source to `to_system_prompt()`, its member metrics by name. When a user asks a domain-specific question, the agent explores progressively:
+The system prompt gives the agent a compact domain index: each domain's name and summary, and its member metrics by name (from the contract's semantic source, which `to_system_prompt()` loads by default). When a user asks a domain-specific question, the agent explores progressively:
 
 ```
 lookup_domain("acquisition")        → business context + metric descriptions

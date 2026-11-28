@@ -626,6 +626,70 @@ agent-facing tool argument — the two carry identical information, so the model
 no basis on which to choose, and a schema field would cost input tokens on every
 request. The value is validated eagerly at `create_tools()` time.
 
+### Metric Index in the Prompt (v0.65.0, #139)
+
+Governed agents used to spend more turns than the same agent given plain SQL,
+for the same accuracy. On LiveSQLBench (gpt-6-luna, k=3) the `contract` arm
+averaged 6.2 turns and 13k uncached input tokens a run against 4.1 and 3k for
+plain SQL, at 35.9% vs 36.8% accuracy. The extra turns were the *path* to a
+definition: `list_metrics` to learn names, and an `inspect_query` before every
+`run_query`. They were not the lookups themselves. DABStep's evidence
+(FINDINGS, "Where the tools help: retrieval at the point of use, not
+validation") puts the tools' accuracy lead in the domain and metric lookups
+made just before a metric query: the domain description carries the
+null-means-all fee rule, and an arm with every definition pasted into its
+prompt lost those tasks. That evidence is exploratory (luna-only, task-level),
+which is why the design protects the lookups rather than relying on them.
+
+So the change shortens the path and keeps the lookups:
+
+- **Names in the prompt, definitions behind the lookups.** With a semantic
+  source passed, `XmlPromptRenderer` lists each domain's member metrics by name,
+  and metrics outside every cataloged domain in one `<other_metrics>` group.
+  Descriptions are never added (a metric description is often a paragraph), and
+  neither is SQL. Without a source the rendering is byte-for-byte v0.64.0,
+  which golden tests pin; callers opt in, and `to_system_prompt()` does not load
+  the source itself.
+- **Hints name no tool.** A host may wire a subset of the tools, and a disabled
+  tool would leave a dangling reference. Each hint keeps the "look it up before
+  computing" constraint. Routing lives in each tool's own description (next
+  section).
+- **Thresholds.** `metric_detail_threshold` (20) now drops descriptions, never
+  names. Names drop only above `metric_index_threshold` (default 200 index
+  entries; a metric in three domains counts three times), since names cost a
+  few tokens each. When left unset, the index threshold follows
+  `metric_detail_threshold=None` (never degrade), then the class's
+  `METRIC_INDEX_THRESHOLD`. It is resolved at render time through `getattr`,
+  so pre-v0.40.0 subclasses that never call `super().__init__()` still work.
+  The largest real contracts measured listed 20-86 entries.
+
+**Rejected alternatives.** Putting metric SQL in the prompt and dropping the
+lookup instruction is the cheapest per token, but it is the pasted-text design
+that trailed the tools by about 5 points on DABStep's fee families.
+`lookup_domain` returning every member's full definition saves one hop, but
+returns mostly unused SQL. A batch `lookup_metric` was dropped: parallel tool
+calls already fetch several metrics in one turn, and the recorder would need
+per-name results.
+
+**How it was checked.** It was a library change, not a paper result, so the
+release gate was tests plus a live before/after trace check. Ten metric
+questions on `examples/revenue_agent` ran on v0.64.0 and v0.65.0 under the
+same recommended prompt, with two OpenRouter models (glm-5.3-flash,
+deepseek-v4-flash):
+
+- Turns fell from 4.9 to 4.0 and from 5.2 to 4.0.
+- `inspect_query` and `list_metrics` calls fell to zero.
+- Both lookups came before the first query in 20 of 20 runs (19 of 20 on
+  v0.64.0).
+- All 40 answers were identical and correct.
+
+A measured version for the paper would run a ladder on LiveSQLBench and
+DABStep, each step adding one change: the descriptions, then the source
+passed, then the lean procedure. Its contrasts would be accuracy
+non-inferiority at -5 points on DABStep's non-rule-matching tasks, and the
+`lookup_domain("fees")` share before the first fee query staying within 10
+points.
+
 ### Query Protocol in the Tool Descriptions
 
 `run_query` and `inspect_query` carry two protocol clauses in their descriptions

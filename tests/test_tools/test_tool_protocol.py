@@ -159,8 +159,8 @@ def test_run_query_description_composes_exactly(
     # checks, so the timeout clause is present and the result-check one is not.
     assert run_query.description == (
         "Validate a SQL query against the contract and, if it passes, execute it"
-        " and return the results. It runs the same checks as inspect_query"
-        " first, and a blocked query is not run."
+        " and return the results. The checks run first, and a blocked query is"
+        " not run."
         " A query still running after 30 seconds is stopped and counts as"
         " blocked." + _PROTOCOL_METRIC_ORDERING + _PROTOCOL_PRECEDENCE
     )

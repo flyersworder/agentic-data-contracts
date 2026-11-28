@@ -553,8 +553,9 @@ Each sentence appears only when the capability it names exists — ordering when
 semantic source actually has metrics, precedence when an adapter is configured (a
 validation-only setup can't execute, so claiming precedence there would point the
 agent at a tool that returns an error). The same rule governs every other clause:
-`run_query` mentions the query timeout and result checks only when the contract
-declares them, and `inspect_query` mentions retries only when `max_retries` is set.
+`run_query` mentions the query timeout and result checks only when an adapter is
+configured and the contract declares them, and `inspect_query` mentions retries
+only when `max_retries` is set.
 
 The descriptions are written in plain register — no `MUST` or `NEVER` — and give
 the reason for each constraint. Current models follow instructions literally, and

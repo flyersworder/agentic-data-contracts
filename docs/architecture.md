@@ -637,8 +637,11 @@ SQL or data-access path, so the contract's checks apply. Both are in plain
 register with their reason: current models follow instructions literally, and
 `MUST` / `NEVER` over-trigger.
 
-They are the one deliberate exception to "a tool's routing lives in its own
-description": the constraint is about the query, so it sits on the query tools.
+The ordering clause is a deliberate exception to "a tool's routing lives in its
+own description": the constraint is about the query, so it sits on the query
+tools. The only other cross-reference is `inspect_query` naming `run_query`, the
+tool inspecting is optional to; `run_query` names no other tool, so it stands
+alone when a host passes a subset of the tools.
 Otherwise each tool says when to use itself — `lookup_metric` and `lookup_domain`
 carry the point-of-use cue (before writing SQL that computes a metric), and
 `inspect_query` says inspecting first is optional because `run_query` applies the
@@ -658,8 +661,12 @@ host that writes its own prompt.
 One rule governs every description clause: **a clause appears only when the
 capability it names exists.** Besides the two below: return shapes of
 `describe_table` / `preview_table` and `inspect_query`'s cost estimate need an
-adapter, `run_query`'s timeout and result-check sentences need the contract to
-declare them, and `inspect_query`'s retry sentence needs `max_retries`.
+adapter, `run_query`'s timeout and result-check sentences need an adapter and the
+contract to declare them, and `inspect_query`'s retry sentence needs
+`max_retries`. Each states only what the code does: the timeout says the query is
+stopped only for a `TimeoutAdapter` (otherwise the tool stops waiting and the
+database may still be running it), and result checks are said to block only
+when one is block-enforced.
 
 - **Ordering is gated on metrics.** `metric_ordering` resolves to `""` when
   `metric_names_set` is empty, so a schema-only contract never points the agent at

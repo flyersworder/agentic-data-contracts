@@ -297,7 +297,13 @@ def test_claude_renderer_metrics_large_set_with_domains() -> None:
     assert "<available_domains>" in output
     assert "domain_a" in output
     assert "domain_b" in output
-    assert "metric_0 —" not in output
+    # Above the detail threshold, names are still listed (descriptions never
+    # are, with domains). This fake source declares no domains, so all 30
+    # names go in the one group for metrics outside every cataloged domain.
+    assert '<metric name="metric_0" />' in output
+    assert '<metric name="metric_29" />' in output
+    assert "Description for metric 0" not in output
+    assert "<other_metrics>" in output
 
 
 # ---------------------------------------------------------------------------

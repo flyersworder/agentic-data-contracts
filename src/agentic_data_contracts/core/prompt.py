@@ -6,6 +6,7 @@ import enum
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from xml.sax.saxutils import escape
 
 import yaml
 
@@ -39,6 +40,19 @@ def _default_extra_section(name: str, payload: Any) -> list[str]:
     """
     body = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True).rstrip("\n")
     return [f"<{name}>", body, f"</{name}>"]
+
+
+def _metric_element(name: str, *, indent: int) -> str:
+    """A names-only ``<metric>`` element, its name attribute-escaped.
+
+    Metric names come from external sources (dbt, Cube, Ossie) and can carry a
+    quote or ampersand; unescaped, the element breaks and the agent may pass a
+    truncated name to the lookup. Only the index elements this release added
+    escape: the older elements keep their rendering, which the no-source golden
+    tests pin.
+    """
+    escaped = escape(name, {'"': "&quot;"})
+    return f'{" " * indent}<metric name="{escaped}" />'
 
 
 class _Unset(enum.Enum):
@@ -281,11 +295,11 @@ class XmlPromptRenderer:
                 lines.append(f"  <domain {attrs} />")
                 continue
             lines.append(f"  <domain {attrs}>")
-            lines.extend(f'    <metric name="{name}" />' for name in names)
+            lines.extend(_metric_element(name, indent=4) for name in names)
             lines.append("  </domain>")
         if others and not drop_names:
             lines.append("  <other_metrics>")
-            lines.extend(f'    <metric name="{name}" />' for name in others)
+            lines.extend(_metric_element(name, indent=4) for name in others)
             lines.append("  </other_metrics>")
 
         # The hints name no tool: a host may wire a subset, and a disabled tool
@@ -368,7 +382,7 @@ class XmlPromptRenderer:
                 len(metrics),
                 detail_threshold,
             )
-            lines.extend(f'  <metric name="{m.name}" />' for m in metrics)
+            lines.extend(_metric_element(m.name, indent=2) for m in metrics)
             lines.append(listed_hint)
         else:
             for m in metrics:

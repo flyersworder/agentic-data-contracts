@@ -213,7 +213,7 @@ def test_retry_clause_only_when_max_retries_is_set() -> None:
 
 def test_run_query_says_it_validates_first(adapter: DuckDBAdapter) -> None:
     desc = _desc(create_tools(_contract(), adapter=adapter), "run_query")
-    assert "same checks as inspect_query" in desc
+    assert "The checks run first" in desc
     assert "blocked query is not run" in desc
 
 
@@ -250,3 +250,138 @@ def test_lookup_relationships_says_when_to_use_it(semantic: YamlSource) -> None:
     )
     assert "join" in desc
     assert "Use it" in desc
+
+
+# ── Review round 1: capability gating and accuracy ───────────────────────────
+
+
+def test_execution_clauses_need_an_adapter() -> None:
+    # Without an adapter run_query returns "No database adapter configured",
+    # so a timeout or result-check sentence would describe something that
+    # never happens.
+    desc = _desc(
+        create_tools(
+            _contract(
+                rules=_RESULT_CHECK_RULE, resources=_limits(max_query_time_seconds=30)
+            )
+        ),
+        "run_query",
+    )
+    assert "seconds" not in desc
+    assert "result checks" not in desc
+
+
+def test_describe_and_preview_usage_sentences_need_an_adapter() -> None:
+    tools = create_tools(_contract())
+    assert "Use it" not in _desc(tools, "describe_table")
+    assert "Use it" not in _desc(tools, "preview_table")
+
+
+def test_timeout_wording_without_a_cancellable_adapter(adapter: DuckDBAdapter) -> None:
+    class _Plain:
+        """A DatabaseAdapter that is not a TimeoutAdapter."""
+
+        dialect = "duckdb"
+
+        def execute(self, sql: str):  # noqa: ANN201
+            return adapter.execute(sql)
+
+        def explain(self, sql: str):  # noqa: ANN201
+            return adapter.explain(sql)
+
+        def describe_table(self, schema: str, table: str):  # noqa: ANN201
+            return adapter.describe_table(schema, table)
+
+        def list_tables(self, schema: str) -> list[str]:
+            return adapter.list_tables(schema)
+
+    contract = _contract(resources=_limits(max_query_time_seconds=30))
+    plain = _desc(create_tools(contract, adapter=_Plain()), "run_query")  # type: ignore[arg-type]
+    cancellable = _desc(create_tools(contract, adapter=adapter), "run_query")
+    # The plain adapter's statement keeps running in the database; only the
+    # tool stops waiting for it.
+    assert "stops waiting" in plain
+    assert "is stopped" not in plain
+    assert "is stopped" in cancellable
+
+
+def test_timeout_is_stated_as_declared(adapter: DuckDBAdapter) -> None:
+    for declared, shown in (("1000000", "1000000"), ("2.5", "2.5"), ("30", "30")):
+        desc = _desc(
+            create_tools(
+                _contract(resources=_limits(max_query_time_seconds=declared)),
+                adapter=adapter,
+            ),
+            "run_query",
+        )
+        assert f"after {shown} seconds" in desc
+
+
+def test_preview_default_never_exceeds_the_cap(adapter: DuckDBAdapter) -> None:
+    desc = _desc(
+        create_tools(_contract(), adapter=adapter, max_result_rows=3), "preview_table"
+    )
+    assert "default 3, at most 3 rows" in desc
+
+
+def test_describe_table_governed_clause_follows_the_source_not_the_bulk_index(
+    adapter: DuckDBAdapter, fixtures_dir: Path
+) -> None:
+    class _ExactOnly(YamlSource):
+        """Serves get_table_schema but not the bulk get_table_schemas."""
+
+        def get_table_schemas(self) -> dict:
+            return {}
+
+    desc = _desc(
+        create_tools(
+            _contract(),
+            adapter=adapter,
+            semantic_source=_ExactOnly(fixtures_dir / "semantic_source.yml"),
+        ),
+        "describe_table",
+    )
+    assert "semantic source" in desc
+
+
+def test_impact_sentence_only_when_impacts_are_declared(semantic: YamlSource) -> None:
+    no_impacts = YamlSource.from_raw(
+        {"metrics": [{"name": "m", "description": "M.", "sql_expression": "1"}]}
+    )
+    without = _desc(
+        create_tools(_contract(), semantic_source=no_impacts), "lookup_metric"
+    )
+    with_impacts = _desc(
+        create_tools(_contract(), semantic_source=semantic), "lookup_metric"
+    )
+    assert "Use the impact edges" not in without
+    assert "Use the impact edges" in with_impacts
+
+
+def test_run_query_names_no_other_tool(adapter: DuckDBAdapter) -> None:
+    # A host may pass a subset of the tools; without metrics, run_query's
+    # description must stand alone.
+    desc = _desc(create_tools(_contract(), adapter=adapter), "run_query")
+    assert "inspect_query" not in desc
+
+
+def test_warn_only_result_checks_are_not_said_to_block(adapter: DuckDBAdapter) -> None:
+    warn_rule = _RESULT_CHECK_RULE.replace("enforcement: block", "enforcement: warn")
+    warned = _desc(
+        create_tools(_contract(rules=warn_rule), adapter=adapter), "run_query"
+    )
+    blocking = _desc(
+        create_tools(_contract(rules=_RESULT_CHECK_RULE), adapter=adapter),
+        "run_query",
+    )
+    assert "result checks" in warned
+    assert "block the result" not in warned
+    assert "block the result" in blocking
+
+
+def test_lookup_descriptions_do_not_overstate(semantic: YamlSource) -> None:
+    tools = create_tools(_contract(), semantic_source=semantic)
+    # A miss can return "not found" rather than candidates.
+    assert "close candidates when there are any" in _desc(tools, "lookup_metric")
+    # Owners and freshness are present only where the domain declares them.
+    assert "owners and review freshness where declared" in _desc(tools, "lookup_domain")

@@ -355,3 +355,22 @@ class TestLogging:
             _contract("a").to_system_prompt(_Source([_metric("x", "a")]))
             _contract().to_system_prompt(_plain(3))
         assert _logs(caplog) == []
+
+
+# ---------------------------------------------------------------------------
+# Escaping
+# ---------------------------------------------------------------------------
+
+
+def test_metric_names_are_attribute_escaped() -> None:
+    # A name with a quote or ampersand must not break the element, or the
+    # agent may pass a truncated name to the lookup.
+    name = 'net "adjusted" r&d'
+    escaped = '<metric name="net &quot;adjusted&quot; r&amp;d" />'
+    with_domains = _contract("a").to_system_prompt(_Source([_metric(name, "a")]))
+    other_group = _contract("a").to_system_prompt(_Source([_metric(name)]))
+    names_only = _contract().to_system_prompt(
+        _Source([_metric(name)] + [_metric(f"m{i}") for i in range(25)])
+    )
+    for prompt in (with_domains, other_group, names_only):
+        assert escaped in prompt

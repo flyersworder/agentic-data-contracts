@@ -230,7 +230,7 @@ def test_run_query_description_documents_compact_shape(
     # here is that the row-shape note is the suffix and the *only* difference
     # between the two renderings.
     assert records.description.startswith(
-        "Validate and execute a SQL query, returning the results."
+        "Validate a SQL query against the contract and, if it passes, execute it"
     )
     assert not records.description.endswith(_COMPACT_ROWS_NOTE)
     assert compact.description == records.description + _COMPACT_ROWS_NOTE
@@ -299,7 +299,8 @@ def test_preview_table_description_documents_compact_shape(
         ),
         "preview_table",
     )
-    assert records.description == "Preview sample rows from an allowed table."
+    assert records.description.startswith("Show sample rows from one allowed table.")
+    assert not records.description.endswith(_COMPACT_ROWS_NOTE)
     assert compact.description == records.description + _COMPACT_ROWS_NOTE
 
 

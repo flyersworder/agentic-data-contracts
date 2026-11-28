@@ -130,9 +130,8 @@ def test_precedence_omitted_without_an_adapter(
 def test_inspect_query_never_carries_precedence(
     contract: DataContract, semantic: YamlSource, adapter: DuckDBAdapter
 ) -> None:
-    # inspect_query executes nothing, so "prefer this over other data-access
-    # paths" would be a false claim there — and its description already closes
-    # with its own precedence argument against spending retry budget.
+    # inspect_query executes nothing, so "use this rather than other
+    # data-access paths" would be a false claim there.
     inspect = _tool(
         create_tools(contract, adapter=adapter, semantic_source=semantic),
         "inspect_query",
@@ -156,10 +155,14 @@ def test_run_query_description_composes_exactly(
         ),
         "run_query",
     )
+    # valid_contract.yml declares max_query_time_seconds: 30 and no result
+    # checks, so the timeout clause is present and the result-check one is not.
     assert run_query.description == (
-        "Validate and execute a SQL query, returning the results."
-        + _PROTOCOL_METRIC_ORDERING
-        + _PROTOCOL_PRECEDENCE
+        "Validate a SQL query against the contract and, if it passes, execute it"
+        " and return the results. It runs the same checks as inspect_query"
+        " first, and a blocked query is not run."
+        " A query still running after 30 seconds is stopped and counts as"
+        " blocked." + _PROTOCOL_METRIC_ORDERING + _PROTOCOL_PRECEDENCE
     )
 
 

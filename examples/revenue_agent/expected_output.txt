@@ -39,6 +39,17 @@ Column-level discovery is still available via describe_table:
 === Session Budget (from run_query response) ===
   session remaining: {'elapsed_seconds': T, 'retries_remaining': 3, 'tokens_remaining': 50000, 'cost_remaining_usd': 5.0, 'seconds_remaining': 300-T}
 
+=== Metric index in the system prompt ===
+<available_domains>
+  <domain name="revenue" summary="Financial metrics from completed orders" metric_count="4">
+    <metric name="total_revenue" />
+    <metric name="revenue_by_region" />
+    <metric name="active_customers" />
+    <metric name="revenue_per_customer" />
+  </domain>
+  <hint>Each domain's description holds rules that apply to its metrics, and each listed metric has a governed SQL definition. Look up the domain and the metric before computing it.</hint>
+</available_domains>
+
 === Extras resident in the system prompt ===
 <column_hints>
 - table: analytics.orders

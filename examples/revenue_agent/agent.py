@@ -340,6 +340,17 @@ async def _run_demo(
     # bookkeeping never inflates the prompt.
     renderer = XmlPromptRenderer(extra_sections=["column_hints", "join_paths"])
     rendered = dc.to_system_prompt(semantic, renderer=renderer)
+
+    # ── Metric index ─────────────────────────────────────────────────────────
+    # Passing the semantic source puts every metric's *name* under its domain,
+    # so the agent can go straight to lookup_domain / lookup_metric instead of
+    # browsing with list_metrics first. Definitions stay behind the lookups:
+    # the domain's rules and the metric's SQL arrive just before the query.
+    start = rendered.index("<available_domains>")
+    end = rendered.index("</available_domains>") + len("</available_domains>")
+    print("\n=== Metric index in the system prompt ===")
+    print(rendered[start:end])
+
     start = rendered.index("<column_hints>")
     end = rendered.index("</join_paths>") + len("</join_paths>")
     print("\n=== Extras resident in the system prompt ===")

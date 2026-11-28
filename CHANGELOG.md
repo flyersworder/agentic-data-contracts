@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.65.0] - Unreleased
+
+Shortens an agent's path to a metric definition (#139). Governed agents spent more turns than the same agent given plain SQL access, for the same accuracy: they browsed with `list_metrics` to learn metric names and inspected every query before running it. The domain and metric lookups just before a metric query are the step that earns accuracy, so they stay; the hops around them go.
+
+### Added
+
+- **Metric names in the prompt index, when you pass the semantic source to `to_system_prompt()`.** Each `<domain>` lists its member metrics by name (a metric in several domains is listed under each), and metrics outside every cataloged domain are listed in one `<other_metrics>` group. Descriptions are never added: a metric description is often a paragraph. The agent can go straight to `lookup_domain` / `lookup_metric` without a `list_metrics` call to learn names.
+- **`XmlPromptRenderer(metric_index_threshold=...)` and the class constant `METRIC_INDEX_THRESHOLD = 200`.** Above that many index entries (a metric in three domains counts three times) the names are dropped: domains render as before with `metric_count`, and a contract without domains renders a count line. `None` never drops names. Left unset, it follows `metric_detail_threshold`: `metric_detail_threshold=None` means "never drop names" too, resolved at render time, and a subclass's `METRIC_INDEX_THRESHOLD` (including one that never calls `super().__init__()`) is honoured.
+
+### Changed
+
+- **No prompt change for a caller who passes no semantic source.** That rendering, including the domain hint naming `lookup_domain` / `lookup_metric`, is pinned byte-for-byte to v0.64.0 by golden tests. The same holds for a source with no metrics.
+- **With a source passed, the metric hints name no tool.** A host may wire a subset of the tools, and a disabled tool would leave a dangling reference. Each hint keeps the "look it up before computing" constraint; with domains it also says the domain's description holds rules that apply to its metrics. A prompt-snapshot test of a source-passed prompt will see the new hint text.
+- **`metric_detail_threshold` now drops descriptions, not names.** A contract without domains and with more metrics than the threshold (default 20) listed only a count; it now lists every name, without descriptions, up to the index threshold. A caller who already passes a source to such a contract with 21-200 metrics gets the names added, with no log line. The INFO log on degradation no longer says agents "must call list_metrics"; it says what was omitted and which argument restores it.
+- **Tool descriptions rewritten as contracts in plain register.** Each says what the tool returns, when to use it and what it does not return, and each clause appears only when the capability it names exists. Input schemas are unchanged.
+  - `inspect_query` says inspecting first is optional, since `run_query` applies the same checks; when `max_retries` is set it adds that a blocked or failed `run_query` spends a retry and `inspect_query` does not. Its "use this before spending retry budget" line, which read as "inspect every query", is gone.
+  - `run_query` says it runs the same checks first and does not run a blocked query, and mentions the query timeout and result checks only when the contract declares them.
+  - `lookup_metric` and `lookup_domain` carry the point-of-use cue: use them before writing SQL that computes a metric, because the definition and the domain's rules are governed. `lookup_domain`'s "before querying", which read as every query, is gone.
+  - `describe_table` and `preview_table` state what they return, with an adapter; `preview_table` states its row cap (at most 100, or `max_result_rows` when lower).
+  - `list_metrics` is for browsing when the metric's name is not known; `lookup_relationships` says to use it when a query joins tables.
+  - The metric constraint on `run_query` / `inspect_query` and the precedence clause on `run_query` drop `MUST` / `never` and give their reason. Callers asserting on exact description text need to update; `_PROTOCOL_METRIC_ORDERING` and `_PROTOCOL_PRECEDENCE` still hold the two clauses.
+
+### Documentation
+
+- **README: "Recommended production setup".** Pass the semantic source to `to_system_prompt()`, and a system-prompt sentence that asks for the domain and metric lookups before a metric query without requiring an inspect before every query, with the `max_retries` trade-off. The Claude Agent SDK quickstart now passes `dc.load_semantic_source()`. The revenue example prints the metric index, and its golden output covers it.
+- The evaluation harness's notes on the library's tool descriptions are marked "as of adc ≤ 0.64": they describe what the published runs saw.
+
 ## [0.64.0] - 2026-11-19
 
 ### Compatibility

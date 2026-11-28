@@ -85,7 +85,9 @@ whatever iteration cap, if any, bounds A/B's own loop). This cannot be
 enforced from inside `_governed_tools` — the budget lives on the `Agent`, not
 on the tools — which is why it is stated here rather than left to be found.
 
-DISCLOSED ASYMMETRY, NOT FIXED: arm `contract`'s nine library-supplied tools
+DISCLOSED ASYMMETRY, NOT FIXED (as of adc <= 0.64; the descriptions quoted
+below were rewritten in plain register after that, #139, and describe what the
+published runs saw): arm `contract`'s nine library-supplied tools
 carry 3,042 characters of tool descriptions against 167 for arms A/B's three,
 and several of arm C's coach procedure rather than merely describe function —
 e.g. `inspect_query` says a model "MUST call lookup_metric first", `run_query`

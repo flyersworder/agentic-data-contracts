@@ -630,12 +630,24 @@ request. The value is validated eagerly at `create_tools()` time.
 
 `run_query` and `inspect_query` carry two protocol clauses in their descriptions
 (`_PROTOCOL_METRIC_ORDERING`, `_PROTOCOL_PRECEDENCE` in `tools/factory.py`): an
-**ordering** rule — when computing a metric, call `lookup_metric` first and use its
-governed definition, never invent or adapt a formula — and, on `run_query` only, a
-**precedence** claim that it is preferred over any other SQL or data-access path.
+**ordering** rule — when the query computes a metric, look it up with
+`lookup_metric` first and use its governed definition as written — and, on
+`run_query` only, a **precedence** claim that it is the path to use over any other
+SQL or data-access path, so the contract's checks apply. Both are in plain
+register with their reason: current models follow instructions literally, and
+`MUST` / `NEVER` over-trigger.
 
-The guidance duplicates hints `XmlPromptRenderer` already emits, and the
-duplication is deliberate. The rendered prompt is **opt-in**: none of the ecosystem
+They are the one deliberate exception to "a tool's routing lives in its own
+description": the constraint is about the query, so it sits on the query tools.
+Otherwise each tool says when to use itself — `lookup_metric` and `lookup_domain`
+carry the point-of-use cue (before writing SQL that computes a metric), and
+`inspect_query` says inspecting first is optional because `run_query` applies the
+same checks.
+
+The guidance restates the "look it up before computing" constraint that
+`XmlPromptRenderer`'s metric hints carry, and the duplication is deliberate. (The
+hints themselves name no tool: a host may wire a subset of the tools, and a
+disabled tool would leave a dangling reference.) The rendered prompt is **opt-in**: none of the ecosystem
 wrappers inject it, so a host calling `create_langchain_tools` or
 `create_pydantic_ai_toolset` and supplying its own system prompt may never render
 the contract at all. Descriptions travel with the tools on every path. The two
@@ -643,8 +655,11 @@ surfaces do different jobs — the prompt hint aids *discovery* (the tool exists
 the description enforces at *call time* — and only one of them survives a
 host that writes its own prompt.
 
-One rule governs both clauses: **a clause appears only when the capability it names
-exists.**
+One rule governs every description clause: **a clause appears only when the
+capability it names exists.** Besides the two below: return shapes of
+`describe_table` / `preview_table` and `inspect_query`'s cost estimate need an
+adapter, `run_query`'s timeout and result-check sentences need the contract to
+declare them, and `inspect_query`'s retry sentence needs `max_retries`.
 
 - **Ordering is gated on metrics.** `metric_ordering` resolves to `""` when
   `metric_names_set` is empty, so a schema-only contract never points the agent at
@@ -664,13 +679,13 @@ shape the text:
   the class no checker catches. (The design was informed by
   [Erupt Cube × LLM](https://docs.erupt.xyz/en/topics/cube-llm), which enforces an
   equivalent protocol in its tool descriptions but triggers on any query.)
-- **Precedence on `run_query` only,** never `inspect_query`, which executes nothing
-  and already argues its own precedence ("before spending retry budget on
-  run_query").
+- **Precedence on `run_query` only,** never `inspect_query`, which executes
+  nothing.
 
 Descriptions are re-sent on every model request, so each clause is one sentence.
 `tests/test_tools/test_tool_protocol.py` pins the placement, including a scope
-guard that the other seven descriptions carry neither clause.
+guard that the other seven descriptions carry neither clause;
+`tests/test_tools/test_tool_descriptions.py` pins the gating and the register.
 
 ### Error Signalling (`is_error` → MCP `isError`)
 
@@ -761,10 +776,15 @@ is client UX (skipping confirmations on safe tools), not enforcement.
 ### Natural Agent Workflow
 
 ```
-list_metrics → lookup_metric → lookup_relationships → describe_table
-    → write SQL → inspect_query
-    → (if valid) run_query
+prompt index (domains, metric names) → lookup_domain → lookup_metric
+    → lookup_relationships / describe_table (as needed)
+    → write SQL → run_query (validates, then executes)
 ```
+
+`list_metrics` is for browsing when the metric's name is not known, and
+`inspect_query` for checking a query without running it; neither is a required
+step. The metric names reach the prompt only when the host passes the semantic
+source to `to_system_prompt()`.
 
 ### Tool Factory
 

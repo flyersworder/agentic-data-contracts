@@ -677,11 +677,12 @@ questions on `examples/revenue_agent` ran on v0.64.0 and v0.65.0 under the
 same recommended prompt, with two OpenRouter models (glm-5.3-flash,
 deepseek-v4-flash):
 
-- Turns fell from 4.9 to 4.0 and from 5.2 to 4.0.
+- Turns fell from 5.0 to 4.0 (glm) and from 5.2 to 4.2 (deepseek); input
+  tokens fell 10% and 15%.
 - `inspect_query` and `list_metrics` calls fell to zero.
-- Both lookups came before the first query in 20 of 20 runs (19 of 20 on
-  v0.64.0).
-- All 40 answers were identical and correct.
+- `lookup_domain` and the expected metric's `lookup_metric` came before the
+  first query in 20 of 20 runs (18 of 20 on v0.64.0).
+- All 40 answers were correct.
 
 A measured version for the paper would run a ladder on LiveSQLBench and
 DABStep, each step adding one change: the descriptions, then the source

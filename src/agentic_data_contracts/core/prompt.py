@@ -6,7 +6,6 @@ import enum
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
-from xml.sax.saxutils import escape
 
 import yaml
 
@@ -43,16 +42,14 @@ def _default_extra_section(name: str, payload: Any) -> list[str]:
 
 
 def _metric_element(name: str, *, indent: int) -> str:
-    """A names-only ``<metric>`` element, its name attribute-escaped.
+    """A names-only ``<metric>`` element.
 
-    Metric names come from external sources (dbt, Cube, Ossie) and can carry a
-    quote or ampersand; unescaped, the element breaks and the agent may pass a
-    truncated name to the lookup. Only the index elements this release added
-    escape: the older elements keep their rendering, which the no-source golden
-    tests pin.
+    The name is written raw, like every other value in this renderer: the
+    prompt is read as text, not parsed as XML, and ``lookup_metric`` matches
+    the raw name, so an escaped ``&amp;`` would cost the agent a fuzzy-match
+    hop.
     """
-    escaped = escape(name, {'"': "&quot;"})
-    return f'{" " * indent}<metric name="{escaped}" />'
+    return f'{" " * indent}<metric name="{name}" />'
 
 
 class _Unset(enum.Enum):
@@ -155,7 +152,18 @@ class XmlPromptRenderer:
             if relationship_detail_threshold is _UNSET
             else relationship_detail_threshold
         )
-        self.metric_index_threshold: int | None | _Unset = metric_index_threshold
+        # The raw argument, resolved at render time; read the resolved value
+        # through the ``metric_index_threshold`` property.
+        self._metric_index_threshold_arg: int | None | _Unset = metric_index_threshold
+
+    @property
+    def metric_index_threshold(self) -> int | None:
+        """The resolved index threshold (``None`` means never drop names)."""
+        return self._resolve_metric_thresholds()[1]
+
+    @metric_index_threshold.setter
+    def metric_index_threshold(self, value: int | None) -> None:
+        self._metric_index_threshold_arg = value
 
     def _resolve_metric_thresholds(self) -> tuple[int | None, int | None]:
         """``(detail, index)`` thresholds, read at render time.
@@ -169,7 +177,7 @@ class XmlPromptRenderer:
         detail: int | None = getattr(
             self, "metric_detail_threshold", self.METRIC_DETAIL_THRESHOLD
         )
-        index = getattr(self, "metric_index_threshold", _UNSET)
+        index = getattr(self, "_metric_index_threshold_arg", _UNSET)
         if index is _UNSET:
             # "Never degrade" on the detail threshold has meant "show every
             # metric" since v0.40.0; dropping names under it would break that.

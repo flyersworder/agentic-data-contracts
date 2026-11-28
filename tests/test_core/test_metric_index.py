@@ -358,19 +358,44 @@ class TestLogging:
 
 
 # ---------------------------------------------------------------------------
-# Escaping
+# Names render as the lookup key
 # ---------------------------------------------------------------------------
 
 
-def test_metric_names_are_attribute_escaped() -> None:
-    # A name with a quote or ampersand must not break the element, or the
-    # agent may pass a truncated name to the lookup.
-    name = 'net "adjusted" r&d'
-    escaped = '<metric name="net &quot;adjusted&quot; r&amp;d" />'
-    with_domains = _contract("a").to_system_prompt(_Source([_metric(name, "a")]))
-    other_group = _contract("a").to_system_prompt(_Source([_metric(name)]))
-    names_only = _contract().to_system_prompt(
-        _Source([_metric(name)] + [_metric(f"m{i}") for i in range(25)])
+def test_metric_names_render_raw_in_every_branch() -> None:
+    # The prompt is read as text and lookup_metric matches the raw name, so an
+    # escaped `&amp;` would cost the agent a fuzzy-match hop. Every branch,
+    # including the detailed one, spells the name the same way.
+    name = "gross_margin_&_fees"
+    raw = f'<metric name="{name}"'
+    prompts = [
+        _contract("a").to_system_prompt(_Source([_metric(name, "a")])),
+        _contract("a").to_system_prompt(_Source([_metric(name)])),
+        _contract().to_system_prompt(
+            _Source([_metric(name)] + [_metric(f"m{i}") for i in range(25)])
+        ),
+        _contract().to_system_prompt(_Source([_metric(name)])),
+    ]
+    for prompt in prompts:
+        assert raw in prompt
+        assert "&amp;" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Public attribute
+# ---------------------------------------------------------------------------
+
+
+def test_metric_index_threshold_attribute_reads_resolved() -> None:
+    assert XmlPromptRenderer().metric_index_threshold == 200
+    assert XmlPromptRenderer(metric_index_threshold=7).metric_index_threshold == 7
+    assert (
+        XmlPromptRenderer(metric_detail_threshold=None).metric_index_threshold is None
     )
-    for prompt in (with_domains, other_group, names_only):
-        assert escaped in prompt
+
+
+def test_metric_index_threshold_attribute_can_be_set() -> None:
+    renderer = XmlPromptRenderer()
+    renderer.metric_index_threshold = 3
+    prompt = _contract().to_system_prompt(_plain(4), renderer=renderer)
+    assert "names omitted above 3 index entries" in prompt

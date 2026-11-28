@@ -385,3 +385,33 @@ def test_lookup_descriptions_do_not_overstate(semantic: YamlSource) -> None:
     assert "close candidates when there are any" in _desc(tools, "lookup_metric")
     # Owners and freshness are present only where the domain declares them.
     assert "owners and review freshness where declared" in _desc(tools, "lookup_domain")
+
+
+def test_log_only_result_checks_are_not_said_to_warn(adapter: DuckDBAdapter) -> None:
+    log_rule = _RESULT_CHECK_RULE.replace("enforcement: block", "enforcement: log")
+    warn_rule = _RESULT_CHECK_RULE.replace("enforcement: block", "enforcement: warn")
+    logged = _desc(
+        create_tools(_contract(rules=log_rule), adapter=adapter), "run_query"
+    )
+    warned = _desc(
+        create_tools(_contract(rules=warn_rule), adapter=adapter), "run_query"
+    )
+    assert "warnings" not in logged
+    assert "logged" in logged
+    assert "add warnings" in warned
+
+
+def test_lookup_relationships_cue_needs_relationships(semantic: YamlSource) -> None:
+    with_rels = _desc(
+        create_tools(_contract(), semantic_source=semantic), "lookup_relationships"
+    )
+    without = _desc(create_tools(_contract()), "lookup_relationships")
+    assert "Use it when a query joins tables" in with_rels
+    assert "Use it" not in without
+
+
+def test_describe_table_does_not_promise_a_table_description(
+    adapter: DuckDBAdapter,
+) -> None:
+    desc = _desc(create_tools(_contract(), adapter=adapter), "describe_table")
+    assert "the table's description where one exists" in desc

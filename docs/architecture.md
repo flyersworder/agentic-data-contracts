@@ -730,8 +730,9 @@ adapter, `run_query`'s timeout and result-check sentences need an adapter and th
 contract to declare them, and `inspect_query`'s retry sentence needs
 `max_retries`. Each states only what the code does: the timeout says the query is
 stopped only for a `TimeoutAdapter` (otherwise the tool stops waiting and the
-database may still be running it), and result checks are said to block only
-when one is block-enforced.
+database may still be running it), result checks are described by their
+enforcement (block, warn or log), and `lookup_relationships` says when to use it
+only when the source declares relationships.
 
 - **Ordering is gated on metrics.** `metric_ordering` resolves to `""` when
   `metric_names_set` is empty, so a schema-only contract never points the agent at

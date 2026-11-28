@@ -1970,13 +1970,20 @@ def create_tools(
     result_check_rules = [
         r for r in contract.schema.semantic.rules if r.result_check is not None
     ]
-    # Only block-enforced result checks can block a result; warn and log ones
-    # annotate it. Saying "can block" for a warn-only contract is the same
-    # class of false claim as precedence without an adapter.
-    result_checks_block = any(r.enforcement == "block" for r in result_check_rules)
+    # What a result check does depends on its enforcement: only block ones can
+    # block a result, warn ones add warnings, log ones are logged. Claiming
+    # more is the same class of false claim as precedence without an adapter.
+    result_check_enforcements = {r.enforcement for r in result_check_rules}
     max_retries = resources.max_retries if resources else None
     preview_cap = 100 if max_result_rows is None else min(100, max_result_rows)
     preview_default = min(5, preview_cap)
+    # Only a source that declares relationships has join keys to return.
+    relationships_cue = (
+        " Use it when a query joins tables, to get the governed join keys and"
+        " any filter a join requires."
+        if _rel_index
+        else ""
+    )
 
     describe_desc = (
         "Describe one allowed table: its columns as they exist in the database."
@@ -1984,7 +1991,8 @@ def create_tools(
     if adapter is not None:
         describe_desc += (
             " Returns each column's name, type and nullability, the column's"
-            " description where one exists, and the table's own description."
+            " description where one exists, and the table's description where one"
+            " exists."
         )
         # Gated on the source, not on `folded_tables`: that bulk index can be
         # empty while `_semantic_table`'s exact lookup still finds the table.
@@ -2117,9 +2125,15 @@ def create_tools(
                 " it."
             )
     if adapter is not None and result_check_rules:
+        if "block" in result_check_enforcements:
+            effect = " can block the result."
+        elif "warn" in result_check_enforcements:
+            effect = " add warnings."
+        else:
+            effect = " are logged with the result."
         run_desc += (
             " After execution, the contract's result checks run on the rows and"
-            + (" can block the result." if result_checks_block else " add warnings.")
+            + effect
         )
     run_desc += (
         metric_ordering
@@ -2250,8 +2264,7 @@ def create_tools(
                 " table. Returns join columns, types, descriptions, and required"
                 " filters. When target_table is provided, finds the shortest"
                 " multi-hop join path between the two tables (up to 3 hops)."
-                " Use it when a query joins tables, to get the governed join"
-                " keys and any filter a join requires."
+                + relationships_cue
             ),
             input_schema={
                 "type": "object",

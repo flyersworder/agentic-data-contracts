@@ -86,8 +86,11 @@ enforced from inside `_governed_tools` — the budget lives on the `Agent`, not
 on the tools — which is why it is stated here rather than left to be found.
 
 DISCLOSED ASYMMETRY, NOT FIXED (as of adc <= 0.64; the descriptions quoted
-below were rewritten in plain register after that, #139, and describe what the
-published runs saw): arm `contract`'s nine library-supplied tools
+below were rewritten in plain register in 0.65, #139, and describe what the
+published runs saw). The library is installed editable from the repo, so a
+rerun from 0.65 on sees the new descriptions: rows record `adc_version`, and
+runs on either side of 0.65 are different treatments and must not be pooled.
+Arm `contract`'s nine library-supplied tools
 carry 3,042 characters of tool descriptions against 167 for arms A/B's three,
 and several of arm C's coach procedure rather than merely describe function —
 e.g. `inspect_query` says a model "MUST call lookup_metric first", `run_query`

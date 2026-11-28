@@ -714,8 +714,9 @@ register with their reason: current models follow instructions literally, and
 The ordering clause is a deliberate exception to "a tool's routing lives in its
 own description": the constraint is about the query, so it sits on the query
 tools. The only other cross-reference is `inspect_query` naming `run_query`, the
-tool inspecting is optional to; `run_query` names no other tool, so it stands
-alone when a host passes a subset of the tools.
+tool inspecting is optional to. Outside the ordering clause `run_query` names no
+other tool, so without metrics it stands alone when a host passes a subset of
+the tools.
 Otherwise each tool says when to use itself — `lookup_metric` and `lookup_domain`
 carry the point-of-use cue (before writing SQL that computes a metric), and
 `inspect_query` says inspecting first is optional because `run_query` applies the
@@ -865,8 +866,9 @@ prompt index (domains, metric names) → lookup_domain → lookup_metric
 
 `list_metrics` is for browsing when the metric's name is not known, and
 `inspect_query` for checking a query without running it; neither is a required
-step. The metric names reach the prompt only when the host passes the semantic
-source to `to_system_prompt()`.
+step. The metric names reach the prompt whenever the contract configures a
+semantic source, which `to_system_prompt()` loads by default, unless the caller
+passes `semantic_source=None`.
 
 ### Tool Factory
 

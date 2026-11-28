@@ -280,13 +280,16 @@ from claude_agent_sdk import (
     query,
 )
 
+# Load the semantic source once; the tools and the prompt both use it.
+source = dc.load_semantic_source()
+
 # One-liner: wraps all 9 tools and bundles into an SDK MCP server
-server = create_sdk_mcp_server(dc, adapter=adapter)
+server = create_sdk_mcp_server(dc, adapter=adapter, semantic_source=source)
 
 options = ClaudeAgentOptions(
     model="claude-sonnet-4-6",
     system_prompt=(
-        "You are a revenue analytics assistant.\n\n" + dc.to_system_prompt()
+        "You are a revenue analytics assistant.\n\n" + dc.to_system_prompt(source)
     ),
     mcp_servers={"dc": server},
     **dc.to_sdk_config(),  # token_budget → task_budget, max_retries → max_turns
@@ -313,7 +316,8 @@ The one rule that makes this safe: **suppress the plugin's bundled `.mcp.json` w
 ```python
 import dataclasses
 
-server = create_sdk_mcp_server(dc, adapter=adapter)
+source = dc.load_semantic_source()
+server = create_sdk_mcp_server(dc, adapter=adapter, semantic_source=source)
 
 opts_kwargs = {
     "model": "claude-sonnet-4-6",
@@ -337,7 +341,7 @@ if {"plugins", "skills", "strict_mcp_config"} <= fields:
     opts_kwargs["system_prompt"] = {  # skills need the claude_code harness
         "type": "preset",
         "preset": "claude_code",
-        "append": dc.to_system_prompt(),  # your governance, appended
+        "append": dc.to_system_prompt(source),  # your governance, appended
     }
 
 options = ClaudeAgentOptions(**opts_kwargs)

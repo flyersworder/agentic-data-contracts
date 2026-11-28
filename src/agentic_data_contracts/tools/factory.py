@@ -2025,10 +2025,14 @@ def create_tools(
         " (north_star / department_kpi / team_kpi) or indicator_kind (leading /"
         " lagging). Each entry has the metric's name, description and source"
         " model, its tier and indicator_kind when set, and `stale` when its"
-        " review is overdue. Use it to browse when you do not know which"
-        " metric you need, or to find a domain's north-star or leading"
-        " indicators. It returns no SQL definitions."
+        " review is overdue."
     )
+    if metric_names_set:
+        list_metrics_desc += (
+            " Use it to browse when you do not know which metric you need, or"
+            " to find a domain's north-star or leading indicators."
+        )
+    list_metrics_desc += " It returns no SQL definitions."
 
     lookup_metric_desc = (
         "Return one metric's governed definition by name: its SQL expression"
@@ -2093,9 +2097,10 @@ def create_tools(
         )
     inspect_desc += metric_ordering
 
-    # Names no other tool: a host may pass a subset, and without metrics this
-    # description must stand alone. (inspect_query names run_query, the tool
-    # it is optional to.)
+    # Names no other tool outside the metric clause, which names lookup_metric
+    # by design (see _PROTOCOL_METRIC_ORDERING): without metrics, it stands
+    # alone when a host passes a subset. (inspect_query names run_query, the
+    # tool it is optional to.)
     run_desc = (
         "Validate a SQL query against the contract and, if it passes, execute it"
         " and return the results. The checks run first, and a blocked query is"

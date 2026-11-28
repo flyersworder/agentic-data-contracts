@@ -415,3 +415,12 @@ def test_describe_table_does_not_promise_a_table_description(
 ) -> None:
     desc = _desc(create_tools(_contract(), adapter=adapter), "describe_table")
     assert "the table's description where one exists" in desc
+
+
+def test_list_metrics_browse_cue_needs_metrics(semantic: YamlSource) -> None:
+    with_metrics = _desc(
+        create_tools(_contract(), semantic_source=semantic), "list_metrics"
+    )
+    without = _desc(create_tools(_contract()), "list_metrics")
+    assert "Use it to browse" in with_metrics
+    assert "Use it" not in without
